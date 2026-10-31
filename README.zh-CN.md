@@ -324,7 +324,7 @@ GitHub Actions 在每次 push/PR 时运行三个 job：
 2. **backend-test**：`apt install toolchain` → cmake build → ctest（跨层夹具 + 节点注册表）
 3. **e2e-smoke**：Playwright Chromium 对 `vite preview` 做冒烟测试
 
-第四个 workflow [`.github/workflows/pages.yml`](.github/workflows/pages.yml) 在每次触及 `web/` 的 push 上把前端发布到
+第四个 workflow [`.github/workflows/static.yml`](.github/workflows/static.yml) 在每次触及 `web/` 的 push 上把前端发布到
 GitHub Pages——也就是上面那个在线演示。它需要一次性开关：**Settings → Pages → Source: GitHub Actions**，
 否则演示链接是 404。
 

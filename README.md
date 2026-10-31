@@ -357,7 +357,7 @@ GitHub Actions runs three jobs on every push/PR:
 2. **backend-test**: `apt install toolchain` → cmake build → ctest (cross-tier fixtures + node registry)
 3. **e2e-smoke**: Playwright Chromium against `vite preview`
 
-A fourth workflow, [`.github/workflows/pages.yml`](.github/workflows/pages.yml), publishes the front end to
+A fourth workflow, [`.github/workflows/static.yml`](.github/workflows/static.yml), publishes the front end to
 GitHub Pages on every push that touches `web/` — that is what serves the live demo above. It needs a
 one-time switch: **Settings → Pages → Source: GitHub Actions**, otherwise the demo link 404s.
 
