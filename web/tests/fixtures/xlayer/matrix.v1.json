@@ -1,5 +1,5 @@
 {
-  "comment": "Matrix-mode fixtures for the B-plan compute backend. Data arrays are COLUMN-MAJOR (matching the DCM1 wire format). evaluateMatrix() has no TS counterpart.",
+  "comment": "Matrix-mode fixtures for the backend-owned compute model. Data arrays are COLUMN-MAJOR (matching the DCM1 wire format). evaluateMatrix() has no TS counterpart.",
   "cases": [
     { "name": "matmul-identity", "vars": ["A", "B"], "shapes": [[2,2],[2,2]],
       "data": [[1,0,0,1], [2,0,0,3]],

@@ -131,7 +131,7 @@ export interface ChartCardModel extends CardBase {
 }
 
 /**
- * A compute node as the browser sees it (B-plan: docs/decisions/2026-10-17-backend-owns-compute.md).
+ * A compute node as the browser sees it (docs/decisions/2026-10-17-backend-owns-compute.md).
  *
  * One card owns **one** node in v2. The card no longer computes anything; it mirrors the
  * server node's state machine so the UI can light an indicator (dirty/computing/done/error
@@ -212,7 +212,7 @@ export interface FunctionCardModel extends CardBase {
   node: NodeStatus | null;
   /**
    * Local display-cache matrix id (frontend id space, like a matrix card's `sources[]`).
-   * Under the B-plan this is a **read-only cache** filled from the backend's result
+   * This is a **read-only cache** filled from the backend's result
    * matrix; nothing writes into it locally.
    */
   displayMatrixId: number;

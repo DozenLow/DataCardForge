@@ -1,5 +1,5 @@
 /**
- * Backend transport client (B-plan: docs/decisions/2026-10-17-backend-owns-compute.md).
+ * Backend transport client (docs/decisions/2026-10-17-backend-owns-compute.md).
  *
  * The browser is a pure interaction surface; every number is computed server-side.
  * This module speaks protocol v1 (docs/architecture/backend-protocol-v1.md):

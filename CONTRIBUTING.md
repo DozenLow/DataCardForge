@@ -57,7 +57,7 @@ CI runs exactly the same gates (`.github/workflows/ci.yml`).
 
 These are frozen; changing one needs a new decision record **first**, then the code.
 
-1. **Backend owns the numbers** (the "B-plan"): every numeric / statistical / matrix
+1. **Backend owns the numbers**: every numeric / statistical / matrix
    result comes from the C++/Eigen backend. The browser renders and collects input; it does
    not add new arithmetic.
 2. **A signature id is a published identity**: built-ins (`builtin:expression-columns`,

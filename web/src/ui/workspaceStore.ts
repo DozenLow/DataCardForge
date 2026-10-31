@@ -27,7 +27,7 @@ import { DEFAULT_SMOOTHING, type SmoothingOptions } from '../core/Smoothing.ts';
 import { defaultChartConfig, type ChartConfig, type ChartSource } from '../charts/chartModel.ts';
 import { chartTypeDef, minimumColumns, type ChartTypeId } from '../charts/chartTypes.ts';
 import { lineColor } from '../charts/palette.ts';
-// B-plan (docs/decisions/2026-10-17-backend-owns-compute.md): no numeric compute lives in
+// Backend-owned compute (docs/decisions/2026-10-17-backend-owns-compute.md): no numeric compute lives in
 // the browser any more. `core/expression.ts` is NOT imported here — parsing, compiling and
 // evaluating formulas are the backend's job; the frontend only ships formula *text*.
 import {
@@ -75,7 +75,7 @@ import {
 export { lineColor };
 
 /**
- * Compute-backend availability (B-plan). Unreachable is a VISIBLE state with a reason —
+ * Compute-backend availability. Unreachable is a VISIBLE state with a reason —
  * the UI renders a banner from this; nothing ever falls back to local compute silently.
  */
 export interface BackendStatus {
@@ -505,7 +505,7 @@ interface WorkspaceState {
   showToast: (kind: Toast['kind'], message: string) => void;
   clearToast: () => void;
 
-  // ── compute backend (B-plan: docs/decisions/2026-10-17-backend-owns-compute.md) ──
+  // ── compute backend (docs/decisions/2026-10-17-backend-owns-compute.md) ──
   backend: BackendStatus;
   /** Function signatures the connected backend advertises (empty until a handshake). */
   signatures: SignatureDto[];
@@ -535,7 +535,7 @@ interface WorkspaceState {
 
 let toastCounter = 0;
 
-/** Singleton transport client + local→server matrix id map (B-plan registration). */
+/** Singleton transport client + local→server matrix id map (backend registration). */
 const backendClient = new BackendClient();
 const backendMatrixIds = new Map<number, number>();
 /**
@@ -611,7 +611,7 @@ function formulaReference(column: { posName: string; annotation: string }): stri
 
 
 /**
- * Make restored cards safe for the B-plan model.
+ * Make restored cards safe for the backend-owned model.
  *
  * A restored function card has no live node (the backend was restarted, or the file
  * predates node registration), so it comes back with `node: null` and its output id
@@ -1899,7 +1899,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         name: entries[index].name,
         matrixId,
       }));
-      // Register server-side too (B-plan: the backend holds the authoritative copy).
+      // Register server-side too: the backend holds the authoritative copy.
       // Fire-and-forget: file loading must never wait on the network; a failed
       // registration flips `backend` to offline and the banner appears.
       for (let index = 0; index < entries.length; ++index) {
@@ -2415,7 +2415,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       });
       refreshDependentsOf(cardId);
 
-      // B-plan: the backend holds the authoritative copy, so an edit must reach it.
+      // The backend holds the authoritative copy, so an edit must reach it.
       // Fire-and-forget like registration — editing never blocks on the network; only a
       // genuinely unreachable backend flips the banner.
       const backendId = backendMatrixIds.get(source.matrixId);

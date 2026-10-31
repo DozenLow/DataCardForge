@@ -1,5 +1,5 @@
-// Tiny blocking HTTP/1.1 server on raw POSIX sockets — no third-party deps (the B-plan
-// keeps the backend build to g++ + Eigen + std). One thread per connection; fine for a
+// Tiny blocking HTTP/1.1 server on raw POSIX sockets — no third-party deps; the backend
+// build stays at g++ + Eigen + std. One thread per connection; fine for a
 // local single-user tool. Protocol: docs/architecture/backend-protocol-v1.md.
 #pragma once
 

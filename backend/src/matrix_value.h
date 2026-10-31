@@ -1,4 +1,4 @@
-// Matrix value type for the B-plan matrix mode (docs/decisions/2026-10-17-backend-owns-compute.md).
+// Matrix value type for the matrix mode (docs/decisions/2026-10-17-backend-owns-compute.md).
 // Wraps an Eigen matrix with shape metadata so the expression engine can enforce
 // dimension compatibility and report structured shapeMismatch errors instead of
 // producing silent garbage.

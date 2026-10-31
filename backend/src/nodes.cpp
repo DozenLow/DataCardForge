@@ -362,7 +362,7 @@ bool NodeRegistry::gatherInputs(const std::vector<PortBinding>& bindings,
   data->clear();
   slices->clear();
   *length = 0;
-  // Port semantics (B-plan v1): a port binds a whole table to a declared variable.
+  // Port semantics (v1): a port binds a whole table to a declared variable.
   // Every column stays addressable under its natural label; a single-column table is
   // additionally aliased to the declared varName so `a + 1` reads naturally. Multi-
   // column tables get per-column slicing from the deferred conditional-filter card.

@@ -1,5 +1,5 @@
 /**
- * Function card — a pure view over ONE backend compute node (B-plan + card schema v2).
+ * Function card — a pure view over ONE backend compute node (backend-owned compute + card schema v2).
  *
  * Three zones, as designed in the function-card review (README 函数卡 UI):
  *

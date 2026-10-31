@@ -4,7 +4,7 @@
  * The fixtures in `fixtures/xlayer/*.json` are the single judge for every compute
  * engine (docs/architecture/backend-protocol-v1.md). This file pins the behaviour of
  * the TS reference implementation (`core/expression.ts`, frozen as a differential
- * oracle by the B-plan decision, docs/decisions/2026-10-17-backend-owns-compute.md);
+ * oracle by the backend-owned compute decision, docs/decisions/2026-10-17-backend-owns-compute.md);
  * the C++ backend runs the same JSON through its own engine and CI requires both green.
  */
 import { readFileSync } from 'node:fs';

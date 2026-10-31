@@ -521,7 +521,7 @@ describe('map card keep-alive', () => {
   });
 });
 
-describe('compute-backend sync (B-plan)', () => {
+describe('compute-backend sync', () => {
   interface Call {
     url: string;
     method: string;
@@ -779,7 +779,7 @@ async function loadSource(rows: number[][], annotations: string[]) {
   return cardId;
 }
 
-describe('formula-card compute authority (B-plan stage 3)', () => {
+describe('formula-card compute authority (stage 3)', () => {
   it('registers ONE signature node binding the whole table', async () => {
     const stub = stubBackend({ nodeResult: [[2, 4, 6]] });
     try {

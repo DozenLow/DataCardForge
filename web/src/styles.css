@@ -31,7 +31,7 @@
   --on-warn: #ffffff;
   --shadow: 0 6px 18px rgba(20, 26, 38, 0.14);
   --shadow-active: 0 10px 28px rgba(20, 26, 38, 0.24);
-  /* Node-state colours (B-plan four-state lamp). Two consumers — the card's state light and
+  /* Node-state colours (four-state lamp). Two consumers — the card's state light and
      the summary panel — read these same values, so they can never disagree about what
      "computing" or "done" looks like. Fixed in both themes on purpose: these tones read on
      either surface (the panel tints them with its own alpha). */
@@ -1935,7 +1935,7 @@ body {
 }
 
 /*
- * Node state light (B-plan): the four backend states drive the indicator — grey (dirty /
+ * Node state light: the four backend states drive the indicator — grey (dirty /
  * not yet registered), amber (computing), green (done), red (error). Colour-blind-safe via
  * shape too: computing pulses, done is solid. Never a silent blank.
  */
@@ -2350,7 +2350,7 @@ body {
   font-weight: 700;
 }
 
-/* ── Backend availability banner (B-plan contract 1: never silent) ─── */
+/* ── Backend availability banner (contract 1: never silent) ─── */
 .backend-banner {
   display: flex;
   align-items: center;

@@ -68,7 +68,7 @@ export default function App() {
     return () => observer.disconnect();
   }, []);
 
-  // B-plan handshake on load. Offline is a VISIBLE banner with a retry —
+  // Backend handshake on load. Offline is a VISIBLE banner with a retry —
   // docs/decisions/2026-10-17-backend-owns-compute.md contract 1 ("绝不空白").
   useEffect(() => {
     void connectBackend();

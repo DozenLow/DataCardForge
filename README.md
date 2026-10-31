@@ -48,7 +48,7 @@ a C++17 compiler and the Eigen 3.4 headers
 - **Card model**: everything is a card — data card (file) → function card (transform) → output card (plot / export)
 - **Strict separation**: data and behavior are separated; tables are never mutated; every transformation produces a new card
 - **Connection subordination**: connections are only the visualization of data dependencies, normally kept low-key (background layer), and never interfere with card layout or interaction — cards are the protagonists, connections the supporting cast
-- **Backend-owns-compute (B-plan)**: all numeric / statistical / matrix computation runs in the **C++/Eigen backend**; the browser is a **pure interaction surface** (rendering, input, layout). The backend being unreachable is a **visible state with a retry button**, never silent. This supersedes the earlier T1-browser-baseline tier table while preserving the three contracts of the [maximum-headroom principle](docs/decisions/2026-10-15-max-headroom-principle.md): visible degradation, cross-tier semantic consistency (differential fixtures), bounded worst-case. Full reasoning: [decision record](docs/decisions/2026-10-17-backend-owns-compute.md)
+- **Backend-owns-compute**: all numeric / statistical / matrix computation runs in the **C++/Eigen backend**; the browser is a **pure interaction surface** (rendering, input, layout). The backend being unreachable is a **visible state with a retry button**, never silent. This supersedes the earlier T1-browser-baseline tier table while preserving the three contracts of the [maximum-headroom principle](docs/decisions/2026-10-15-max-headroom-principle.md): visible degradation, cross-tier semantic consistency (differential fixtures), bounded worst-case. Full reasoning: [decision record](docs/decisions/2026-10-17-backend-owns-compute.md)
 - **Column-oriented matrix**: rows = samples (`No.N`), columns = variables (`Pos.N`), contiguous storage, high performance
 - **Extensible**: computation system + adapter interfaces — the community can contribute long-tail features
 
@@ -369,7 +369,7 @@ one-time switch: **Settings → Pages → Source: GitHub Actions**, otherwise th
 - `backend/src/http_server.cpp` → protocol v1 HTTP endpoints
 - `web/src/backend/client.ts` → frontend transport client (protocol v1)
 - `web/src/loaders/` → adapters for new file formats (`FileLoader`)
-- `web/src/core/MatrixData.ts` → client-side data model (display cache under B-plan)
+- `web/src/core/MatrixData.ts` → client-side data model (display cache)
 - `web/src/ui/ConnectionLayer.tsx` → connection visualization
 - `web/tests/fixtures/xlayer/` → cross-tier differential test fixtures (single judge format)
 
@@ -379,7 +379,7 @@ one-time switch: **Settings → Pages → Source: GitHub Actions**, otherwise th
 - [x] **Qt UI implementation removed** → repo is now web-first (2026-10-15)
 - [x] **Dependency cycle detection** → `DependencyGraph` refuses loops and deduplicates edges (2026-10-15)
 - [x] **Maximum-headroom principle adopted** → visible degradation contract (2026-10-15)
-- [x] **B-plan decided** → backend owns compute, browser is pure interaction (2026-10-17)
+- [x] **Backend-owned compute** → backend owns compute, browser is pure interaction (2026-10-17)
 - [x] **Cross-tier differential fixtures** → 81 expression cases, single JSON judge format (2026-10-17; extended 2026-10-21 and 2026-10-28)
 - [x] **Differential fuzz gate** → random TS↔C++ cross-check incl. error codes/positions, reproducible seeds (2026-10-21)
 - [x] **C++/Eigen compute backend skeleton** → expression engine port, node registry, HTTP API, protocol v1 (2026-10-17)

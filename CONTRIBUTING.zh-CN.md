@@ -51,7 +51,7 @@ CI 跑的就是同一套门禁（`.github/workflows/ci.yml`）。
 
 以下都是冻结的；要改，**先**补一条决策记录（[docs/decisions/](docs/decisions/)），再改代码。
 
-1. **计算权威在后端**（B 方案）：所有数值/统计/矩阵结果都来自 C++/Eigen 后端。浏览器负责渲染与
+1. **计算权威在后端**：所有数值/统计/矩阵结果都来自 C++/Eigen 后端。浏览器负责渲染与
    收集输入，不新增算术。
 2. **签名 id 是发布后的身份**：`builtin:expression-columns`、`builtin:linear-regression`、
    `builtin:summary` 永不改 id。改名只是 `displayName` / i18n 的事。

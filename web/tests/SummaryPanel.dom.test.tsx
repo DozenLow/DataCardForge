@@ -39,7 +39,7 @@ const store = () => useWorkspace.getState();
  * The numbers the "backend" answers with.
  *
  * Deliberately unrelated to the source column (1, 2, 3, 4): if any of them ever showed up
- * on screen, the panel would be computing locally, which the B-plan forbids.
+ * on screen, the panel would be computing locally, which backend-owned compute forbids.
  */
 const COL_A = [101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112];
 const COL_B = [201, 202, 203, 204, 205, 206, 207, 208, 209, 210, 211, 212];

@@ -1,6 +1,6 @@
 // Server-side compute nodes: input bindings, formula, result matrix, state machine.
 // The dependency graph mirrors web/src/core/DependencyGraph.ts (dedup + cycle refusal)
-// with the B-plan addition that a node's N input ports are added ATOMICALLY: if any
+// with the addition that a node's N input ports are added ATOMICALLY: if any
 // edge would close a loop, no edge is registered (docs/decisions/2026-10-17-backend-owns-compute.md).
 #pragma once
 

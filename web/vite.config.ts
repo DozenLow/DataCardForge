@@ -31,7 +31,7 @@ export default defineConfig({
     // Vite rejects requests whose Host header is neither localhost nor an IP (DNS-rebinding
     // guard). LAN clients hitting http://<ip>:5173 pass; a hostname needs adding here.
     proxy: {
-      // B-plan: forward /api/* to the C++ compute backend (DC_BACKEND_PORT, default 37811).
+      // Backend-owned compute: forward /api/* to the C++ compute backend (DC_BACKEND_PORT, default 37811).
       '/api': {
         target: `http://127.0.0.1:${backendPort}`,
         changeOrigin: true,

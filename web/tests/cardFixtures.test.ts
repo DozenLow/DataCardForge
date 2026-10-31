@@ -6,7 +6,7 @@
  * (`backend/tests/card_fixture_run.cpp`) creates the very same card through `NodeRegistry`
  * and compares the matrices it produces against the same `expect` block.
  *
- * The TS side does NOT compute anything (B-plan). What it referees is the part only the
+ * The TS side does NOT compute anything. What it referees is the part only the
  * frontend can get wrong — how a card description turns into port bindings, and whether the
  * fixture itself is coherent (a case whose column count disagrees with its formulas would
  * be a broken judge for both sides).

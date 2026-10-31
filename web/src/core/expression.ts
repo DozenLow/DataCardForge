@@ -1,7 +1,7 @@
 /**
  * Column expression engine.
  *
- * ⚠️ **已退出生产路径，仅作 xlayer 差分基准。** Under the B-plan
+ * ⚠️ **已退出生产路径，仅作 xlayer 差分基准。** Under the backend-owned model
  * (docs/decisions/2026-10-17-backend-owns-compute.md) the parse / compile / evaluate of
  * formulas all live in the C++ backend; the browser ships formula *text* only. Nothing on a
  * production code path imports this file any more — it is kept solely as the reference
