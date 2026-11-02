@@ -102,10 +102,10 @@ jobs:
           fetch-depth: 0
 
       - name: Install dependencies
-        run: brew install cmake ninja eigen
+        run: brew install cmake ninja eigen@3
 
       - name: Configure backend (Release)
-        run: cmake -S backend -B backend/build -G Ninja -DCMAKE_BUILD_TYPE=Release
+        run: cmake -S backend -B backend/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$(brew --prefix eigen@3)"
 
       - name: Build backend
         run: cmake --build backend/build --config Release
@@ -135,10 +135,10 @@ jobs:
           fetch-depth: 0
 
       - name: Install dependencies
-        run: brew install cmake ninja eigen
+        run: brew install cmake ninja eigen@3
 
       - name: Configure backend (Debug)
-        run: cmake -S backend -B backend/build -G Ninja -DCMAKE_BUILD_TYPE=Debug
+        run: cmake -S backend -B backend/build -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_PREFIX_PATH="$(brew --prefix eigen@3)"
 
       - name: Build backend
         run: cmake --build backend/build --config Debug
