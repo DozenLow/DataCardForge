@@ -26,6 +26,9 @@ on:
           - Debug
           - both
 
+permissions:
+  contents: read
+
 jobs:
   build-linux-release:
     runs-on: ubuntu-latest
@@ -236,6 +239,8 @@ jobs:
     needs: [build-linux-release, build-linux-debug, build-macos-release, build-macos-debug, build-windows-release, build-windows-debug]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
