@@ -7,13 +7,41 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      platforms:
+        type: choice
+        description: 'Select platform(s) to build'
+        default: 'all'
+        options:
+          - all
+          - linux-only
+          - macos-only
+          - windows-only
+      build_type:
+        type: choice
+        description: 'Build type'
+        default: 'Release'
+        options:
+          - Release
+          - Debug
+          - both
 
 jobs:
   build-linux:
     runs-on: ubuntu-latest
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      contains(github.event.inputs.platforms, 'all') ||
+      contains(github.event.inputs.platforms, 'linux')
     strategy:
       matrix:
-        build-type: [Release, Debug]
+        build-type: ${{ fromJson(
+          github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'both'
+          ? '["Release", "Debug"]'
+          : github.event_name == 'workflow_dispatch'
+          ? format('["{0}"]', github.event.inputs.build_type)
+          : '["Release", "Debug"]'
+        ) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -40,9 +68,19 @@ jobs:
 
   build-macos:
     runs-on: macos-latest
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      contains(github.event.inputs.platforms, 'all') ||
+      contains(github.event.inputs.platforms, 'macos')
     strategy:
       matrix:
-        build-type: [Release, Debug]
+        build-type: ${{ fromJson(
+          github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'both'
+          ? '["Release", "Debug"]'
+          : github.event_name == 'workflow_dispatch'
+          ? format('["{0}"]', github.event.inputs.build_type)
+          : '["Release", "Debug"]'
+        ) }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,9 +107,19 @@ jobs:
 
   build-windows:
     runs-on: windows-latest
+    if: |
+      github.event_name != 'workflow_dispatch' ||
+      contains(github.event.inputs.platforms, 'all') ||
+      contains(github.event.inputs.platforms, 'windows')
     strategy:
       matrix:
-        build-type: [Release, Debug]
+        build-type: ${{ fromJson(
+          github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'both'
+          ? '["Release", "Debug"]'
+          : github.event_name == 'workflow_dispatch'
+          ? format('["{0}"]', github.event.inputs.build_type)
+          : '["Release", "Debug"]'
+        ) }}
     steps:
       - uses: actions/checkout@v4
         with:
