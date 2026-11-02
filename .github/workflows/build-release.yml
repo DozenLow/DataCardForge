@@ -126,12 +126,24 @@ jobs:
             fi
           done
 
+      - name: Extract release notes from CHANGELOG
+        id: changelog
+        run: |
+          version=${GITHUB_REF#refs/tags/v}
+          # Extract notes between version header and next version or EOF
+          changelog_notes=$(awk "/## \[$version\]/,/## \[/{if(!/## \[/) print}" CHANGELOG.md)
+          
+          # Handle multiline content for GitHub Actions
+          echo "notes<<EOF" >> $GITHUB_OUTPUT
+          echo "$changelog_notes" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
           files: release/*.zip
+          body: ${{ steps.changelog.outputs.notes }}
           draft: false
           prerelease: false
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
