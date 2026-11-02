@@ -30,18 +30,15 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     if: |
-      github.event_name != 'workflow_dispatch' ||
-      contains(github.event.inputs.platforms, 'all') ||
-      contains(github.event.inputs.platforms, 'linux')
+      (github.event_name != 'workflow_dispatch' ||
+       contains(github.event.inputs.platforms, 'all') ||
+       contains(github.event.inputs.platforms, 'linux')) &&
+      (github.event_name != 'workflow_dispatch' ||
+       github.event.inputs.build_type == 'both' ||
+       github.event.inputs.build_type == matrix.build-type)
     strategy:
       matrix:
-        build-type: ${{ fromJson(
-          github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'both'
-          ? '["Release", "Debug"]'
-          : github.event_name == 'workflow_dispatch'
-          ? format('["{0}"]', github.event.inputs.build_type)
-          : '["Release", "Debug"]'
-        ) }}
+        build-type: [Release, Debug]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -69,18 +66,15 @@ jobs:
   build-macos:
     runs-on: macos-latest
     if: |
-      github.event_name != 'workflow_dispatch' ||
-      contains(github.event.inputs.platforms, 'all') ||
-      contains(github.event.inputs.platforms, 'macos')
+      (github.event_name != 'workflow_dispatch' ||
+       contains(github.event.inputs.platforms, 'all') ||
+       contains(github.event.inputs.platforms, 'macos')) &&
+      (github.event_name != 'workflow_dispatch' ||
+       github.event.inputs.build_type == 'both' ||
+       github.event.inputs.build_type == matrix.build-type)
     strategy:
       matrix:
-        build-type: ${{ fromJson(
-          github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'both'
-          ? '["Release", "Debug"]'
-          : github.event_name == 'workflow_dispatch'
-          ? format('["{0}"]', github.event.inputs.build_type)
-          : '["Release", "Debug"]'
-        ) }}
+        build-type: [Release, Debug]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -108,18 +102,15 @@ jobs:
   build-windows:
     runs-on: windows-latest
     if: |
-      github.event_name != 'workflow_dispatch' ||
-      contains(github.event.inputs.platforms, 'all') ||
-      contains(github.event.inputs.platforms, 'windows')
+      (github.event_name != 'workflow_dispatch' ||
+       contains(github.event.inputs.platforms, 'all') ||
+       contains(github.event.inputs.platforms, 'windows')) &&
+      (github.event_name != 'workflow_dispatch' ||
+       github.event.inputs.build_type == 'both' ||
+       github.event.inputs.build_type == matrix.build-type)
     strategy:
       matrix:
-        build-type: ${{ fromJson(
-          github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'both'
-          ? '["Release", "Debug"]'
-          : github.event_name == 'workflow_dispatch'
-          ? format('["{0}"]', github.event.inputs.build_type)
-          : '["Release", "Debug"]'
-        ) }}
+        build-type: [Release, Debug]
     steps:
       - uses: actions/checkout@v4
         with:
