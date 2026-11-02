@@ -30,15 +30,12 @@ jobs:
   build-linux:
     runs-on: ubuntu-latest
     if: |
-      (github.event_name != 'workflow_dispatch' ||
-       contains(github.event.inputs.platforms, 'all') ||
-       contains(github.event.inputs.platforms, 'linux')) &&
-      (github.event_name != 'workflow_dispatch' ||
-       github.event.inputs.build_type == 'both' ||
-       github.event.inputs.build_type == matrix.build-type)
+      github.event_name != 'workflow_dispatch' ||
+      contains(github.event.inputs.platforms, 'all') ||
+      contains(github.event.inputs.platforms, 'linux')
     strategy:
       matrix:
-        build-type: [Release, Debug]
+        build-type: ${{ fromJSON(github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'both' && '["Release","Debug"]' || github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'Debug' && '["Debug"]' || github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'Release' && '["Release"]' || '["Release","Debug"]') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -66,15 +63,12 @@ jobs:
   build-macos:
     runs-on: macos-latest
     if: |
-      (github.event_name != 'workflow_dispatch' ||
-       contains(github.event.inputs.platforms, 'all') ||
-       contains(github.event.inputs.platforms, 'macos')) &&
-      (github.event_name != 'workflow_dispatch' ||
-       github.event.inputs.build_type == 'both' ||
-       github.event.inputs.build_type == matrix.build-type)
+      github.event_name != 'workflow_dispatch' ||
+      contains(github.event.inputs.platforms, 'all') ||
+      contains(github.event.inputs.platforms, 'macos')
     strategy:
       matrix:
-        build-type: [Release, Debug]
+        build-type: ${{ fromJSON(github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'both' && '["Release","Debug"]' || github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'Debug' && '["Debug"]' || github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'Release' && '["Release"]' || '["Release","Debug"]') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -102,15 +96,12 @@ jobs:
   build-windows:
     runs-on: windows-latest
     if: |
-      (github.event_name != 'workflow_dispatch' ||
-       contains(github.event.inputs.platforms, 'all') ||
-       contains(github.event.inputs.platforms, 'windows')) &&
-      (github.event_name != 'workflow_dispatch' ||
-       github.event.inputs.build_type == 'both' ||
-       github.event.inputs.build_type == matrix.build-type)
+      github.event_name != 'workflow_dispatch' ||
+      contains(github.event.inputs.platforms, 'all') ||
+      contains(github.event.inputs.platforms, 'windows')
     strategy:
       matrix:
-        build-type: [Release, Debug]
+        build-type: ${{ fromJSON(github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'both' && '["Release","Debug"]' || github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'Debug' && '["Debug"]' || github.event_name == 'workflow_dispatch' && github.event.inputs.build_type == 'Release' && '["Release"]' || '["Release","Debug"]') }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -178,7 +169,7 @@ jobs:
           echo "EOF" >> $GITHUB_OUTPUT
 
       - name: Create Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           files: release/*.zip
           body: ${{ steps.changelog.outputs.notes }}
