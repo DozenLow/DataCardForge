@@ -39,7 +39,9 @@
 
 #include <sys/stat.h>
 // 测量卫生：把进程钉在它当前所在的那颗 CPU 上（见 pinToCurrentCpu）。
+#ifdef __linux__
 #include <sched.h>
+#endif
 
 #include "expression.h"
 #include "matrix_value.h"
@@ -220,6 +222,7 @@ bool measure(const Case& c, const Data& d, const CaseInputs& in, std::vector<dou
 // 在 1.3× 回归护栏上，门禁会假红。钉住之后同一颗核心、同一份产物，读数稳定到 1% 以内。
 // 尽力而为：cpuset 不让改（容器）或非 Linux 时失败就照旧跑，不影响正确性。
 int pinToCurrentCpu() {
+#ifdef __linux__
   const int cpu = sched_getcpu();
   if (cpu < 0) return -1;
   cpu_set_t set;
@@ -227,6 +230,9 @@ int pinToCurrentCpu() {
   CPU_SET(cpu, &set);
   if (sched_setaffinity(0, sizeof set, &set) != 0) return -1;
   return cpu;
+#else
+  return -1;
+#endif
 }
 
 std::string gitSha() {
