@@ -428,9 +428,9 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
     Matrix m(std::move(columns));
     if (parsed["name"].isString()) m.name = parsed["name"].asString();
     int64_t id = store_->insert(std::move(m));
-    bus_->publish(Json::object({{"matrixId", Json(id)}, {"state", Json(std::string("done"))}}));
+    bus_->publish(Json::object({{"matrixId", Json(static_cast<int64_t>(id))}, {"state", Json(std::string("done"))}}));
     nodes_->onMatrixChanged(id);
-    return jsonOk(Json::object({{"matrixId", Json(id)}, {"revision", Json(1)}}));
+    return jsonOk(Json::object({{"matrixId", Json(static_cast<int64_t>(id))}, {"revision", Json(1)}}));
   }
 
   // POST /api/matrices/raw — a DCM1 frame body (protocol v1 "载荷编码"), avoids the JSON
@@ -448,9 +448,9 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
     Matrix m(std::move(columns));
     m.name = "raw";
     int64_t id = store_->insert(std::move(m));
-    bus_->publish(Json::object({{"matrixId", Json(id)}, {"state", Json(std::string("done"))}}));
+    bus_->publish(Json::object({{"matrixId", Json(static_cast<int64_t>(id))}, {"state", Json(std::string("done"))}}));
     nodes_->onMatrixChanged(id);
-    return jsonOk(Json::object({{"matrixId", Json(id)}, {"revision", Json(1)}}));
+    return jsonOk(Json::object({{"matrixId", Json(static_cast<int64_t>(id))}, {"revision", Json(1)}}));
   }
 
   long matrixId = -1;
@@ -631,7 +631,7 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
     const std::string suffix = slash == std::string::npos ? std::string() : rest.substr(slash);
     if (id < 0) return jsonError(400, "unexpectedToken");
     const auto existing = nodes_->get(id);
-    if (!existing) return jsonError(404, "unknownNode", Json::object({{"nodeId", Json(id)}}));
+    if (!existing) return jsonError(404, "unknownNode", Json::object({{"nodeId", Json(static_cast<int64_t>(id))}}));
 
     // GET /api/nodes/{id} — the node's authoritative status snapshot. The event stream is
     // transient (bounded log), so a client that reconnects or restores a workspace needs
@@ -681,7 +681,7 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
       }
       nodes_->recomputeSubtree(id);
       const auto node = nodes_->get(id);
-      return jsonOk(Json::object({{"nodeId", Json(id)},
+      return jsonOk(Json::object({{"nodeId", Json(static_cast<int64_t>(id))},
                                   {"state", Json(std::string(node ? nodeName(node->state) : "dirty"))}}));
     }
 
@@ -690,7 +690,7 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
       if (!nodes_->remove(id, &hadDependents)) {
         return jsonError(hadDependents ? 409 : 404, hadDependents ? "hasDependents" : "unknownNode");
       }
-      return jsonOk(Json::object({{"deleted", Json(id)}}));
+      return jsonOk(Json::object({{"deleted", Json(static_cast<int64_t>(id))}}));
     }
 
     if (suffix == "/compute" && req.method == "POST") {
@@ -699,10 +699,10 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
       // (reconnect/polling paths read status; they must not spend compute).
       nodes_->computeNow(id);
       const auto node = nodes_->get(id);
-      if (!node) return jsonError(404, "unknownNode", Json::object({{"nodeId", Json(id)}}));
+      if (!node) return jsonError(404, "unknownNode", Json::object({{"nodeId", Json(static_cast<int64_t>(id))}}));
       Json ids = Json::array();
       for (int64_t matrixId : node->resultMatrixIds) ids.push(Json(matrixId));
-      Json out = Json::object({{"nodeId", Json(id)},
+      Json out = Json::object({{"nodeId", Json(static_cast<int64_t>(id))},
                                {"state", Json(std::string(nodeName(node->state)))},
                                {"resultMatrixIds", std::move(ids)}});
       if (node->state == NodeState::Error) {
@@ -720,7 +720,7 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
 
     if (suffix == "/result") {
       const auto node = nodes_->get(id);
-      if (!node) return jsonError(404, "unknownNode", Json::object({{"nodeId", Json(id)}}));
+      if (!node) return jsonError(404, "unknownNode", Json::object({{"nodeId", Json(static_cast<int64_t>(id))}}));
       std::vector<std::string> names;
       size_t shapeRows = 0;
       size_t shapeCols = 0;
