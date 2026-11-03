@@ -3,7 +3,7 @@
 [![CI](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml/badge.svg)](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml)
 [![Pages 演示](https://img.shields.io/badge/%E6%BC%94%E7%A4%BA-%E5%89%8D%E7%AB%AF%E5%9C%A8%E7%BA%BF-2ea44f)](https://dozenlow.github.io/DataCardForge/)
 [![许可证](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
-[![测试](https://img.shields.io/badge/tests-581%20unit%20%C2%B7%208%20ctest-brightgreen)](web/tests)
+[![测试](https://img.shields.io/badge/tests-581%20unit%20%C2%B7%209%20ctest-brightgreen)](web/tests)
 
 **[English](README.md) | [中文](README.zh-CN.md)**
 
@@ -17,13 +17,13 @@
 
 **产品与仓库**：两者同名 **DataCardForge**。
 **作者与权属**：`DozenLow` · GPL-3.0 · 身份、时间线与提交锚点见 [`PROVENANCE.md`](PROVENANCE.md)。
-**当前实测状态**（2026-10-31 实测）：前端 581 个单元测试（14 个 opt-in 跳过）· 后端 8 个 ctest（4 个 opt-in）· 端到端 102 项检查，全绿。
+**当前实测状态**（2026-11-03 实测）：前端 581 个单元测试（14 个 opt-in 跳过）· 后端 9 个 ctest（4 个 opt-in）· 端到端 102 项检查，全绿。
 **尚未完成**：函数卡是半成品；连线的 hover 与断线编辑仍在路上——两者都在
 [状态与已知缺口](#状态与已知缺口)里写清楚了。
 
 ## 试一下
 
-**浏览器里直接玩（无需安装）**——<https://dozenlow.github.io/DataCardForge/> 是前端的静态部署。把
+**浏览器里直接用（无需安装）**——<https://dozenlow.github.io/DataCardForge/> 是前端的静态部署。把
 [`docs/sampleData/1.txt`](docs/sampleData/1.txt) 拖进画布，右键列头 →「画图」即可。文件加载与 9 种图表
 在那里都能用；C++ 计算服务不在静态托管上，函数卡会显示「后端不可达」横幅——这是设计里的可见降级，不是故障。
 演示地址需要先在 **Settings → Pages → Source: GitHub Actions** 开启一次，否则打开是 404。
@@ -317,7 +317,7 @@ npm test                  # 单元测试（vitest，含跨层夹具）
 # 前端：typecheck + 581 个单元测试（含 81 个跨层差分夹具、14 个 opt-in 跳过）
 cd web && npm run typecheck && npm test
 
-# 后端：8 个 ctest 用例（跨层夹具、矩阵算子、节点注册表、卡片夹具；另有 4 个按需门控，默认 Skipped）
+# 后端：9 个 ctest 用例（跨层夹具、矩阵算子、节点注册表、卡片夹具、静态路径规则；另有 4 个按需门控，默认 Skipped）
 cd backend && ctest --test-dir build --output-on-failure
 
 # 按需门控：差分 fuzz（随机表达式 TS↔C++ 对拍）与 HTTP 畸形报文压测

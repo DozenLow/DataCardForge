@@ -3,7 +3,7 @@
 [![CI](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml/badge.svg)](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml)
 [![Pages demo](https://img.shields.io/badge/demo-live%20(front%20end)-2ea44f)](https://dozenlow.github.io/DataCardForge/)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-581%20unit%20%C2%B7%208%20ctest-brightgreen)](web/tests)
+[![Tests](https://img.shields.io/badge/tests-581%20unit%20%C2%B7%209%20ctest-brightgreen)](web/tests)
 
 **[English](README.md) | [中文](README.zh-CN.md)**
 
@@ -18,8 +18,8 @@ A lightweight **data matrix batch-processing workbench** for industrial / scient
 **Product and repository**: both are named **DataCardForge**.
 **Author & provenance**: `DozenLow` · GPL-3.0 · see [`PROVENANCE.md`](PROVENANCE.md) for the
 verifiable author identity, timeline and commit anchors.
-**Verified state** (last verified 2026-10-31): 581 frontend unit tests (14 opt-in
-skipped) · 8 backend ctest cases (4 opt-in) · 102 end-to-end smoke checks — all green.
+**Verified state** (last verified 2026-11-03): 581 frontend unit tests (14 opt-in
+skipped) · 9 backend ctest cases (4 opt-in) · 102 end-to-end smoke checks — all green.
 **Not finished yet**: function cards are a work in progress; hover and edge-editing of connections
 are still missing — both are spelled out under [Status & known gaps](#status--known-gaps).
 
@@ -351,7 +351,7 @@ npm test                  # unit tests (vitest, includes cross-tier fixtures)
 # Frontend: typecheck + unit tests (count printed by vitest; includes 81 cross-tier differential fixtures)
 cd web && npm run typecheck && npm test
 
-# Backend: 8 ctest cases (cross-tier fixtures, matrix operators, node registry, card fixtures; 4 further gates are opt-in and Skipped by default)
+# Backend: 9 ctest cases (cross-tier fixtures, matrix operators, node registry, card fixtures, static path rules; 4 further gates are opt-in and Skipped by default)
 cd backend && ctest --test-dir build --output-on-failure
 
 # Opt-in gates: differential fuzz (random TS↔C++ cross-check) and HTTP malformed-request stress
@@ -454,7 +454,7 @@ on Linux, the MSVC runtime is linked statically (`/MT`) on Windows, and Eigen is
 
 ## Acknowledgements
 
-This project is developed with the assistance of **AI coding agents** (DeepSeek Harness / Claude-class tooling, and earlier GitHub Copilot). Authored by the maintainer: the requirements, the architecture decisions in [`docs/decisions/`](docs/decisions/), the acceptance criteria and the test gates. The repository does not claim "it was all typed by hand" — it claims that **every feature statement above is reproduced by the suites listed under Tests** (581 unit / 8 ctest / 102 end-to-end checks). Ownership and timeline: [`PROVENANCE.md`](PROVENANCE.md).
+This project is developed with the assistance of **AI coding agents** (DeepSeek Harness / Claude-class tooling, and earlier GitHub Copilot). Authored by the maintainer: the requirements, the architecture decisions in [`docs/decisions/`](docs/decisions/), the acceptance criteria and the test gates. The repository does not claim "it was all typed by hand" — it claims that **every feature statement above is reproduced by the suites listed under Tests** (581 unit / 9 ctest / 102 end-to-end checks). Ownership and timeline: [`PROVENANCE.md`](PROVENANCE.md).
 
 ## Contributing & security
 

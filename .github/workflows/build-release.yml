@@ -40,8 +40,8 @@ jobs:
     # rather than asking the user to install Node.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: npm
@@ -49,7 +49,7 @@ jobs:
       - name: Build front end
         working-directory: web
         run: npm ci && npm run build
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: web-dist
           path: web/dist
@@ -62,7 +62,7 @@ jobs:
       contains(github.event.inputs.platforms, 'all') ||
       contains(github.event.inputs.platforms, 'linux')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -84,7 +84,7 @@ jobs:
         run: ldd backend/build/dc_backend || true
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dc_backend-linux-perf
           path: backend/build/dc_backend
@@ -100,7 +100,7 @@ jobs:
        contains(github.event.inputs.platforms, 'linux')) &&
       startsWith(github.ref, 'refs/tags/v')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -117,7 +117,7 @@ jobs:
         run: ctest --test-dir backend/build --output-on-failure
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dc_backend-linux-debug
           path: backend/build/dc_backend
@@ -130,7 +130,7 @@ jobs:
       contains(github.event.inputs.platforms, 'all') ||
       contains(github.event.inputs.platforms, 'macos')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -147,7 +147,7 @@ jobs:
         run: ctest --test-dir backend/build --output-on-failure
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dc_backend-macos-perf
           path: backend/build/dc_backend
@@ -161,7 +161,7 @@ jobs:
        contains(github.event.inputs.platforms, 'macos')) &&
       startsWith(github.ref, 'refs/tags/v')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -178,7 +178,7 @@ jobs:
         run: ctest --test-dir backend/build --output-on-failure
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dc_backend-macos-debug
           path: backend/build/dc_backend
@@ -191,7 +191,7 @@ jobs:
       contains(github.event.inputs.platforms, 'all') ||
       contains(github.event.inputs.platforms, 'windows')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -216,7 +216,7 @@ jobs:
         run: ctest --test-dir backend/build --output-on-failure
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dc_backend-windows-perf
           path: backend/build/dc_backend.exe
@@ -230,7 +230,7 @@ jobs:
        contains(github.event.inputs.platforms, 'windows')) &&
       startsWith(github.ref, 'refs/tags/v')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -255,7 +255,7 @@ jobs:
         run: ctest --test-dir backend/build --output-on-failure
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dc_backend-windows-debug
           path: backend/build/dc_backend.exe
@@ -270,7 +270,7 @@ jobs:
       contains(github.event.inputs.platforms, 'all') ||
       contains(github.event.inputs.platforms, 'linux')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -289,7 +289,7 @@ jobs:
         run: ctest --test-dir backend/build --output-on-failure
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dc_backend-linux-standard
           path: backend/build/dc_backend
@@ -302,7 +302,7 @@ jobs:
       contains(github.event.inputs.platforms, 'all') ||
       contains(github.event.inputs.platforms, 'macos')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -319,7 +319,7 @@ jobs:
         run: ctest --test-dir backend/build --output-on-failure
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dc_backend-macos-standard
           path: backend/build/dc_backend
@@ -332,7 +332,7 @@ jobs:
       contains(github.event.inputs.platforms, 'all') ||
       contains(github.event.inputs.platforms, 'windows')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -357,7 +357,7 @@ jobs:
         run: ctest --test-dir backend/build --output-on-failure
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: dc_backend-windows-standard
           path: backend/build/dc_backend.exe
@@ -380,12 +380,16 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          # `gh run download` instead of actions/download-artifact: that action still runs on
+          # the deprecated node20 runtime, and the gh CLI is preinstalled on the runner.
+          gh run download "$GITHUB_RUN_ID" -D artifacts -R "$GITHUB_REPOSITORY"
 
       - name: Prepare release assets
         run: |
@@ -411,7 +415,6 @@ jobs:
           ( cd release && sha256sum ./*.zip > SHA256SUMS.txt && cat SHA256SUMS.txt )
 
       - name: Compose release body
-        id: body
         run: |
           version=${GITHUB_REF#refs/tags/v}
           {
@@ -419,21 +422,14 @@ jobs:
             echo
             cat .github/release-assets.md
           } > "$RUNNER_TEMP/body.md"
-          {
-            echo "body<<DC_BODY_EOF"
-            cat "$RUNNER_TEMP/body.md"
-            echo "DC_BODY_EOF"
-          } >> "$GITHUB_OUTPUT"
 
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            release/*.zip
-            release/README.txt
-            release/SHA256SUMS.txt
-          body: ${{ steps.body.outputs.body }}
-          draft: false
-          prerelease: false
+      - name: Create release
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          # gh instead of softprops/action-gh-release: same node20 reason as above.
+          gh release view "$tag" >/dev/null 2>&1 || \
+            gh release create "$tag" --title "$tag" --notes-file "$RUNNER_TEMP/body.md"
+          gh release upload "$tag" release/*.zip release/README.txt release/SHA256SUMS.txt --clobber
