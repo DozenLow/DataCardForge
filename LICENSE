@@ -30,16 +30,20 @@ Foundation and is available online at:
 
     https://www.gnu.org/licenses/gpl-3.0.txt
 
-The repository also links the QCustomPlot library, which is itself
-released under GPL-3.0, and therefore this project must remain
-under a compatible GPL license.
+The project is licensed under GPL-3.0 in its own right; no linked
+dependency forces that choice. (The Qt-era stack — Qt 6, QCustomPlot,
+QXlsx, fast_float — was removed together with the Qt UI tree on
+2026-10-15 and is neither shipped nor linked any more.)
 
 ------------------------------------------------------------------
 
 Third-party components included in or linked by this project are
 distributed under their own licenses:
 
-  Qt 6          : LGPL-3.0 / Commercial
-  QCustomPlot   : GPL-3.0
-  QXlsx         : MIT
-  fast_float    : MIT / Apache-2.0
+  Eigen 3.4     : MPL-2.0     (C++ compute backend, header-only)
+  React 19      : MIT         (web frontend)
+  Vite 8        : MIT         (web build toolchain)
+  ECharts 6     : Apache-2.0  (chart rendering)
+  zustand       : MIT         (state management)
+  react-rnd     : MIT         (card drag / resize)
+  @e965/xlsx    : Apache-2.0  (Excel reading)

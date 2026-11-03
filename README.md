@@ -427,6 +427,8 @@ This project is developed with the assistance of **AI coding agents** (DeepSeek 
 - **Security**: [SECURITY.md](SECURITY.md) — how to report a vulnerability privately, and the
   list of boundaries that are by design (no authentication, loopback only, no HTTPS) so that
   they do not get filed as bugs.
+- **Changelog**: [CHANGELOG.md](CHANGELOG.md) — what changed in each release
+  (中文: [CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md)).
 
 Both documents have a Chinese version: [CONTRIBUTING.zh-CN.md](CONTRIBUTING.zh-CN.md) ·
 [SECURITY.zh-CN.md](SECURITY.zh-CN.md).

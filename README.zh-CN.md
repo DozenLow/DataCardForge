@@ -97,7 +97,7 @@ Eigen 3.4 头文件（`sudo apt install build-essential cmake ninja-build libeig
 - 底部**平滑控件**：滑动平均 / 指数平滑 / 中值滤波 / Savitzky–Golay，改变时实时重绘，设置在切换数据源时保持不变
 - **导出**：**SVG（真矢量，活 DOM 序列化、无内嵌位图）** / PNG（1×/2×/4×）/ PDF（位图封装，UI 明确标注非矢量）
 - 文件切换时所有依赖图表自动更新；列不存在时保留旧数据
-- 缩放 / 平移、图例（拟合线名不入图例）
+- 缩放 / 平移（两轴均可，滚轮或拖拽）；坐标轴面板里有**重置缩放**按钮；拟合线名不进图例
 
 > 统计量实现在 `core/stats.ts`，纯函数、40 个单元测试，数值约定与 NumPy/R 一致
 > （线性插值分位数、Bessel 校正方差、Silverman 带宽、t 分布置信区间、Tukey 离群点）。
@@ -148,7 +148,7 @@ Eigen 3.4 头文件（`sudo apt install build-essential cmake ninja-build libeig
 
 ### 函数卡（schema v2，2026-10-27）
 - **依赖在信封上**：`inputs[]` 是唯一依赖表示，依赖图重建一次遍历、零卡种知识
-  （v1 只从图表卡重建，公式卡依赖曾静默丢失）
+  （v1 只从图表卡重建，函数卡依赖曾静默丢失）
 - **一节点 K 输出**：签名（`FunctionSignature`）声明端口与输出数；`builtin:expression-columns`
   用一个节点算出一张宽表，取代 v1 的「每公式列一个节点、重复求值」
 - **输入是显式矩阵**：切数据卡里的文件不再静默改变函数卡的输入；改用**卡片级待处理提示**
@@ -251,7 +251,7 @@ schema v2 把依赖升成信封、把绑定挪到端口之后，连线一度退�
 | ECharts 6 | 统计图表 | **SVG renderer**，矢量导出 |
 | react-rnd | 卡片拖拽/缩放 | |
 | zustand | 状态管理（卡片表 + 依赖图） | |
-| @e965/xlsx | Excel 读写 | 按需加载 |
+| @e965/xlsx | Excel 读取 | 按需加载 |
 | 自研虚拟滚动 | 大表渲染 | 无第三方依赖 |
 | Web Worker（`src/loaders/parse.worker.ts`） | 解析离开主线程 | 大文件加载时界面不冻结 |
 | **C++17 / g++ 15** | 计算后端语言 | CMake 4 + Ninja |
@@ -365,7 +365,7 @@ GitHub Pages——也就是上面那个在线演示。它需要一次性开关�
 - [ ] 数据**编辑**能力（非文件来源卡片，双击编辑 + 公式求值）
 - [x] 连线箭头指向目标端（2026-10-28），2026-10-29 起停在目标卡片边框外；
   [x] 红蓝流动虚线（长划/短划 + 流向，色觉友好）；红蓝双向高亮：单条线只会是其中一色，双向高亮仍待做
-- [ ] **美化 card**：统一卡片样式、间距、配色与排版
+- [ ] **卡片美化**：统一卡片样式、间距、配色与排版
 
 ## 长期规划
 
@@ -391,6 +391,8 @@ GitHub Pages——也就是上面那个在线演示。它需要一次性开关�
   （每个提交用 `git commit -s` 签名）、提 PR 前要跑的门禁，以及不得破坏的契约。
 - **安全**：[SECURITY.zh-CN.md](SECURITY.zh-CN.md) —— 漏洞的私密报告方式，以及哪些行为是
   设计边界（无鉴权、只绑回环、无 HTTPS），以免被误当作缺陷上报。
+- **更新日志**：[CHANGELOG.zh-CN.md](CHANGELOG.zh-CN.md) —— 各版本之间的变更
+  （English：[CHANGELOG.md](CHANGELOG.md)）。
 
 两份文档都有英文版：[CONTRIBUTING.md](CONTRIBUTING.md) · [SECURITY.md](SECURITY.md)。
 
