@@ -14,9 +14,9 @@ Keep the two halves in sync when editing.
 
 | 文件 | 构建 | 用途 |
 |---|---|---|
-| `dc_backend-<os>-standard.zip` | `-O2 -g`，**不定义 `NDEBUG`** → Eigen 断言开启 | **请默认下载这个**。速度接近正式版，但一旦违反契约（矩阵维度不匹配、越界访问）会**当场停下并指出位置**，而不是默默算出一个错数字 |
-| `dc_backend-<os>-perf.zip` | `-O3 -DNDEBUG` | **性能上限展示**：测试与性能门禁测量的就是这一档；断言关闭，出错时可能只表现为结果不对 |
-| `dc_backend-<os>-debug.zip` | `-O0 -g`，断言开启 | **复现专用**：单步调试友好；慢 2–10 倍，不要用它跑真实数据或计性能。只在打 tag 时构建 |
+| `datacardforge-<os>-standard.zip` | `-O2 -g`，**不定义 `NDEBUG`** → Eigen 断言开启 | **请默认下载这个**。速度接近正式版，但一旦违反契约（矩阵维度不匹配、越界访问）会**当场停下并指出位置**，而不是默默算出一个错数字 |
+| `datacardforge-<os>-fullperformance.zip` | `-O3 -DNDEBUG` | **全性能档（性能上限展示）**：测试与性能门禁测量的就是这一档；断言关闭，出错时可能只表现为结果不对 |
+| `datacardforge-<os>-debug.zip` | `-O0 -g`，断言开启 | **复现专用**：单步调试友好；慢 2–10 倍，不要用它跑真实数据或计性能。只在打 tag 时构建 |
 
 `<os>` 为 `linux` / `macos` / `windows`。
 
@@ -25,7 +25,7 @@ Keep the two halves in sync when editing.
 ## 包内结构
 
 ```
-dc_backend            # Windows 上是 dc_backend.exe
+datacardforge          # Windows 上是 datacardforge.exe
 web/
   index.html
   assets/…
@@ -37,11 +37,11 @@ README.txt            # 本文件
 ## 运行
 
 ```bash
-# Windows: dc_backend.exe
-./dc_backend                 # 起服务并自动打开浏览器
-./dc_backend --no-open       # 只起服务
-./dc_backend --port 4000     # 换端口
-./dc_backend --web-root DIR  # 指到别处的前端产物
+# Windows: datacardforge.exe
+./datacardforge                 # 起服务并自动打开浏览器
+./datacardforge --no-open       # 只起服务
+./datacardforge --port 4000     # 换端口
+./datacardforge --web-root DIR  # 指到别处的前端产物
 ```
 
 找不到 `web/` 时后端仍会启动，只提供 API，并在启动日志里说明（`ui: not found (API only)`）。
@@ -78,9 +78,9 @@ extra runtime to install.
 
 | Asset | Build | Use it for |
 |---|---|---|
-| `dc_backend-<os>-standard.zip` | `-O2 -g`, `NDEBUG` **left undefined** → Eigen assertions on | **Download this one by default.** Near release speed, but the moment a contract is violated (matrix dimension mismatch, out-of-bounds access) it **stops on the spot and points at the location**, instead of quietly computing a wrong number |
-| `dc_backend-<os>-perf.zip` | `-O3 -DNDEBUG` | **The performance ceiling on display**: this is the tier the tests and the perf gate measure. Assertions are off, so a defect may only surface as a wrong result |
-| `dc_backend-<os>-debug.zip` | `-O0 -g`, assertions on | **For reproduction only**: friendly to a step debugger; 2–10× slower, so do not run real data or take timings with it. Built for tags only |
+| `datacardforge-<os>-standard.zip` | `-O2 -g`, `NDEBUG` **left undefined** → Eigen assertions on | **Download this one by default.** Near release speed, but the moment a contract is violated (matrix dimension mismatch, out-of-bounds access) it **stops on the spot and points at the location**, instead of quietly computing a wrong number |
+| `datacardforge-<os>-fullperformance.zip` | `-O3 -DNDEBUG` | **The full-performance tier** — the ceiling on display: this is the tier the tests and the perf gate measure. Assertions are off, so a defect may only surface as a wrong result |
+| `datacardforge-<os>-debug.zip` | `-O0 -g`, assertions on | **For reproduction only**: friendly to a step debugger; 2–10× slower, so do not run real data or take timings with it. Built for tags only |
 
 `<os>` is `linux` / `macos` / `windows`.
 
@@ -93,7 +93,7 @@ first violation" at the same time.
 ## What is inside
 
 ```
-dc_backend            # dc_backend.exe on Windows
+datacardforge          # datacardforge.exe on Windows
 web/
   index.html
   assets/…
@@ -107,11 +107,11 @@ dev server.
 ## Running
 
 ```bash
-# Windows: dc_backend.exe
-./dc_backend                 # start the service and open the browser
-./dc_backend --no-open       # start the service only
-./dc_backend --port 4000     # use another port
-./dc_backend --web-root DIR  # point at a front end built elsewhere
+# Windows: datacardforge.exe
+./datacardforge                 # start the service and open the browser
+./datacardforge --no-open       # start the service only
+./datacardforge --port 4000     # use another port
+./datacardforge --web-root DIR  # point at a front end built elsewhere
 ```
 
 When `web/` is missing the backend still starts, serving the API only, and says so in its startup log

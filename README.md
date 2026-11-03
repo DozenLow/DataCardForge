@@ -31,12 +31,12 @@ header → *Draw chart*. File loading and all nine chart types work there; the C
 so function cards show the "backend unreachable" banner — that is the designed visible degradation, not a bug.
 The demo URL only starts serving after Pages is enabled once: **Settings → Pages → Source: GitHub Actions**.
 
-**From a release archive, no toolchain** — unzip `dc_backend-<os>-standard.zip`, run the binary, and it
+**From a release archive, no toolchain** — unzip `datacardforge-<os>-standard.zip`, run the binary, and it
 serves the bundled `web/` from the same origin and opens the browser:
 
 ```bash
-./dc_backend                 # serves the UI on http://127.0.0.1:37811/ and opens it
-./dc_backend --no-open       # serve only (CI, servers, remote shells)
+./datacardforge                 # serves the UI on http://127.0.0.1:37811/ and opens it
+./datacardforge --no-open       # serve only (CI, servers, remote shells)
 ```
 
 **Locally, with the compute backend** — install once, then one command builds the C++ service and
@@ -388,9 +388,9 @@ Pushing a `v*` tag publishes nine backend archives plus `README.txt` and `SHA256
 
 | Asset | Build | What it is for |
 |---|---|---|
-| `dc_backend-<os>-standard.zip` | `-O2 -g`, `NDEBUG` **left undefined** → Eigen assertions on | **the one to download**: near-Release speed, but it stops at the first violated contract instead of quietly computing a wrong number |
-| `dc_backend-<os>-perf.zip` | `-O3 -DNDEBUG` | the performance ceiling on display — the tier the tests and the perf gate measure |
-| `dc_backend-<os>-debug.zip` | `-O0 -g` | reproducing a defect; 2–10× slower, never benchmark with it (built for tags only) |
+| `datacardforge-<os>-standard.zip` | `-O2 -g`, `NDEBUG` **left undefined** → Eigen assertions on | **the one to download**: near-Release speed, but it stops at the first violated contract instead of quietly computing a wrong number |
+| `datacardforge-<os>-fullperformance.zip` | `-O3 -DNDEBUG` | the full-performance tier — the ceiling on display, and the tier the tests and the perf gate measure |
+| `datacardforge-<os>-debug.zip` | `-O0 -g` | reproducing a defect; 2–10× slower, never benchmark with it (built for tags only) |
 
 Each archive is the binary **plus `web/`**: unzip, run it, and it serves the UI from the same
 origin and opens the browser. Nothing needs to be installed: libstdc++/libgcc are linked statically

@@ -9,6 +9,11 @@
 
 ## 未发布
 
+### 修复
+- 连线被连线层自己的 SVG 视窗裁掉了：缩到 100% 以下时，这个视窗只覆盖「一屏」的平面坐标，
+  于是一离开这片区域线就在半空截断、相距较远的卡片看起来根本没连上。现在允许内容溢出，
+  只由画布视口负责裁剪
+
 ## [0.1.1] - 2026-11-03
 
 ### 新增
@@ -24,8 +29,8 @@
   并在压缩包旁边提供 `README.txt` 与 `SHA256SUMS.txt`
 
 ### 变更
-- 发行资产改名为 `standard` / `perf` / `debug`：推荐下载档带断言，`perf` 是性能基准档，
-  `debug` 只在打 tag 时构建
+- 发行资产改名为 `datacardforge-<os>-<档位>.zip`，档位为 `standard` / `fullperformance` / `debug`：
+  推荐下载档带断言，`fullperformance` 是全性能基准档，`debug` 只在打 tag 时构建
 - 发行版二进制改为静态携带 C++ 运行时（Linux `-static-libstdc++ -static-libgcc`，Windows `/MT`），
   用户安装时无需额外运行时
 - 文档：移除已退役的「B 方案」代号，统一改为「后端持有计算」的直接表述

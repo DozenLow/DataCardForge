@@ -55,7 +55,7 @@ jobs:
           path: web/dist
           if-no-files-found: error
 
-  build-linux-perf:
+  build-linux-fullperformance:
     runs-on: ubuntu-latest
     if: |
       github.event_name != 'workflow_dispatch' ||
@@ -86,7 +86,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: dc_backend-linux-perf
+          name: datacardforge-linux-fullperformance
           path: backend/build/dc_backend
           if-no-files-found: error
 
@@ -119,11 +119,11 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: dc_backend-linux-debug
+          name: datacardforge-linux-debug
           path: backend/build/dc_backend
           if-no-files-found: error
 
-  build-macos-perf:
+  build-macos-fullperformance:
     runs-on: macos-latest
     if: |
       github.event_name != 'workflow_dispatch' ||
@@ -149,7 +149,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: dc_backend-macos-perf
+          name: datacardforge-macos-fullperformance
           path: backend/build/dc_backend
           if-no-files-found: error
 
@@ -180,11 +180,11 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: dc_backend-macos-debug
+          name: datacardforge-macos-debug
           path: backend/build/dc_backend
           if-no-files-found: error
 
-  build-windows-perf:
+  build-windows-fullperformance:
     runs-on: windows-latest
     if: |
       github.event_name != 'workflow_dispatch' ||
@@ -218,7 +218,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: dc_backend-windows-perf
+          name: datacardforge-windows-fullperformance
           path: backend/build/dc_backend.exe
           if-no-files-found: error
 
@@ -257,7 +257,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: dc_backend-windows-debug
+          name: datacardforge-windows-debug
           path: backend/build/dc_backend.exe
           if-no-files-found: error
 
@@ -291,7 +291,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: dc_backend-linux-standard
+          name: datacardforge-linux-standard
           path: backend/build/dc_backend
           if-no-files-found: error
 
@@ -321,7 +321,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: dc_backend-macos-standard
+          name: datacardforge-macos-standard
           path: backend/build/dc_backend
           if-no-files-found: error
 
@@ -359,7 +359,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
         with:
-          name: dc_backend-windows-standard
+          name: datacardforge-windows-standard
           path: backend/build/dc_backend.exe
           if-no-files-found: error
 
@@ -367,13 +367,13 @@ jobs:
     needs:
       - build-web
       - build-linux-standard
-      - build-linux-perf
+      - build-linux-fullperformance
       - build-linux-debug
       - build-macos-standard
-      - build-macos-perf
+      - build-macos-fullperformance
       - build-macos-debug
       - build-windows-standard
-      - build-windows-perf
+      - build-windows-fullperformance
       - build-windows-debug
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
@@ -399,15 +399,16 @@ jobs:
             dir_name="$(basename "$dir")"
             [ "$dir_name" = "web-dist" ] && continue
             bin=""
+            exe="datacardforge"
             [ -f "$dir/dc_backend" ] && bin="$dir/dc_backend"
-            [ -f "$dir/dc_backend.exe" ] && bin="$dir/dc_backend.exe"
+            [ -f "$dir/dc_backend.exe" ] && { bin="$dir/dc_backend.exe"; exe="datacardforge.exe"; }
             [ -n "$bin" ] || continue
-            # Layout the binary auto-detects: <exe dir>/web/index.html. Staging first keeps
-            # the zip's root tidy and makes the "unzip and run" path work with no flags.
+            # The CMake target is still `dc_backend` (the systemd unit and local build dirs
+            # depend on that path); the *shipped* executable is the product name.
             stage="$RUNNER_TEMP/stage/$dir_name"
             rm -rf "$stage"
             mkdir -p "$stage/web"
-            cp "$bin" "$stage/"
+            cp "$bin" "$stage/$exe"
             cp -r artifacts/web-dist/. "$stage/web/"
             ( cd "$stage" && zip -q -r "$GITHUB_WORKSPACE/release/${dir_name}.zip" . )
           done
@@ -416,12 +417,13 @@ jobs:
 
       - name: Compose release body
         run: |
-          version=${GITHUB_REF#refs/tags/v}
-          {
-            awk "/## \[$version\]/,/## \[/{if (!/## \[/) print}" CHANGELOG.md
-            echo
-            cat .github/release-assets.md
-          } > "$RUNNER_TEMP/body.md"
+          set -euo pipefail
+          version="${GITHUB_REF#refs/tags/v}"
+          # Bilingual by default: two collapsed <details> blocks, Chinese first.
+          python3 scripts/compose-release-notes.py --version "$version" \
+            --en-changelog CHANGELOG.md --zh-changelog CHANGELOG.zh-CN.md \
+            --assets .github/release-assets.md --out "$RUNNER_TEMP/body.md"
+          cat "$RUNNER_TEMP/body.md"
 
       - name: Create release
         env:

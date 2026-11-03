@@ -259,6 +259,13 @@ body {
   inset: 0;
   width: 100%;
   height: 100%;
+  /* The SVG stays viewport-sized, but its *contents* live in unbounded plane coordinates
+     and are counter-scaled by the zoom group inside. Without this, the SVG's own viewport
+     clips at 100% of the screen: at 50% zoom the visible plane is twice as wide as the svg
+     box, so every wire that left the first screenful and every distant card pair simply
+     stopped mid-air (the reported "line stops before the card" defect). The canvas above
+     still clips to what the user can actually see, which is the only clip we want. */
+  overflow: visible;
   /* Connections are a background visualization: never intercept input, and never paint
      over a card. The cards sit at z-index 1..N in the same stacking context, so this layer
      used to win every comparison (it was 900) and the curves were drawn across table cells

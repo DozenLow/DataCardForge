@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- Connections were clipped by the connection layer's own SVG viewport: below 100% zoom the
+  box covered only one screenful of *plane* units, so a wire leaving that area stopped in
+  mid-air and distant card pairs looked unconnected. The layer now lets its content overflow;
+  the canvas viewport is the only clip
+
 ## [0.1.1] - 2026-11-03
 
 ### Added
@@ -28,8 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and ship `README.txt` + `SHA256SUMS.txt` next to the archives
 
 ### Changed
-- Release assets are named `standard` / `perf` / `debug`: the recommended download carries
-  assertions, `perf` is the benchmark tier, and `debug` is only built for tags
+- Release assets are named `standard` / `fullperformance` / `debug` and ship as
+  `datacardforge-<os>-<tier>.zip`: the recommended download carries assertions,
+  `fullperformance` is the benchmark tier, and `debug` is only built for tags
 - Release binaries carry their C++ runtime statically (Linux `-static-libstdc++ -static-libgcc`,
   Windows `/MT`), so installing the packages requires no extra runtime
 - Documentation: the retired "B-plan" codename was replaced by the plain

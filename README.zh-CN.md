@@ -28,11 +28,11 @@
 在那里都能用；C++ 计算服务不在静态托管上，函数卡会显示「后端不可达」横幅——这是设计里的可见降级，不是故障。
 演示地址需要先在 **Settings → Pages → Source: GitHub Actions** 开启一次，否则打开是 404。
 
-**用发行包跑（无需工具链）**——解压 `dc_backend-<os>-standard.zip`，直接运行二进制，它会用同源的 `web/` 提供界面并自动打开浏览器：
+**用发行包跑（无需工具链）**——解压 `datacardforge-<os>-standard.zip`，直接运行二进制，它会用同源的 `web/` 提供界面并自动打开浏览器：
 
 ```bash
-./dc_backend                 # 起在 http://127.0.0.1:37811/ 并打开浏览器
-./dc_backend --no-open       # 只起服务（CI、服务器、远程 shell 用）
+./datacardforge                 # 起在 http://127.0.0.1:37811/ 并打开浏览器
+./datacardforge --no-open       # 只起服务（CI、服务器、远程 shell 用）
 ```
 
 **本地跑完整版（含计算后端）**——先装一次依赖，然后一条命令编译后端并起两个服务：
@@ -352,9 +352,9 @@ node scripts/smoke.mjs http://127.0.0.1:4173
 
 | 资产 | 构建 | 用途 |
 |---|---|---|
-| `dc_backend-<os>-standard.zip` | `-O2 -g`，`NDEBUG` **不定义** → Eigen 断言开启 | **默认下载这个**：接近正式版速度，但违反契约时当场停下，而不是默默算出错数字 |
-| `dc_backend-<os>-perf.zip` | `-O3 -DNDEBUG` | **性能上限展示**：测试与性能门禁测量的就是这一档 |
-| `dc_backend-<os>-debug.zip` | `-O0 -g` | 复现专用：慢 2–10 倍，别拿它计性能（只在 tag 构建） |
+| `datacardforge-<os>-standard.zip` | `-O2 -g`，`NDEBUG` **不定义** → Eigen 断言开启 | **默认下载这个**：接近正式版速度，但违反契约时当场停下，而不是默默算出错数字 |
+| `datacardforge-<os>-fullperformance.zip` | `-O3 -DNDEBUG` | **全性能档**：性能上限展示，测试与性能门禁测量的就是这一档 |
+| `datacardforge-<os>-debug.zip` | `-O0 -g` | 复现专用：慢 2–10 倍，别拿它计性能（只在 tag 构建） |
 
 每个包都是「二进制 + `web/`」：解压、运行，它用同源托管界面并自动打开浏览器。不需要安装任何
 运行时：Linux 上 libstdc++/libgcc 静态链接，Windows 上 MSVC 运行时用 `/MT` 静态链接，Eigen 是
