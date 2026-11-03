@@ -103,9 +103,12 @@ std::string resolveStaticPath(const std::string& root, const std::string& urlPat
   if (ec) return {};
 
   // Canonicalisation resolves symlinks, so this also refuses a link inside the web root
-  // that points somewhere else on disk.
+  // that points somewhere else on disk. Compare through generic_string(): on Windows
+  // path::native() is wide, and building the check on narrow strings keeps this portable.
   const std::filesystem::path rel = candidate.lexically_relative(rootAbs);
-  if (rel.empty() || rel.native().rfind("..", 0) == 0) return {};
+  if (rel.empty() || rel.is_absolute()) return {};
+  const std::string relStr = rel.generic_string();
+  if (relStr == ".." || relStr.rfind("../", 0) == 0) return {};
   if (!std::filesystem::is_regular_file(candidate, ec) || ec) return {};
   return candidate.string();
 }
