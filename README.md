@@ -1,7 +1,7 @@
 # DataCardForge — Data Matrix Workbench
 
-[![CI](https://github.com/teglaven/DataCardForge/actions/workflows/ci.yml/badge.svg)](https://github.com/teglaven/DataCardForge/actions/workflows/ci.yml)
-[![Pages demo](https://img.shields.io/badge/demo-live%20(front%20end)-2ea44f)](https://teglaven.github.io/DataCardForge/)
+[![CI](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml/badge.svg)](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml)
+[![Pages demo](https://img.shields.io/badge/demo-live%20(front%20end)-2ea44f)](https://dozenlow.github.io/DataCardForge/)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-581%20unit%20%C2%B7%208%20ctest-brightgreen)](web/tests)
 
@@ -16,7 +16,7 @@ A lightweight **data matrix batch-processing workbench** for industrial / scient
 </p>
 
 **Product and repository**: both are named **DataCardForge**.
-**Author & provenance**: `teglaven` · GPL-3.0 · see [`PROVENANCE.md`](PROVENANCE.md) for the
+**Author & provenance**: `DozenLow` · GPL-3.0 · see [`PROVENANCE.md`](PROVENANCE.md) for the
 verifiable author identity, timeline and commit anchors.
 **Verified state** (last verified 2026-10-31): 581 frontend unit tests (14 opt-in
 skipped) · 8 backend ctest cases (4 opt-in) · 102 end-to-end smoke checks — all green.
@@ -25,7 +25,7 @@ are still missing — both are spelled out under [Status & known gaps](#status--
 
 ## Try it
 
-**In the browser, no install** — <https://teglaven.github.io/DataCardForge/> runs the React front end as a
+**In the browser, no install** — <https://dozenlow.github.io/DataCardForge/> runs the React front end as a
 static site. Drag [`docs/sampleData/1.txt`](docs/sampleData/1.txt) onto the canvas, then right-click a column
 header → *Draw chart*. File loading and all nine chart types work there; the C++ compute service does not,
 so function cards show the "backend unreachable" banner — that is the designed visible degradation, not a bug.
@@ -280,16 +280,22 @@ for those). See the
 
 | Component | Purpose | Notes |
 |-----------|---------|-------|
-| React 19 + Vite 8 | UI framework and build | TypeScript 7 `strict` |
-| ECharts 6 | Charts | **SVG renderer**, vector export |
+| React 19 + Vite 8 | UI framework and build | TypeScript 7, `strict` |
+| ECharts 6.1 | Charts | **SVG renderer**, true vector export |
 | react-rnd | Card drag / resize | |
-| zustand | State (card table + dependency graph) | |
+| zustand 5 | State (card table + dependency graph) | |
 | @e965/xlsx | Excel read | Loaded on demand |
 | Hand-rolled virtual scrolling | Large-table rendering | No third-party dependency |
 | Web Worker (`src/loaders/parse.worker.ts`) | Off-thread file parsing | Keeps the UI responsive on large files |
-| **C++17 / g++ 15** | Compute backend language | CMake 4 + Ninja |
-| **Eigen 3.4** | Linear algebra / matrix operations | Header-only, `/usr/include/eigen3` |
-| POSIX sockets | Backend HTTP server | Zero third-party networking deps |
+| Node.js 22 | Frontend runtime, dev server, CI | CI pins `node-version: 22`; the opt-in fuzz gate needs `--experimental-transform-types` |
+| Vitest 5 + jsdom | Unit / DOM tests | 581 tests, 14 opt-in skipped |
+| Playwright (Chromium) | End-to-end smoke | 102 checks against `vite preview` |
+| **C++17** (verified with g++ 15) | Compute backend language | `CMAKE_CXX_STANDARD 17`, CMake 4.2 + Ninja |
+| **Eigen 3.4** | Linear algebra / matrix operations | Header-only, `find_package(Eigen3 REQUIRED NO_MODULE)`, `/usr/include/eigen3` |
+| **Native sockets (POSIX / Winsock)** | Backend HTTP server | Zero third-party networking deps; `ws2_32` is linked on Windows |
+| `dc_core` static library | Shared backend code | Linked by `dc_backend`, the fixture runners and `dc_bench` |
+| `dc_bench` (std::chrono) | Engine benchmark harness | Backs `bench/budgets.json`; no third-party benchmark framework |
+| GitHub Actions | CI, multi-platform builds, Pages | `ci.yml` · `build-release.yml` · `static.yml` |
 
 ## Building & Running
 
@@ -352,14 +358,21 @@ node scripts/smoke.mjs http://127.0.0.1:4173
 
 ### CI
 
-GitHub Actions runs three jobs on every push/PR:
-1. **typecheck-and-test**: `npm ci` → typecheck → vitest → production build
-2. **backend-test**: `apt install toolchain` → cmake build → ctest (cross-tier fixtures + node registry)
-3. **e2e-smoke**: Playwright Chromium against `vite preview`
+Three workflows live in [`.github/workflows/`](.github/workflows/):
 
-A fourth workflow, [`.github/workflows/static.yml`](.github/workflows/static.yml), publishes the front end to
-GitHub Pages on every push that touches `web/` — that is what serves the live demo above. It needs a
-one-time switch: **Settings → Pages → Source: GitHub Actions**, otherwise the demo link 404s.
+1. **[`ci.yml`](.github/workflows/ci.yml)** — on every push to `main` and every PR, three jobs:
+   - `typecheck-and-test`: `npm ci` → typecheck → vitest → production build
+   - `backend-test`: install the toolchain → cmake configure + build → ctest
+     (cross-tier fixtures + node registry)
+   - `e2e-smoke`: Playwright Chromium against `vite preview`
+2. **[`build-release.yml`](.github/workflows/build-release.yml)** — on pushes/PRs to `main` and on
+   `v*` tags: a six-job matrix (Linux / macOS / Windows × Release / Debug) that configures, builds and
+   runs ctest, then uploads each platform's binary as an artifact. Its `release` job only runs when
+   `github.ref` starts with `refs/tags/v`, so **a push to `main` never publishes a release**; a tag does,
+   with notes extracted from `CHANGELOG.md`.
+3. **[`static.yml`](.github/workflows/static.yml)** — publishes the front end to GitHub Pages, only on
+   pushes that touch `web/**` (or the workflow itself). This is what serves the live demo above; it needs
+   a one-time switch, **Settings → Pages → Source: GitHub Actions**, otherwise the demo link 404s.
 
 ## Architecture Extension Points
 
@@ -404,7 +417,7 @@ one-time switch: **Settings → Pages → Source: GitHub Actions**, otherwise th
 
 ## Long-term Roadmap
 
-> The items below are only directional ideas and may change at any time; if you have suggestions, feel free to open an [issue](https://github.com/teglaven/DataCardForge/issues).
+> The items below are only directional ideas and may change at any time; if you have suggestions, feel free to open an [issue](https://github.com/DozenLow/DataCardForge/issues).
 
 - [ ] **Conditional filter card**: slice matrices by row/column predicates before feeding into function cards
 - [ ] **ExtensionCard**: a **quick parameter-setting + live-preview** panel dedicated to a specific parent card; can only be created from the parent card and is treated as its child window, closing with it. It exists to fix "once there are many cards, parameter tweaking is scattered" — e.g. scrubbing a piecewise-fit segment count or a smoothing window with the wheel while the chart updates live.

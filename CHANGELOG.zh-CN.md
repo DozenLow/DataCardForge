@@ -44,5 +44,5 @@
 ### 修复
 - 通过嵌入 git SHA 保证构建可复现
 
-[未发布]: https://github.com/teglaven/DataCardForge/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/teglaven/DataCardForge/releases/tag/v0.1.0
+[未发布]: https://github.com/DozenLow/DataCardForge/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/DozenLow/DataCardForge/releases/tag/v0.1.0

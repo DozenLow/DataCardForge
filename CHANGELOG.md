@@ -45,5 +45,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Build reproducibility with git SHA embedding
 
-[Unreleased]: https://github.com/teglaven/DataCardForge/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/teglaven/DataCardForge/releases/tag/v0.1.0
+[Unreleased]: https://github.com/DozenLow/DataCardForge/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/DozenLow/DataCardForge/releases/tag/v0.1.0

@@ -1,7 +1,7 @@
 # DataCardForge — 数据矩阵工作台
 
-[![CI](https://github.com/teglaven/DataCardForge/actions/workflows/ci.yml/badge.svg)](https://github.com/teglaven/DataCardForge/actions/workflows/ci.yml)
-[![Pages 演示](https://img.shields.io/badge/%E6%BC%94%E7%A4%BA-%E5%89%8D%E7%AB%AF%E5%9C%A8%E7%BA%BF-2ea44f)](https://teglaven.github.io/DataCardForge/)
+[![CI](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml/badge.svg)](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml)
+[![Pages 演示](https://img.shields.io/badge/%E6%BC%94%E7%A4%BA-%E5%89%8D%E7%AB%AF%E5%9C%A8%E7%BA%BF-2ea44f)](https://dozenlow.github.io/DataCardForge/)
 [![许可证](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
 [![测试](https://img.shields.io/badge/tests-581%20unit%20%C2%B7%208%20ctest-brightgreen)](web/tests)
 
@@ -16,14 +16,14 @@
 </p>
 
 **产品与仓库**：两者同名 **DataCardForge**。
-**作者与权属**：`teglaven` · GPL-3.0 · 身份、时间线与提交锚点见 [`PROVENANCE.md`](PROVENANCE.md)。
+**作者与权属**：`DozenLow` · GPL-3.0 · 身份、时间线与提交锚点见 [`PROVENANCE.md`](PROVENANCE.md)。
 **当前实测状态**（2026-10-31 实测）：前端 581 个单元测试（14 个 opt-in 跳过）· 后端 8 个 ctest（4 个 opt-in）· 端到端 102 项检查，全绿。
 **尚未完成**：函数卡是半成品；连线的 hover 与断线编辑仍在路上——两者都在
 [状态与已知缺口](#状态与已知缺口)里写清楚了。
 
 ## 试一下
 
-**浏览器里直接玩（无需安装）**——<https://teglaven.github.io/DataCardForge/> 是前端的静态部署。把
+**浏览器里直接玩（无需安装）**——<https://dozenlow.github.io/DataCardForge/> 是前端的静态部署。把
 [`docs/sampleData/1.txt`](docs/sampleData/1.txt) 拖进画布，右键列头 →「画图」即可。文件加载与 9 种图表
 在那里都能用；C++ 计算服务不在静态托管上，函数卡会显示「后端不可达」横幅——这是设计里的可见降级，不是故障。
 演示地址需要先在 **Settings → Pages → Source: GitHub Actions** 开启一次，否则打开是 404。
@@ -247,16 +247,22 @@ schema v2 把依赖升成信封、把绑定挪到端口之后，连线一度退�
 
 | 组件 | 用途 | 备注 |
 |------|------|------|
-| React 19 + Vite 8 | UI 框架与构建 | TypeScript 7 `strict` |
-| ECharts 6 | 统计图表 | **SVG renderer**，矢量导出 |
+| React 19 + Vite 8 | UI 框架与构建 | TypeScript 7，`strict` |
+| ECharts 6.1 | 统计图表 | **SVG renderer**，真矢量导出 |
 | react-rnd | 卡片拖拽/缩放 | |
-| zustand | 状态管理（卡片表 + 依赖图） | |
+| zustand 5 | 状态管理（卡片表 + 依赖图） | |
 | @e965/xlsx | Excel 读取 | 按需加载 |
 | 自研虚拟滚动 | 大表渲染 | 无第三方依赖 |
 | Web Worker（`src/loaders/parse.worker.ts`） | 解析离开主线程 | 大文件加载时界面不冻结 |
-| **C++17 / g++ 15** | 计算后端语言 | CMake 4 + Ninja |
-| **Eigen 3.4** | 线性代数/矩阵运算 | Header-only，`/usr/include/eigen3` |
-| POSIX sockets | 后端 HTTP 服务 | 零第三方网络依赖 |
+| Node.js 22 | 前端运行时、开发服务器、CI | CI 固定 `node-version: 22`；按需 fuzz 门控需 `--experimental-transform-types` |
+| Vitest 5 + jsdom | 单元 / DOM 测试 | 581 个用例，14 个按需跳过 |
+| Playwright（Chromium） | 端到端冒烟 | 102 项检查，跑在 `vite preview` 上 |
+| **C++17**（实测 g++ 15） | 计算后端语言 | `CMAKE_CXX_STANDARD 17`，CMake 4.2 + Ninja |
+| **Eigen 3.4** | 线性代数/矩阵运算 | Header-only，`find_package(Eigen3 REQUIRED NO_MODULE)`，`/usr/include/eigen3` |
+| **原生 socket（POSIX / Winsock）** | 后端 HTTP 服务 | 零第三方网络依赖；Windows 上链接 `ws2_32` |
+| `dc_core` 静态库 | 后端共享代码 | 由 `dc_backend`、夹具运行器与 `dc_bench` 链接 |
+| `dc_bench`（std::chrono） | 引擎基准 | 对应 `bench/budgets.json`；不引入第三方基准框架 |
+| GitHub Actions | CI、多平台构建、Pages | `ci.yml` · `build-release.yml` · `static.yml` |
 
 ## 构建与运行
 
@@ -319,14 +325,19 @@ node scripts/smoke.mjs http://127.0.0.1:4173
 
 ### CI
 
-GitHub Actions 在每次 push/PR 时运行三个 job：
-1. **typecheck-and-test**：`npm ci` → typecheck → vitest → production build
-2. **backend-test**：`apt install toolchain` → cmake build → ctest（跨层夹具 + 节点注册表）
-3. **e2e-smoke**：Playwright Chromium 对 `vite preview` 做冒烟测试
+[`.github/workflows/`](.github/workflows/) 下有三个工作流：
 
-第四个 workflow [`.github/workflows/static.yml`](.github/workflows/static.yml) 在每次触及 `web/` 的 push 上把前端发布到
-GitHub Pages——也就是上面那个在线演示。它需要一次性开关：**Settings → Pages → Source: GitHub Actions**，
-否则演示链接是 404。
+1. **[`ci.yml`](.github/workflows/ci.yml)** —— 每次 push 到 `main` 及每个 PR 触发，三个 job：
+   - `typecheck-and-test`：`npm ci` → typecheck → vitest → 生产构建
+   - `backend-test`：装工具链 → cmake 配置与构建 → ctest（跨层夹具 + 节点注册表）
+   - `e2e-smoke`：Playwright Chromium 对 `vite preview` 做冒烟
+2. **[`build-release.yml`](.github/workflows/build-release.yml)** —— push/PR 到 `main` 以及 `v*` tag 触发：
+   六个矩阵 job（Linux / macOS / Windows × Release / Debug）各自配置、构建并跑 ctest，再把各平台二进制
+   作为 artifact 上传。其中 `release` job 只在 `github.ref` 以 `refs/tags/v` 开头时运行，所以
+   **push `main` 不会发 Release**；推 tag 才会，发布说明从 `CHANGELOG.md` 提取。
+3. **[`static.yml`](.github/workflows/static.yml)** —— 只在触及 `web/**`（或工作流自身）的 push 上把前端
+   发布到 GitHub Pages，也就是上面那个在线演示。它需要一次性开关：
+   **Settings → Pages → Source: GitHub Actions**，否则演示链接是 404。
 
 ## 架构扩展点
 
@@ -369,7 +380,7 @@ GitHub Pages——也就是上面那个在线演示。它需要一次性开关�
 
 ## 长期规划
 
-> 以下内容仅为方向性设想，可能随时变动；如有建议，欢迎提 [issue](https://github.com/teglaven/DataCardForge/issues)。
+> 以下内容仅为方向性设想，可能随时变动；如有建议，欢迎提 [issue](https://github.com/DozenLow/DataCardForge/issues)。
 
 - [ ] **条件筛选卡**：按行/列谓词切割矩阵后再喂入函数卡
 - [ ] **扩展卡（ExtensionCard）**：专用于服务特定卡片的**快速参数设置 + 实时预览**面板，只能通过父卡片创建并视其为父窗口、随父卡关闭；解决"卡片一多、参数设置分散"的瓶颈（支持滚轮快速调参 + 实时预览，如分段拟合项数、平滑窗口等）。

@@ -1,5 +1,7 @@
 # 架构权衡：前端选型 ImGui vs Web
 
+中文 | [English](frontend-imgui-vs-web.en.md)
+
 - **状态**：✅ 已收敛 —— 结论为 **Web**，见 [前端选型定为 Web](../decisions/2026-10-14-frontend-web-chosen.md)（2026-10-14）
 - **标签**：`#架构 #前端选型 #权衡`
 

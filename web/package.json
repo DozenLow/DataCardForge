@@ -5,14 +5,14 @@
   "type": "module",
   "description": "DataCardForge — web frontend (card-based data matrix workbench)",
   "license": "GPL-3.0-only",
-  "homepage": "https://teglaven.github.io/DataCardForge/",
+  "homepage": "https://dozenlow.github.io/DataCardForge/",
   "repository": {
     "type": "git",
-    "url": "https://github.com/teglaven/DataCardForge.git",
+    "url": "https://github.com/DozenLow/DataCardForge.git",
     "directory": "web"
   },
   "bugs": {
-    "url": "https://github.com/teglaven/DataCardForge/issues"
+    "url": "https://github.com/DozenLow/DataCardForge/issues"
   },
   "scripts": {
     "dev": "vite",

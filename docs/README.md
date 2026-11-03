@@ -1,5 +1,7 @@
 # docs/ — 设计记录（Obsidian vault）
 
+[English](README.en.md) | 中文
+
 本目录是项目的**设计记录**，不是产品文档的入口。它记录"为什么"和"想过的路"，产品说明记录"是什么"：
 
 - 产品说明与快速开始：仓库根 [`README.md`](../README.md) / [`README.zh-CN.md`](../README.zh-CN.md)
@@ -10,7 +12,7 @@
 ## 导航
 
 - 🧭 **项目演进史** (`history.md`) — 把决策/日志/踩坑/审计按因果链串成一条历史，含四个时代、四条螺旋线、教训清单与文档不一致盘点
-  - [项目演进史（DataCardForge）](history.md) ← **先读这篇再进各分册**
+  - [项目演进史（DataCardForge）](history.md) · [EN](history.en.md) ← **先读这篇再进各分册**
 - 📌 **决策记录** (`decisions/`) — 已经拍板、影响后续的方向性结论
   - [回归卡改名「关系枚举」：选列变成端口绑定，列头带上 X : Y](decisions/2026-10-31-relation-enum-card.md) ← **最新：卡片终于能选列，表格横向滚动对齐也修了**
   - [数据卡可以换文件：换数据自动跟随，切文件仍显式重指向](decisions/2026-10-31-file-replacement.md) ← **保存的工作区终于能当模板复用**
@@ -29,9 +31,10 @@
   - [后端先行，前端搁置](decisions/2026-08-07-backend-first-frontend-paused.md)（其中"前端暂停"部分已被上面取代；"后端先行"部分被 10-17 决策复活并扩展）
   - [连线从属原则](decisions/2026-08-07-connection-subordination.md)
 - 📐 **规范** (`architecture/`) — 已定稿、实现必须服从的契约（改它 = 改代码前先改这里）
-  - [后端协议 v1](architecture/backend-protocol-v1.md) ← 后端计算的传输/资源/错误/夹具契约；阶段 1–2 已按此实现，端点与帧格式以本文为准
+  - [后端协议 v1](architecture/backend-protocol-v1.md) · [EN](architecture/backend-protocol-v1.en.md) ← 后端计算的传输/资源/错误/夹具契约；阶段 1–2 已按此实现，端点与帧格式以本文为准
+  - [端口语义 v1](architecture/port-semantics-v1.md) · [EN](architecture/port-semantics-v1.en.md) ← 端口的身份、绑定与跨层语义契约
 - ⚖️ **架构权衡** (`architecture/`) — 历史对比文档，结论多数已被决策追记取代；仅当想理解"为什么不选另一头"时阅读
-  - [前端选型：ImGui vs Web](architecture/frontend-imgui-vs-web.md)（✅ 已收敛 → 选 Web，见 10-14 决策；对比表仍可复用）
+  - [前端选型：ImGui vs Web](architecture/frontend-imgui-vs-web.md) · [EN](architecture/frontend-imgui-vs-web.en.md)（✅ 已收敛 → 选 Web，见 10-14 决策；对比表仍可复用）
 - 🕳️ **踩坑记录** (`lessons/`) — 实测中遇到的坑与规避方法
   - [ImPlot v1.1 API 大改](lessons/implot-v1.1-api.md)
   - [ImGui Docking 下 PushStyleColor 的坑](lessons/imgui-docking-pushstylecolor.md)
@@ -57,3 +60,13 @@
    此前"文档须指明对应 `src/widgets/` 文件"的约定随之废止——现在连线几何、红蓝灰配色、关闭保护等规则的
    **唯一权威定义是 TypeScript 源码与其测试**。历史文档中残留的 C++ 文件名不再指向可打开的文件，
    只作为"这条规则从哪来"的出处标注保留。
+
+## 语言策略
+
+- **规范文档双语**：`docs/README.md`、`architecture/` 三份、`history.md` 都提供英文版——中文是 `X.md`，
+  英文是同目录的 `X.en.md`，两份内容一一对应，**以中文为原始版本**；两者冲突时以 `X.md` 为准，并请顺手修掉 `X.en.md`。
+- **历史记录只有中文**：`decisions/`、`log/`、`lessons/`、`audits/`、`tasks/` 记录的是"当时那天怎么想的"，
+  回溯翻译不增值，因此不提供英文版；需要时按篇再译。
+- **新增文档的要求**：新的规范类文档必须同时给出 `X.en.md`；新的决策/日志不需要。
+- **根目录产品文档用另一套命名**：英文 `README.md` / `CONTRIBUTING.md` / `SECURITY.md` / `CHANGELOG.md`，
+  中文 `README.zh-CN.md` 等（后缀是 `.zh-CN.md`，与这里的 `.en.md` 方向相反）。

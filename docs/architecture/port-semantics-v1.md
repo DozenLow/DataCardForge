@@ -1,5 +1,7 @@
 # 端口语义规格 v1（port-semantics-v1）
 
+中文 | [English](port-semantics-v1.en.md)
+
 - **日期**：2026-10-26
 - **状态**：🔒 语义已锁定 / **字节布局未冻结**
 - **定位**：函数卡端口的**单一事实源**。`FunctionSignature` 注册表（内置函数）、未来的

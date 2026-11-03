@@ -6,8 +6,8 @@
 | 项 | 值 |
 |---|---|
 | 项目名 | DataCardForge |
-| 作者 / 著作权人 | **teglaven** `<57093716+teglaven@users.noreply.github.com>` |
-| GitHub | <https://github.com/teglaven> |
+| 作者 / 著作权人 | **DozenLow** `<57093716+DozenLow@users.noreply.github.com>` |
+| GitHub | <https://github.com/DozenLow> |
 | 许可证 | GPL-3.0（见 [`LICENSE`](LICENSE)） |
 | 项目起点 | 2026-07 原型 → 2026-08-07 Qt/C++ 单体版 → 2026-10-14 改制 web-first |
 
