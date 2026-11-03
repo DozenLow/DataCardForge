@@ -9,7 +9,7 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
-find_package(Eigen3 3.4 REQUIRED NO_MODULE)
+find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(Threads REQUIRED)
 
 # ── build id ───────────────────────────────────────────────────────────
@@ -54,6 +54,9 @@ add_executable(dc_backend src/http_server.cpp src/main.cpp ${DC_SHA_HEADER})
 target_include_directories(dc_backend PRIVATE ${CMAKE_BINARY_DIR}/generated)
 add_dependencies(dc_backend dc_build_sha)
 target_link_libraries(dc_backend PRIVATE dc_core Threads::Threads)
+if(WIN32)
+  target_link_libraries(dc_backend PRIVATE ws2_32)
+endif()
 
 # Fixture runner: the same xlayer JSON that gates the TS reference (stage-0 contract).
 add_executable(dc_fixture_run tests/fixture_runner.cpp)
