@@ -13,6 +13,13 @@
 
 namespace dc {
 
+// Platform-portable socket handle type.
+#ifdef _WIN32
+using socket_t = unsigned long long;  // matches SOCKET (UINT_PTR) on 64-bit Windows
+#else
+using socket_t = int;
+#endif
+
 struct HttpRequest {
   std::string method;
   std::string path;                       // without query
@@ -40,7 +47,7 @@ class HttpServer {
 
  private:
   HttpResponse route(const HttpRequest& req);
-  void handleConnection(int fd);
+  void handleConnection(socket_t fd);
 
   int port_;
   MatrixStore* store_;
