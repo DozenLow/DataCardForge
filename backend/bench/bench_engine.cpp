@@ -1,4 +1,3 @@
-// dc_bench — 引擎层性能门禁（决策见 docs/decisions/2026-10-29-perf-gate.md）。
 //
 // 直接调 ExprEngine::evaluate（逐元素）与 ExprEngine::evaluateMatrix（矩阵），不经 HTTP、
 // 不起服务、不读真实数据文件：测的是「公式 + 数据 → 结果」这条路径本身，不是外面那层传输。
@@ -269,7 +268,11 @@ std::string machineName() {
 std::string utcNow() {
   const std::time_t t = std::time(nullptr);
   std::tm tm{};
+#ifdef _WIN32
+  gmtime_s(&tm, &t);
+#else
   gmtime_r(&t, &tm);
+#endif
   char buf[32] = {0};
   std::strftime(buf, sizeof buf, "%Y-%m-%dT%H:%M:%SZ", &tm);
   return buf;
