@@ -22,6 +22,32 @@ set(CMAKE_EXE_LINKER_FLAGS_ASSERTS "" CACHE STRING "Linker flags for the Asserts
 find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(Threads REQUIRED)
 
+# ── Windows runtime: link everything into the exe ───────────────────────
+# A MinGW-built exe imports libstdc++-6.dll, libgcc_s_seh-1.dll and libwinpthread-1.dll by
+# default, and a stock Windows machine has none of them. The failure the 0.1.1 Windows zip
+# produced is the nastier half of that: the exe *finds* some unrelated libstdc++-6.dll on PATH
+# (shipped by another tool) and dies with "the procedure entry point ... could not be located
+# in dc_backend.exe". Matching the version is not enough either — mingw-w64 ships two
+# incompatible flavours of libstdc++ (UCRT and MSVCRT builds spell mbstate_t differently, so
+# even the same GCC version exports different symbol names, which is what
+# ...do_unshiftER9_Mbstatet... reveals). The only safe target is "imports nothing but Windows
+# system DLLs". `-static` is used rather than just -static-libstdc++/-static-libgcc because it
+# must cover winpthread too (std::thread). This mirrors what the Linux jobs pass to the linker.
+# The rule below lives here rather than only in the workflow: it was passed from the workflow
+# once as -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded, which is meaningless for MinGW, so the
+# release notes claimed a self-contained binary while the shipped exe still needed DLLs.
+if(MSVC)
+  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+endif()
+if(UNIX AND NOT APPLE)
+  # Same guarantee on Linux: libstdc++/libgcc into the binary (macOS ships libc++ itself).
+  add_link_options(-static-libstdc++ -static-libgcc)
+endif()
+
+if(MINGW)
+  add_link_options(-static -static-libgcc -static-libstdc++)
+endif()
+
 # ── build id ───────────────────────────────────────────────────────────
 # `/api/hello` reports the commit the binary was built from, so the value has to be produced
 # by the BUILD, not by the configure step: a configure-time `git rev-parse` freezes at the

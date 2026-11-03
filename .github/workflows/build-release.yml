@@ -207,13 +207,40 @@ jobs:
           echo "CMAKE_TOOLCHAIN_FILE=$vcpkgRoot\scripts\buildsystems\vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Configure backend (Release)
-        run: cmake -S backend -B backend/build -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_TOOLCHAIN_FILE="${{ env.CMAKE_TOOLCHAIN_FILE }}"
+        # No -DCMAKE_MSVC_RUNTIME_LIBRARY here: this job compiles with MinGW, not MSVC, and that
+        # knob is silently ignored there — which is how "the runtime is linked statically" ended up
+        # true only in the docs while the exe kept importing libstdc++-6.dll. The runtime is made
+        # self-contained in backend/CMakeLists.txt (`-static`), and the import check below enforces it.
+        run: cmake -S backend -B backend/build -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="${{ env.CMAKE_TOOLCHAIN_FILE }}"
 
       - name: Build backend
         run: cmake --build backend/build --config Release
 
       - name: Run tests
         run: ctest --test-dir backend/build --output-on-failure
+
+      - name: Verify the exe imports no MinGW runtime DLLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Take objdump from the MinGW CMake actually used, not from PATH blindly.
+          cxx="$(grep -m1 '^CMAKE_CXX_COMPILER:FILEPATH=' backend/build/CMakeCache.txt | cut -d= -f2 | tr '\\' '/')"
+          objdump="$(dirname "$cxx")/objdump.exe"
+          [ -x "$objdump" ] || objdump="$(command -v objdump)"
+          deps="$("$objdump" -p backend/build/dc_backend.exe | awk '/DLL Name/ {print $3}')"
+          echo "imports:"; echo "$deps"
+          # A release user has none of these; a stale copy found on PATH is exactly what
+          # "procedure entry point ... could not be located in dc_backend.exe" looks like.
+          if printf '%s\n' "$deps" | grep -Ei '^(libstdc\+\+-6|libgcc_s_(seh|dw2)-1|libwinpthread-1|libssp-0)\.dll$'; then
+            echo "::error::the exe still imports the MinGW runtime - it will not start on a clean Windows machine"
+            exit 1
+          fi
+          # And prove it: run the exe with MinGW stripped from PATH, which is what a user's
+          # machine looks like. --help exits 0 as soon as the image has loaded.
+          tmp="$(mktemp -d)"
+          cp backend/build/dc_backend.exe "$tmp/"
+          env PATH="/c/Windows/system32:/c/Windows" "$tmp/dc_backend.exe" --help >/dev/null
+          echo "clean-PATH smoke run: ok"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
@@ -253,6 +280,27 @@ jobs:
 
       - name: Run tests
         run: ctest --test-dir backend/build --output-on-failure
+
+      - name: Verify the exe imports no MinGW runtime DLLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Take objdump from the MinGW CMake actually used, not from PATH blindly.
+          cxx="$(grep -m1 '^CMAKE_CXX_COMPILER:FILEPATH=' backend/build/CMakeCache.txt | cut -d= -f2 | tr '\\' '/')"
+          objdump="$(dirname "$cxx")/objdump.exe"
+          [ -x "$objdump" ] || objdump="$(command -v objdump)"
+          deps="$("$objdump" -p backend/build/dc_backend.exe | awk '/DLL Name/ {print $3}')"
+          echo "imports:"; echo "$deps"
+          if printf '%s\n' "$deps" | grep -Ei '^(libstdc\+\+-6|libgcc_s_(seh|dw2)-1|libwinpthread-1|libssp-0)\.dll$'; then
+            echo "::error::the exe still imports the MinGW runtime - it will not start on a clean Windows machine"
+            exit 1
+          fi
+          # And prove it: run the exe with MinGW stripped from PATH, which is what a user's
+          # machine looks like. --help exits 0 as soon as the image has loaded.
+          tmp="$(mktemp -d)"
+          cp backend/build/dc_backend.exe "$tmp/"
+          env PATH="/c/Windows/system32:/c/Windows" "$tmp/dc_backend.exe" --help >/dev/null
+          echo "clean-PATH smoke run: ok"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
@@ -348,13 +396,35 @@ jobs:
           echo "CMAKE_TOOLCHAIN_FILE=$vcpkgRoot\scripts\buildsystems\vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Configure backend (Asserts)
-        run: cmake -S backend -B backend/build -G "Ninja" -DCMAKE_BUILD_TYPE=Asserts -DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded -DCMAKE_TOOLCHAIN_FILE="${{ env.CMAKE_TOOLCHAIN_FILE }}"
+        # MinGW job: -DCMAKE_MSVC_RUNTIME_LIBRARY would be ignored here (see the Release job).
+        run: cmake -S backend -B backend/build -G "Ninja" -DCMAKE_BUILD_TYPE=Asserts -DCMAKE_TOOLCHAIN_FILE="${{ env.CMAKE_TOOLCHAIN_FILE }}"
 
       - name: Build backend
         run: cmake --build backend/build
 
       - name: Run tests
         run: ctest --test-dir backend/build --output-on-failure
+
+      - name: Verify the exe imports no MinGW runtime DLLs
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Take objdump from the MinGW CMake actually used, not from PATH blindly.
+          cxx="$(grep -m1 '^CMAKE_CXX_COMPILER:FILEPATH=' backend/build/CMakeCache.txt | cut -d= -f2 | tr '\\' '/')"
+          objdump="$(dirname "$cxx")/objdump.exe"
+          [ -x "$objdump" ] || objdump="$(command -v objdump)"
+          deps="$("$objdump" -p backend/build/dc_backend.exe | awk '/DLL Name/ {print $3}')"
+          echo "imports:"; echo "$deps"
+          if printf '%s\n' "$deps" | grep -Ei '^(libstdc\+\+-6|libgcc_s_(seh|dw2)-1|libwinpthread-1|libssp-0)\.dll$'; then
+            echo "::error::the exe still imports the MinGW runtime - it will not start on a clean Windows machine"
+            exit 1
+          fi
+          # And prove it: run the exe with MinGW stripped from PATH, which is what a user's
+          # machine looks like. --help exits 0 as soon as the image has loaded.
+          tmp="$(mktemp -d)"
+          cp backend/build/dc_backend.exe "$tmp/"
+          env PATH="/c/Windows/system32:/c/Windows" "$tmp/dc_backend.exe" --help >/dev/null
+          echo "clean-PATH smoke run: ok"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v6

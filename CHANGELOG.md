@@ -7,13 +7,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.2] - 2026-11-03
 
 ### Fixed
 - Connections were clipped by the connection layer's own SVG viewport: below 100% zoom the
   box covered only one screenful of *plane* units, so a wire leaving that area stopped in
   mid-air and distant card pairs looked unconnected. The layer now lets its content overflow;
   the canvas viewport is the only clip
+- The Windows archives could not start on a stock Windows machine: the exe still imported
+  MinGW's `libstdc++-6.dll` / `libgcc_s_seh-1.dll` / `libwinpthread-1.dll`, so Windows resolved a
+  mismatched copy from `PATH` and died with "the procedure entry point ...`do_unshift`... could
+  not be located in `dc_backend.exe`" (mingw-w64's UCRT and MSVCRT libstdc++ builds do not even
+  spell `mbstate_t` the same way, so an identical version number is not interchangeable). The
+  runtime is now linked into the exe with `-static`, and the Windows CI jobs fail the build if a
+  MinGW DLL reappears in the import table
 
 ## [0.1.1] - 2026-11-03
 
@@ -30,15 +37,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   via `.github/workflows/build-release.yml`
 - Automated build-and-release workflow: pushing a `v*` tag publishes the platform
   artifacts with release notes extracted from this file
-- Release pages now explain every asset (`standard` / `perf` / `debug`),
+- Release pages now explain every asset (`standard` / `fullperformance` / `debug`),
   and ship `README.txt` + `SHA256SUMS.txt` next to the archives
 
 ### Changed
 - Release assets are named `standard` / `fullperformance` / `debug` and ship as
   `datacardforge-<os>-<tier>.zip`: the recommended download carries assertions,
   `fullperformance` is the benchmark tier, and `debug` is only built for tags
-- Release binaries carry their C++ runtime statically (Linux `-static-libstdc++ -static-libgcc`,
-  Windows `/MT`), so installing the packages requires no extra runtime
+- Linux and macOS release binaries carry their C++ runtime statically
+  (`-static-libstdc++ -static-libgcc`), so installing the packages requires no extra runtime
 - Documentation: the retired "B-plan" codename was replaced by the plain
   "backend-owned compute" wording (comments, docs and test titles only)
 - CI: Pages deployment consolidated on `static.yml`; the duplicate `pages.yml` was removed
@@ -52,20 +59,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Security
-
-### Release assets — what the three tiers mean
-
-Every archive is the backend binary **plus a `web/` directory**: unzip it, run it, and the UI opens
-at `http://127.0.0.1:37811/` from the same origin. Nothing else has to be installed.
-
-| Archive | Build | Speed | Assertions | Pick it when |
-|---|---|---|---|---|
-| `dc_backend-<os>-standard.zip` | `-O2 -g`, `NDEBUG` undefined | ~90% of `perf` | **on** | the default: a wrong result stops at the violated contract instead of being reported as a number |
-| `dc_backend-<os>-perf.zip` | `-O3 -DNDEBUG` | 100% | off | benchmarks, or when the last ~10% matters |
-| `dc_backend-<os>-debug.zip` | `-O0 -g` | 10–50% | on | reproducing a defect under a debugger; built for tags only |
-
-Compared with 0.1.0 the binaries now also carry their C++ runtime statically and serve the UI
-themselves — 0.1.0 shipped a bare API-only executable.
 
 ## [0.1.0] - 2026-10-31
 

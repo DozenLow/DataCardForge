@@ -52,8 +52,14 @@ README.txt            # 本文件
 |---|---|
 | Linux | 仅 glibc ≥ 2.39（Ubuntu 24.04 / Debian 13 及以上）；libstdc++ 与 libgcc 已静态链接进二进制 |
 | macOS | 系统自带 libc++，无需额外安装 |
-| Windows | MSVC 运行时已用 `/MT` 静态链接，**不需要**安装 VC++ Redistributable |
+| Windows | C++ 运行库已**整体链接进 exe**（`libstdc++` / `libgcc` / `winpthread` 都不需要外部 DLL），只依赖系统自带 DLL，**不需要**装 VC++ Redistributable 或任何 MinGW 组件 |
 | 全部 | Eigen 是 header-only，已编译进二进制，不需要单独安装 |
+
+> **如果旧包弹出「无法定位程序输入点 …`do_unshift`… 于动态链接库 `dc_backend.exe` 上」**：
+> 那是因为旧包的 exe 仍然动态依赖 MinGW 的 `libstdc++-6.dll`，而系统从 `PATH` 里抓到了一个
+> 口味或版本不匹配的副本（mingw-w64 的 UCRT 版与 MSVCRT 版 libstdc++ 连 `mbstate_t` 的符号名都不同，
+> 所以版本号一样也可能不兼容）。当前包已把运行时全部静态链接，不会再出现；若你手工解压过旧包，
+> 请把同目录残留的 `libstdc++-6.dll`、`libgcc_s_seh-1.dll`、`libwinpthread-1.dll` 删掉。
 
 ## 校验下载
 
@@ -123,8 +129,15 @@ When `web/` is missing the backend still starts, serving the API only, and says 
 |---|---|
 | Linux | Only glibc ≥ 2.39 (Ubuntu 24.04 / Debian 13 or newer); libstdc++ and libgcc are linked statically into the binary |
 | macOS | The system provides libc++; nothing to install |
-| Windows | The MSVC runtime is linked statically with `/MT`, so **no** VC++ Redistributable is required |
+| Windows | The C++ runtime is linked **into the exe** (no `libstdc++` / `libgcc` / `winpthread` DLL is needed), so all it uses are Windows system DLLs — no VC++ Redistributable and no MinGW components are required |
 | All | Eigen is header-only and compiled in — nothing to install separately |
+
+> **If an older archive pops up "the procedure entry point …`do_unshift`… could not be located in `dc_backend.exe`"**:
+> that archive still imported MinGW's `libstdc++-6.dll`, and Windows resolved an unrelated copy from `PATH`
+> whose flavour or version did not match (mingw-w64's UCRT and MSVCRT libstdc++ builds do not even spell
+> `mbstate_t` the same way, so an identical version number can still be incompatible). The runtime is now
+> linked entirely into the exe, so it cannot recur; if you extracted an old archive by hand, delete the
+> leftover `libstdc++-6.dll`, `libgcc_s_seh-1.dll` and `libwinpthread-1.dll` beside it.
 
 ## Verify the download
 

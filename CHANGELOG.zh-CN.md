@@ -7,12 +7,17 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
-## 未发布
+## [0.1.2] - 2026-11-03
 
 ### 修复
 - 连线被连线层自己的 SVG 视窗裁掉了：缩到 100% 以下时，这个视窗只覆盖「一屏」的平面坐标，
   于是一离开这片区域线就在半空截断、相距较远的卡片看起来根本没连上。现在允许内容溢出，
   只由画布视口负责裁剪
+- Windows 包在普通 Windows 机器上根本起不来：exe 仍然动态依赖 MinGW 的 `libstdc++-6.dll` /
+  `libgcc_s_seh-1.dll` / `libwinpthread-1.dll`，系统从 `PATH` 里抓到一个不匹配的副本后直接报
+  「无法定位程序输入点 …`do_unshift`… 于动态链接库 `dc_backend.exe` 上」（mingw-w64 的 UCRT 版与
+  MSVCRT 版 libstdc++ 连 `mbstate_t` 的符号名都不同，所以版本号相同也不能互换）。现在用 `-static`
+  把运行时全部链接进 exe，并且 Windows CI 一旦发现导入表里又出现 MinGW DLL 就直接判失败
 
 ## [0.1.1] - 2026-11-03
 
@@ -25,13 +30,13 @@
 - 后端多平台构建（Linux、macOS、Windows），每个平台都跑测试，见
   `.github/workflows/build-release.yml`
 - 自动构建与发布工作流：推送 `v*` tag 时发布各平台产物，发布说明从本文件提取
-- 发行页逐项说明每个资产（`standard` / `perf` / `debug`），
+- 发行页逐项说明每个资产（`standard` / `fullperformance` / `debug`），
   并在压缩包旁边提供 `README.txt` 与 `SHA256SUMS.txt`
 
 ### 变更
 - 发行资产改名为 `datacardforge-<os>-<档位>.zip`，档位为 `standard` / `fullperformance` / `debug`：
   推荐下载档带断言，`fullperformance` 是全性能基准档，`debug` 只在打 tag 时构建
-- 发行版二进制改为静态携带 C++ 运行时（Linux `-static-libstdc++ -static-libgcc`，Windows `/MT`），
+- 发行版二进制改为静态携带 C++ 运行时（Linux 与 macOS 用 `-static-libstdc++ -static-libgcc`），
   用户安装时无需额外运行时
 - 文档：移除已退役的「B 方案」代号，统一改为「后端持有计算」的直接表述
   （只动注释、文档与测试标题）
@@ -46,19 +51,6 @@
 ### 移除
 
 ### 安全
-
-### 发行资产：三档意味着什么
-
-每个包都是「后端二进制 + `web/` 目录」：解压、运行，界面就在 `http://127.0.0.1:37811/` 同源打开，
-不需要另装任何东西。
-
-| 资产 | 构建 | 速度 | 断言 | 什么时候选 |
-|---|---|---|---|---|
-| `dc_backend-<os>-standard.zip` | `-O2 -g`，不定义 `NDEBUG` | 约为 `perf` 的 90% | **开** | 默认选它：算错时会在违约点直接停下，而不是把错数字当结果报出来 |
-| `dc_backend-<os>-perf.zip` | `-O3 -DNDEBUG` | 100% | 关 | 做基准测试，或就差最后那 ~10% 性能 |
-| `dc_backend-<os>-debug.zip` | `-O0 -g` | 10–50% | 开 | 在调试器里复现缺陷；仅 tag 构建 |
-
-与 0.1.0 相比，二进制现在还静态携带 C++ 运行时、并且自己提供界面——0.1.0 发布的是一个只有 API 的可执行文件。
 
 ## [0.1.0] - 2026-10-31
 
