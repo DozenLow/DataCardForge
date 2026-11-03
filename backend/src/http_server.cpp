@@ -1,11 +1,27 @@
 #include "http_server.h"
 #include "build_sha.h"  // generated at build time
 
-#include <arpa/inet.h>
-#include <netinet/in.h>
-#include <netinet/tcp.h>
-#include <sys/socket.h>
-#include <unistd.h>
+#ifdef _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <winsock2.h>
+#  include <ws2tcpip.h>
+#  ifndef MSG_NOSIGNAL
+#    define MSG_NOSIGNAL 0
+#  endif
+#  define dc_close_socket closesocket
+#else
+#  include <arpa/inet.h>
+#  include <netinet/in.h>
+#  include <netinet/tcp.h>
+#  include <sys/socket.h>
+#  include <unistd.h>
+#  define dc_close_socket close
+#endif
 
 #include <algorithm>
 #include <charconv>
@@ -83,11 +99,11 @@ bool parseHexSize(std::string_view text, size_t* out) {
   return true;
 }
 
-long parseId(const std::string& s) {
+int64_t parseId(const std::string& s) {
   long long value = 0;
   const auto res = std::from_chars(s.data(), s.data() + s.size(), value, 10);
   if (res.ec != std::errc() || res.ptr != s.data() + s.size()) return -1;
-  return static_cast<long>(value);
+  return static_cast<int64_t>(value);
 }
 
 HttpResponse jsonError(int status, const std::string& code, Json params = Json::object()) {
@@ -104,12 +120,12 @@ enum class ReadStatus { Ok, Closed, BadRequest, TooLarge };
 // Reads exactly one HTTP/1.1 request. Never throws: every numeric field goes through
 // from_chars and the whole routine is additionally guarded by a catch-all, because this
 // runs on a detached per-connection thread where an escaping exception kills the process.
-ReadStatus readRequestImpl(int fd, HttpRequest* req) {
+ReadStatus readRequestImpl(socket_t fd, HttpRequest* req) {
   std::string buf;
   char tmp[8192];
   size_t headerEnd = std::string::npos;
   while (headerEnd == std::string::npos) {
-    const ssize_t n = recv(fd, tmp, sizeof tmp, 0);
+    const int n = recv(fd, tmp, sizeof tmp, 0);
     if (n <= 0) return ReadStatus::Closed;
     buf.append(tmp, static_cast<size_t>(n));
     headerEnd = buf.find("\r\n\r\n");
@@ -144,7 +160,7 @@ ReadStatus readRequestImpl(int fd, HttpRequest* req) {
     for (;;) {
       size_t eol = body.find("\r\n", i);
       while (eol == std::string::npos) {
-        const ssize_t n = recv(fd, tmp, sizeof tmp, 0);
+        const int n = recv(fd, tmp, sizeof tmp, 0);
         if (n <= 0) return ReadStatus::Closed;
         body.append(tmp, static_cast<size_t>(n));
         if (body.size() > kMaxBodyBytes + kMaxHeaderBytes) return ReadStatus::TooLarge;
@@ -155,7 +171,7 @@ ReadStatus readRequestImpl(int fd, HttpRequest* req) {
       if (size == 0) break;
       if (size > kMaxBodyBytes) return ReadStatus::TooLarge;
       while (body.size() < eol + 2 + size + 2) {
-        const ssize_t n = recv(fd, tmp, sizeof tmp, 0);
+        const int n = recv(fd, tmp, sizeof tmp, 0);
         if (n <= 0) return ReadStatus::Closed;
         body.append(tmp, static_cast<size_t>(n));
         if (body.size() > kMaxBodyBytes + kMaxHeaderBytes) return ReadStatus::TooLarge;
@@ -168,7 +184,7 @@ ReadStatus readRequestImpl(int fd, HttpRequest* req) {
   } else {
     if (haveContentLength && contentLength > kMaxBodyBytes) return ReadStatus::TooLarge;
     while (body.size() < contentLength) {
-      const ssize_t n = recv(fd, tmp, sizeof tmp, 0);
+      const int n = recv(fd, tmp, sizeof tmp, 0);
       if (n <= 0) return ReadStatus::Closed;
       body.append(tmp, static_cast<size_t>(n));
       if (body.size() > contentLength) break;
@@ -203,7 +219,7 @@ ReadStatus readRequestImpl(int fd, HttpRequest* req) {
   return ReadStatus::Ok;
 }
 
-ReadStatus readRequest(int fd, HttpRequest* req) {
+ReadStatus readRequest(socket_t fd, HttpRequest* req) {
   try {
     return readRequestImpl(fd, req);
   } catch (...) {
@@ -212,16 +228,16 @@ ReadStatus readRequest(int fd, HttpRequest* req) {
   }
 }
 
-void writeAll(int fd, const char* data, size_t len) {
+void writeAll(socket_t fd, const char* data, size_t len) {
   size_t sent = 0;
   while (sent < len) {
-    const ssize_t n = send(fd, data + sent, len - sent, MSG_NOSIGNAL);
+    const int n = send(fd, data + sent, len - sent, MSG_NOSIGNAL);
     if (n <= 0) return;
     sent += static_cast<size_t>(n);
   }
 }
 
-void sendResponse(int fd, HttpResponse& res, bool headersOnly) {
+void sendResponse(socket_t fd, HttpResponse& res, bool headersOnly) {
   std::string payload;
   if (res.binary) {
     payload = *res.binary;
@@ -334,7 +350,7 @@ double cellValue(const Json& v, bool* ok) {
 }
 
 // /api/matrices/{id}[/suffix] → id + "/suffix" ("" when absent).
-bool splitMatrixPath(const std::string& path, long* id, std::string* suffix) {
+bool splitMatrixPath(const std::string& path, int64_t* id, std::string* suffix) {
   static const std::string prefix = "/api/matrices/";
   if (path.rfind(prefix, 0) != 0) return false;
   const std::string rest = path.substr(prefix.size());
@@ -378,7 +394,7 @@ std::string encodeMatrixFrame(const std::vector<std::vector<double>>& columns,
 // ── routing ────────────────────────────────────────────────────────────
 
 HttpResponse HttpServer::route(const HttpRequest& req) {
-  auto qint = [&](const char* key, long fallback) {
+  auto qint = [&](const char* key, int64_t fallback) {
     auto it = req.query.find(key);
     return it == req.query.end() ? fallback : parseId(it->second);
   };
@@ -453,7 +469,7 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
     return jsonOk(Json::object({{"matrixId", Json(static_cast<int64_t>(id))}, {"revision", Json(1)}}));
   }
 
-  long matrixId = -1;
+  int64_t matrixId = -1;
   std::string matrixSuffix;
   const bool isMatrixPath = splitMatrixPath(req.path, &matrixId, &matrixSuffix);
 
@@ -473,11 +489,11 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
     });
     if (!found)
       return jsonError(404, "unknownMatrix", Json::object({{"matrixId", Json(matrixId)}}));
-    const long start = qint("start", 0);
-    long count = qint("count", 500);
-    count = std::min<long>(std::max(0L, count), 5000);
+    const int64_t start = qint("start", 0);
+    int64_t count = qint("count", 500);
+    count = std::min<int64_t>(std::max<int64_t>(0, count), 5000);
     std::vector<std::vector<double>> window;
-    const size_t rows = store_->window(matrixId, static_cast<size_t>(std::max(0L, start)),
+    const size_t rows = store_->window(matrixId, static_cast<size_t>(std::max<int64_t>(0, start)),
                                        static_cast<size_t>(count), &window);
     HttpResponse res;
     res.status = 200;
@@ -627,7 +643,7 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
   if (req.path.rfind("/api/nodes/", 0) == 0) {
     const std::string rest = req.path.substr(sizeof("/api/nodes/") - 1);
     const size_t slash = rest.find('/');
-    const long id = parseId(rest.substr(0, slash));
+    const int64_t id = parseId(rest.substr(0, slash));
     const std::string suffix = slash == std::string::npos ? std::string() : rest.substr(slash);
     if (id < 0) return jsonError(400, "unexpectedToken");
     const auto existing = nodes_->get(id);
@@ -732,11 +748,11 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
         for (const Column& col : m.columns()) names.push_back(Matrix::label(col));
       });
       if (!found) return jsonError(404, "unknownMatrix");
-      const long start = qint("start", 0);
-      long count = qint("count", 500);
-      count = std::min<long>(std::max(0L, count), 5000);
+      const int64_t start = qint("start", 0);
+      int64_t count = qint("count", 500);
+      count = std::min<int64_t>(std::max<int64_t>(0, count), 5000);
       std::vector<std::vector<double>> window;
-      const size_t rows = store_->window(node->resultMatrixId(), static_cast<size_t>(std::max(0L, start)),
+      const size_t rows = store_->window(node->resultMatrixId(), static_cast<size_t>(std::max<int64_t>(0, start)),
                                          static_cast<size_t>(count), &window);
       HttpResponse res;
       res.status = 200;
@@ -747,9 +763,9 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
   }
 
   if (req.path == "/api/events") {
-    long since = qint("since", 0);
-    long timeout = qint("timeout", 25);
-    auto events = bus_->wait(since, static_cast<int>(std::min(std::max(timeout, 1L), 60L) * 1000));
+    int64_t since = qint("since", 0);
+    int64_t timeout = qint("timeout", 25);
+    auto events = bus_->wait(since, static_cast<int>(std::min(std::max(timeout, INT64_C(1)), INT64_C(60)) * 1000));
     Json arr = Json::array();
     for (const auto& e : events) {
       Json ev = e.second;
@@ -765,34 +781,38 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
 // ── socket plumbing ────────────────────────────────────────────────────
 
 bool HttpServer::serve() {
-  int srv = socket(AF_INET, SOCK_STREAM, 0);
-  if (srv < 0) return false;
+#ifdef _WIN32
+  WSADATA wsa;
+  if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return false;
+#endif
+  socket_t srv = socket(AF_INET, SOCK_STREAM, 0);
+  if (srv == (socket_t)(-1)) return false;
   int one = 1;
-  setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+  setsockopt(srv, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&one), sizeof one);
   sockaddr_in addr{};
   addr.sin_family = AF_INET;
   addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
   addr.sin_port = htons(static_cast<uint16_t>(port_));
   if (bind(srv, reinterpret_cast<sockaddr*>(&addr), sizeof addr) < 0) {
-    close(srv);
+    dc_close_socket(srv);
     return false;
   }
   if (listen(srv, 64) < 0) {
-    close(srv);
+    dc_close_socket(srv);
     return false;
   }
   while (true) {
-    int fd = accept(srv, nullptr, nullptr);
-    if (fd < 0) continue;
+    socket_t fd = accept(srv, nullptr, nullptr);
+    if (fd == (socket_t)(-1)) continue;
     // Nagle off: responses are small control messages, and the client reads them serially.
     // Batching here buys nothing and costs one delayed-ACK round trip per request.
     int nodelay = 1;
-    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof nodelay);
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, reinterpret_cast<const char*>(&nodelay), sizeof nodelay);
     std::thread([this, fd] { handleConnection(fd); }).detach();
   }
 }
 
-void HttpServer::handleConnection(int fd) {
+void HttpServer::handleConnection(socket_t fd) {
   HttpRequest req;
   for (;;) {
     const ReadStatus status = readRequest(fd, &req);
@@ -816,7 +836,7 @@ void HttpServer::handleConnection(int fd) {
     sendResponse(fd, res, headersOnly);
     if (headersOnly) break;
   }
-  close(fd);
+  dc_close_socket(fd);
 }
 
 }  // namespace dc
