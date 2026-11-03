@@ -31,6 +31,14 @@ header → *Draw chart*. File loading and all nine chart types work there; the C
 so function cards show the "backend unreachable" banner — that is the designed visible degradation, not a bug.
 The demo URL only starts serving after Pages is enabled once: **Settings → Pages → Source: GitHub Actions**.
 
+**From a release archive, no toolchain** — unzip `dc_backend-<os>-standard.zip`, run the binary, and it
+serves the bundled `web/` from the same origin and opens the browser:
+
+```bash
+./dc_backend                 # serves the UI on http://127.0.0.1:37811/ and opens it
+./dc_backend --no-open       # serve only (CI, servers, remote shells)
+```
+
 **Locally, with the compute backend** — install once, then one command builds the C++ service and
 starts both servers:
 
@@ -373,6 +381,21 @@ Three workflows live in [`.github/workflows/`](.github/workflows/):
 3. **[`static.yml`](.github/workflows/static.yml)** — publishes the front end to GitHub Pages, only on
    pushes that touch `web/**` (or the workflow itself). This is what serves the live demo above; it needs
    a one-time switch, **Settings → Pages → Source: GitHub Actions**, otherwise the demo link 404s.
+
+### Release artifacts
+
+Pushing a `v*` tag publishes nine backend archives plus `README.txt` and `SHA256SUMS.txt`:
+
+| Asset | Build | What it is for |
+|---|---|---|
+| `dc_backend-<os>-standard.zip` | `-O2 -g`, `NDEBUG` **left undefined** → Eigen assertions on | **the one to download**: near-Release speed, but it stops at the first violated contract instead of quietly computing a wrong number |
+| `dc_backend-<os>-perf.zip` | `-O3 -DNDEBUG` | the performance ceiling on display — the tier the tests and the perf gate measure |
+| `dc_backend-<os>-debug.zip` | `-O0 -g` | reproducing a defect; 2–10× slower, never benchmark with it (built for tags only) |
+
+Each archive is the binary **plus `web/`**: unzip, run it, and it serves the UI from the same
+origin and opens the browser. Nothing needs to be installed: libstdc++/libgcc are linked statically
+on Linux, the MSVC runtime is linked statically (`/MT`) on Windows, and Eigen is header-only
+(compiled in, not shipped). Full asset guide: [`.github/release-assets.md`](.github/release-assets.md).
 
 ## Architecture Extension Points
 

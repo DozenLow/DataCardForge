@@ -1,7 +1,7 @@
 {
   "name": "datacardforge-web",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "description": "DataCardForge — web frontend (card-based data matrix workbench)",
   "license": "GPL-3.0-only",

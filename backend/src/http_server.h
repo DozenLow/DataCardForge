@@ -6,6 +6,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <utility>
 
 #include "json.h"
 #include "matrix_store.h"
@@ -39,20 +40,28 @@ class HttpServer {
  public:
   using Handler = std::function<HttpResponse(const HttpRequest&)>;
 
-  HttpServer(int port, MatrixStore* store, NodeRegistry* nodes, EventBus* bus)
-      : port_(port), store_(store), nodes_(nodes), bus_(bus) {}
+  HttpServer(int port, MatrixStore* store, NodeRegistry* nodes, EventBus* bus,
+             std::string webRoot = std::string())
+      : port_(port), store_(store), nodes_(nodes), bus_(bus), webRoot_(std::move(webRoot)) {}
 
   // Blocks forever. Returns false with an error string logged if bind fails.
   bool serve();
 
+  // Called once the listening socket is ready — used to open the UI in a browser.
+  void setOnReady(std::function<void()> cb) { onReady_ = std::move(cb); }
+
  private:
   HttpResponse route(const HttpRequest& req);
   void handleConnection(socket_t fd);
+  // Serves the built front end (index + assets) from webRoot_, with SPA fallback.
+  bool serveStatic(const HttpRequest& req, HttpResponse* res);
 
   int port_;
   MatrixStore* store_;
   NodeRegistry* nodes_;
   EventBus* bus_;
+  std::string webRoot_;                 // empty = API only
+  std::function<void()> onReady_;
 };
 
 // Encode one matrix window as a DCM2 binary frame (see backend-protocol-v1.md).

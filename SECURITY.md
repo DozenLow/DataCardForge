@@ -42,9 +42,10 @@ please do not file them.
 7. **The Windows/desktop package** (when published) is local-only, unsigned, and has no
    auto-update. SmartScreen will warn about an unknown publisher.
 
-Anything outside this list — for example a path traversal in the static file server once one
-exists, a way to make the backend read arbitrary files, a crash that takes the whole process
-down from a malformed request, or XSS in the UI — is a real finding and worth reporting.
+Anything outside this list — for example a bypass of the static file server's rules (traversal,
+backslashes, NUL bytes, non-allow-listed extensions and paths that escape the web root are all
+refused by design), a way to make the backend read arbitrary files, a crash that takes the whole
+process down from a malformed request, or XSS in the UI — is a real finding and worth reporting.
 
 ## What to expect
 

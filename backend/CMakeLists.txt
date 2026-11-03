@@ -9,6 +9,16 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release)
 endif()
 
+# ── diagnostic build tier ──────────────────────────────────────────────
+# "Asserts": optimized like Release but with NDEBUG left undefined, which is what turns
+# Eigen's eigen_assert back on (it is decided per translation unit from NDEBUG). This is the
+# tier shipped as the recommended download: near-Release speed, but it stops at the first
+# violated contract instead of quietly computing a wrong number. -O2 rather than -O3 because
+# the assertion branches make -O3 rarely worth the build time.
+set(CMAKE_CXX_FLAGS_ASSERTS "-O2 -g -fno-omit-frame-pointer" CACHE STRING
+    "Flags for the Asserts build type")
+set(CMAKE_EXE_LINKER_FLAGS_ASSERTS "" CACHE STRING "Linker flags for the Asserts build type")
+
 find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(Threads REQUIRED)
 
@@ -50,10 +60,15 @@ add_library(dc_core
 target_include_directories(dc_core PUBLIC src)
 target_link_libraries(dc_core PUBLIC Eigen3::Eigen)
 
+# Static file serving lives beside the HTTP layer, not in the compute core: it is packaging
+# glue, and keeping it separate means the path rules can be tested without a socket.
+add_library(dc_static STATIC src/static_files.cpp)
+target_include_directories(dc_static PUBLIC src)
+
 add_executable(dc_backend src/http_server.cpp src/main.cpp ${DC_SHA_HEADER})
 target_include_directories(dc_backend PRIVATE ${CMAKE_BINARY_DIR}/generated)
 add_dependencies(dc_backend dc_build_sha)
-target_link_libraries(dc_backend PRIVATE dc_core Threads::Threads)
+target_link_libraries(dc_backend PRIVATE dc_core dc_static Threads::Threads)
 if(WIN32)
   target_link_libraries(dc_backend PRIVATE ws2_32)
 endif()
@@ -71,6 +86,11 @@ add_test(NAME matrix_fixtures
 add_executable(dc_nodes_test tests/nodes_test.cpp)
 target_link_libraries(dc_nodes_test PRIVATE dc_core)
 add_test(NAME node_registry COMMAND dc_nodes_test)
+
+# Path rules for the packaged UI: traversal, allow-listed extensions, SPA fallback.
+add_executable(dc_static_test tests/static_path_test.cpp)
+target_link_libraries(dc_static_test PRIVATE dc_static)
+add_test(NAME static_paths COMMAND dc_static_test)
 
 # Card-layer fixtures: the SAME JSON the TypeScript side parses
 # (web/tests/cardFixtures.test.ts). TS judges how a card becomes port bindings; this judges

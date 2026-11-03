@@ -1,5 +1,6 @@
 #include "http_server.h"
 #include "build_sha.h"  // generated at build time
+#include "static_files.h"
 
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -775,7 +776,45 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
     return jsonOk(std::move(arr));
   }
 
+  // Packaged front end. Declined here, the JSON 404 stays: a mistyped /api path should stay
+  // machine-readable instead of silently turning into index.html.
+  {
+    HttpResponse res;
+    if (serveStatic(req, &res)) return res;
+  }
+
   return jsonError(404, "notImplemented");
+}
+
+// Serves the packaged front end. Runs only after every /api route has declined, so it can
+// never shadow the protocol. Two ways to answer:
+//   1. the requested file exists under webRoot_ (allow-listed extension, stays inside root)
+//   2. otherwise a non-API GET/HEAD falls back to index.html — the SPA router owns the path,
+//      which is what makes refresh / deep links work
+bool HttpServer::serveStatic(const HttpRequest& req, HttpResponse* res) {
+  if (webRoot_.empty()) return false;
+  if (req.method != "GET" && req.method != "HEAD") return false;
+  if (req.path.rfind("/api/", 0) == 0 || req.path == "/api") return false;
+  // A traversal probe gets a 404, never the SPA's index.html: a 200 would read as "that path
+  // exists". The file rules still apply on top of this.
+  if (!isSafeUrlPath(req.path)) return false;
+
+  std::string file = resolveStaticPath(webRoot_, req.path);
+  if (file.empty()) {
+    // A missing *asset* must fail as a missing asset. Answering /assets/stale-hash.js with
+    // index.html makes the browser report a confusing syntax error instead of a 404.
+    if (isAllowedStaticExtension(req.path)) return false;
+    if (!hasIndex(webRoot_)) return false;
+    file = resolveStaticPath(webRoot_, "/");
+    if (file.empty()) return false;
+  }
+  std::string body;
+  if (!readFileBinary(file, &body)) return false;
+  res->status = 200;
+  res->contentType = contentTypeFor(file);
+  res->body = std::move(body);
+  res->binary = nullptr;
+  return true;
 }
 
 // ── socket plumbing ────────────────────────────────────────────────────
@@ -801,6 +840,7 @@ bool HttpServer::serve() {
     dc_close_socket(srv);
     return false;
   }
+  if (onReady_) onReady_();
   while (true) {
     socket_t fd = accept(srv, nullptr, nullptr);
     if (fd == (socket_t)(-1)) continue;
