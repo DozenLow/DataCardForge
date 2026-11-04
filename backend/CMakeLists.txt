@@ -153,6 +153,15 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 add_test(NAME dd_oracle COMMAND dc_dd_oracle_test)
 
+# Algebraic invariants (tests/matrix_invariants_test.cpp): identities that hold for ANY
+# correct implementation — A*I == A, (A·B)ᵀ = Bᵀ·Aᵀ, det(A·B) = det(A)·det(B),
+# solve(A, A·y) == y. This is the third failure class, and the only gate that sees it: a
+# wrong function or a flipped index is invisible to the fixtures (both engines run the same
+# line) and invisible to the accuracy audit (a wrong answer can be computed very precisely).
+add_executable(dc_matrix_invariants_test tests/matrix_invariants_test.cpp)
+target_link_libraries(dc_matrix_invariants_test PRIVATE dc_core)
+add_test(NAME matrix_invariants COMMAND dc_matrix_invariants_test)
+
 # Card-layer fixtures: the SAME JSON the TypeScript side parses
 # (web/tests/cardFixtures.test.ts). TS judges how a card becomes port bindings; this judges
 # what those bindings compute. Together they are the referee the v2 schema decision demands.
