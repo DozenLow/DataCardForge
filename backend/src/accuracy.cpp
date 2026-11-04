@@ -1,9 +1,12 @@
 #include "accuracy.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <random>
+#include <string>
 #include <vector>
 
 #include "expression.h"
@@ -25,6 +28,28 @@ constexpr double kReproduceTolerance = 1e-12;
 // against the measured data: a 1e6-centred variance keeps 9.3 and a 1e8-centred one 7.7,
 // so the line separates them, and 8 digits still exceeds any instrument's resolution.
 constexpr double kDegradedDigits = 8.0;
+
+// MOV and EMA read their neighbours, so permuting the rows changes the ANSWER, not just
+// the rounding. Comparing two orders there would report a huge "gap" for a perfectly
+// accurate result — and a false alarm costs as much trust as a false pass.
+bool usesOrderDependentFunction(const std::string& expression) {
+  std::string upper;
+  upper.reserve(expression.size());
+  for (char ch : expression) {
+    upper.push_back(static_cast<char>(std::toupper(static_cast<unsigned char>(ch))));
+  }
+  for (const char* name : {"MOV", "EMA"}) {
+    const size_t len = std::strlen(name);
+    size_t pos = 0;
+    while ((pos = upper.find(name, pos)) != std::string::npos) {
+      size_t next = pos + len;
+      while (next < upper.size() && (upper[next] == ' ' || upper[next] == '\t')) ++next;
+      if (next < upper.size() && upper[next] == '(') return true;
+      pos = next;
+    }
+  }
+  return false;
+}
 
 struct PortData {
   std::string alias;
@@ -117,6 +142,20 @@ AccuracyReport checkAccuracy(NodeRegistry* nodes, MatrixStore* store, int64_t no
     // Not "fine" — not computable. The caller renders nothing.
     report.reason = "notComputed";
     return report;
+  }
+
+  // Refuse order-dependent expressions before measuring anything.
+  if (node->signatureId == kSigExpressionColumns) {
+    const Json* formulas = node->params.find("formulas");
+    if (formulas != nullptr && formulas->isArray()) {
+      for (const Json& f : formulas->items()) {
+        if (f["expression"].isString() &&
+            usesOrderDependentFunction(f["expression"].asString())) {
+          report.reason = "orderDependent";
+          return report;
+        }
+      }
+    }
   }
 
   std::vector<PortData> ports;

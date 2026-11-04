@@ -107,6 +107,18 @@ int main() {
   std::printf("not computed  status=%s reason=%s\n", idleReport.status.c_str(),
               idleReport.reason.c_str());
 
+  // 5) MOV/EMA read their neighbours: permuting the rows changes the ANSWER, not just the
+  //    rounding, so any "gap" measured there would be a false alarm.
+  const auto smoothed =
+      nodes.createV2(kSigExpressionColumns, {binding}, expressionParams("v", "MOV(A, 3)"));
+  CHECK(smoothed.nodeId > 0);
+  nodes.recomputeSubtree(smoothed.nodeId);
+  const AccuracyReport movReport = checkAccuracy(&nodes, &store, smoothed.nodeId);
+  std::printf("MOV(A, 3)     status=%s reason=%s\n", movReport.status.c_str(),
+              movReport.reason.c_str());
+  CHECK(movReport.status == "unsupported");
+  CHECK(movReport.reason == "orderDependent");
+
   std::printf("%s\n", failures == 0 ? "accuracy: ok" : "accuracy: FAILED");
   return failures == 0 ? 0 : 1;
 }

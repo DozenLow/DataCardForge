@@ -3,7 +3,7 @@
 [![CI](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml/badge.svg)](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml)
 [![Pages demo](https://img.shields.io/badge/demo-live%20(front%20end)-2ea44f)](https://dozenlow.github.io/DataCardForge/)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-581%20unit%20%C2%B7%209%20ctest-brightgreen)](web/tests)
+[![Tests](https://img.shields.io/badge/tests-589%20unit%20%C2%B7%2014%20ctest-brightgreen)](web/tests)
 
 **[English](README.md) | [中文](README.zh-CN.md)**
 
@@ -16,12 +16,12 @@ A lightweight **data matrix batch-processing workbench** for industrial / scient
 </p>
 
 **Product and repository**: both are named **DataCardForge**.
-**Author & provenance**: `DozenLow` · GPL-3.0 · see [`PROVENANCE.md`](PROVENANCE.md) for the
-verifiable author identity, timeline and commit anchors.
-**Verified state** (last verified 2026-11-03): 581 frontend unit tests (14 opt-in
-skipped) · 9 backend ctest cases (4 opt-in) · 102 end-to-end smoke checks — all green.
-**Not finished yet**: function cards are a work in progress; hover and edge-editing of connections
-are still missing — both are spelled out under [Status & known gaps](#status--known-gaps).
+**Author & provenance**: `DozenLow` · GPL-3.0 · see [`PROVENANCE.md`](PROVENANCE.md).
+**Verified state**: 589 frontend unit tests (14 opt-in skipped) · 14 backend ctest cases
+(4 opt-in) · 102 end-to-end smoke checks — all green.
+**Not finished yet**: function cards are a work in progress; hover and edge-editing of
+connections are still missing — both are spelled out under
+[Status & known gaps](#status--known-gaps).
 
 ## Try it
 
