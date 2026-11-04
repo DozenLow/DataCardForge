@@ -20,6 +20,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 #include <random>
 #include <string>
@@ -337,6 +338,72 @@ void caseSingular() {
          threwInverse && threwSolve && oracleSaysSingular ? "refused by both" : "MISMATCH");
 }
 
+// ── expression layer ───────────────────────────────────
+//
+// Every case above calls MatVal directly. Users do not: they type "INV(A)" and travel
+// through the parser and evaluateMatrix. If that layer introduced an extra copy, a
+// transpose or a narrowing conversion, every MatVal case would still be green — the
+// numbers would never reach it. These cases therefore demand BIT IDENTITY with the direct
+// call: the expression layer is supposed to be a dispatcher, not a transform, so
+// "numerically close" here would be hiding the one thing under test.
+bool sameBits(const std::vector<double>& a, const std::vector<double>& b) {
+  if (a.size() != b.size()) return false;
+  for (size_t k = 0; k < a.size(); ++k) {
+    if (std::memcmp(&a[k], &b[k], sizeof(double)) != 0) return false;
+  }
+  return true;
+}
+
+void exprCase(const char* expr, const char* label, const std::vector<std::string>& names,
+              const std::vector<dc::MatVal>& args, const dc::MatVal& direct) {
+  int64_t rows = 0;
+  int64_t cols = 0;
+  std::vector<double> got;
+  try {
+    got = dc::ExprEngine::evaluateMatrix(expr, names, args, &rows, &cols);
+  } catch (const std::exception& e) {
+    std::printf("FAIL expr %-14s threw: %s\n", expr, e.what());
+    ++failures;
+    return;
+  }
+  const bool shapeOk = rows == direct.rows() && cols == direct.cols();
+  const bool bitsOk = shapeOk && sameBits(got, direct.toColumnMajor());
+  if (!bitsOk) {
+    std::printf("FAIL expr %-14s shape %lldx%lld vs %lldx%lld, values %s\n", expr,
+                static_cast<long long>(rows), static_cast<long long>(cols),
+                static_cast<long long>(direct.rows()), static_cast<long long>(direct.cols()),
+                shapeOk ? "differ" : "unchecked");
+    ++failures;
+  }
+  char note[96];
+  std::snprintf(note, sizeof note, "%-14s %s", expr,
+                bitsOk ? "bit-identical to MatVal" : "MISMATCH");
+  record("expr", label, 0.0, 0.0, 0.0, false, note);
+}
+
+void caseExpressionPath() {
+  Rng rng;
+  const int64_t n = 16;
+  std::vector<double> A = randomMat(rng, n, n, -1.0, 1.0);
+  for (int64_t i = 0; i < n; ++i) A[static_cast<size_t>(i * n + i)] += static_cast<double>(n);
+  const std::vector<double> B = randomMat(rng, n, n, -1.0, 1.0);
+  const std::vector<double> y = randomMat(rng, n, 1, -1.0, 1.0);
+
+  const dc::MatVal mA = toMatVal(A, n, n);
+  const dc::MatVal mB = toMatVal(B, n, n);
+  const dc::MatVal my = toMatVal(y, n, 1);
+
+  exprCase("A * B", "A*B", {"A", "B"}, {mA, mB}, dc::MatVal::matmul(mA, mB));
+  exprCase("MMUL(A, B)", "MMUL", {"A", "B"}, {mA, mB}, dc::MatVal::matmul(mA, mB));
+  exprCase("INV(A)", "INV", {"A"}, {mA}, dc::MatVal::inverse(mA));
+  exprCase("TRANSPOSE(A)", "TRANSPOSE", {"A"}, {mA}, dc::MatVal::transpose(mA));
+  exprCase("SOLVE(A, Y)", "SOLVE", {"A", "Y"}, {mA, my}, dc::MatVal::solve(mA, my));
+  const dc::MatVal detDirect(Eigen::MatrixXd::Constant(1, 1, dc::MatVal::determinant(mA)));
+  exprCase("DET(A)", "DET", {"A"}, {mA}, detDirect);
+  exprCase("INV(A) * A", "INV(A)*A", {"A"}, {mA},
+           dc::MatVal::matmul(dc::MatVal::inverse(mA), mA));
+}
+
 // ── statistics cases ──────────────────────────────────────────────────
 
 struct StatCase {
@@ -471,6 +538,7 @@ int main() {
   for (int64_t n : {8, 16, 32}) caseDeterminantRandom(n);
   for (int64_t n : {4, 6, 8, 10, 12}) caseHilbert(n);
   caseSingular();
+  caseExpressionPath();
   statCases();
   report();
 
