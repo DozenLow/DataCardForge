@@ -349,9 +349,26 @@ export class BackendClient {
     }
   }
 
-  /** All node ids the server currently holds (for reconciling a restored workspace). */
-  async listNodes(): Promise<number[]> {
+  /**
+   * On-demand accuracy diagnosis. Never changes the result, the node state or the event
+   * stream: it asks the server to re-run the same node with its rows in another order and
+   * report the jitter. Returns {} when the backend cannot answer.
+   */
+  async checkAccuracy(nodeId: number): Promise<{
+    status?: 'ok' | 'degraded' | 'unsupported';
+    digits?: number;
+    relativeGap?: number;
+    reason?: string;
+  }> {
     try {
+      return await jsonRequest(this.base, `/nodes/${nodeId}/accuracy`, { method: 'POST' });
+    } catch {
+      return {};
+    }
+  }
+
+  /** All node ids the server currently holds (for reconciling a restored workspace). */
+  async listNodes(): Promise<number[]> {    try {
       const r = await jsonRequest<{ nodes: number[] }>(this.base, '/nodes');
       return Array.isArray(r.nodes) ? r.nodes : [];
     } catch {

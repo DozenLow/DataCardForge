@@ -9,6 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.3] - 2026-11-04
 
+### Added
+- The table prints every number at its **shortest round-trip precision** instead of six
+  significant digits. Six digits could not separate a column of measurements centred on
+  1e6 — 3000 distinct rows rendered as 3000 copies of `1e+6` — so the table now shows what
+  is actually stored. Columns are sized from a sample of their values, and every cell keeps
+  a tooltip with the full text.
+- Formula cards report **rounding jitter** for their output, three seconds after the
+  definition stops changing. It is measured, not guessed: the backend re-runs the same node
+  with its rows in another order — the exact answer cannot change, the rounding can — and
+  reports the gap. It is a sample rather than a bound, so the card says *no jitter detected*
+  and never *accurate*, and it stays silent whenever the backend declines to measure.
+
 ### Fixed
 - The packaged exe opened neither a browser nor a terminal when double-clicked. It was one bug,
   not two: the launch was gated on `isatty(stdout)`, and a process that Windows did not start

@@ -22,6 +22,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 
+import { useAccuracyHint } from '../useAccuracyHint.ts';
 import { MatrixData } from '../../core/MatrixData.ts';
 import { useTranslator, useWorkspace, type RepointOffer } from '../workspaceStore.ts';
 import { registerPort, unregisterPort, type AnchorSide } from '../cardMetrics.ts';
@@ -162,6 +163,15 @@ export function FormulaCard({
   };
   /** Column header menu: pick a chart type for one output column. */
   const [chartMenu, setChartMenu] = useState<{ x: number; y: number; column: number } | null>(null);
+
+  // Rounding-jitter hint for the shown output. Three seconds behind the result on purpose:
+  // the card recomputes per keystroke, and one measurement per character would be work
+  // spent on answers the user has already replaced.
+  const formulaSignature = useMemo(
+    () => JSON.stringify(card.params?.formulas ?? []),
+    [card.params],
+  );
+  const accuracyHint = useAccuracyHint(card.node?.nodeId ?? null, formulaSignature);
 
   // A recompute replaces the result table under an open menu, so the stored column index
   // can end up past the last column. Closing the menu is the honest response: the column it
@@ -725,6 +735,17 @@ export function FormulaCard({
                         ? t('formula.outputColumns', { n: cols, rows })
                         : t('formula.outputEmpty')}
                     </span>
+                    {index === 0 && accuracyHint.kind === 'ok' ? (
+                      <span className="formula-card__accuracy" aria-live="polite">
+                        未检出抖动 · no jitter detected
+                      </span>
+                    ) : null}
+                    {index === 0 && accuracyHint.kind === 'degraded' ? (
+                      <span className="formula-card__accuracy is-degraded" aria-live="polite">
+                        ⚠ 抖动 {accuracyHint.gap.toExponential(0)} — 约剩{' '}
+                        {accuracyHint.digits.toFixed(0)} 位有效数字
+                      </span>
+                    ) : null}
                   </li>
                 ))}
               </ul>
