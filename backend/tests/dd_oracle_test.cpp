@@ -605,6 +605,12 @@ void report() {
 int main() {
   std::printf("=== FP64 engine vs double-double oracle ===\n");
   std::printf("u(double) = %.3e   u^2(dd) ~ %.0e\n\n", kU, kDdU);
+#ifndef NDEBUG
+  // Asserts / Debug tier only: a silently broken reference would make every number below
+  // meaningless, and the audit would then certify it.
+  dd::selfCheck();
+  std::printf("[non-Release] dd self-check passed\n\n");
+#endif
 
   for (int64_t n : {4, 8, 16, 32, 64}) caseMatmulRandom(n);
   caseMatmulCancellation();

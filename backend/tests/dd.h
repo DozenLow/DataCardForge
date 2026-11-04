@@ -21,6 +21,8 @@
 #endif
 
 #include <cmath>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 
 namespace dd {
@@ -34,18 +36,47 @@ inline bool isFinite(DD a) { return std::isfinite(a.hi); }
 
 inline double toDouble(DD a) { return a.hi; }
 
+// ── debug probes ───────────────────────────────────────────────────────
+//
+// The oracle's failure mode is the worst kind: a broken double-double still returns a
+// plausible number, and the audit then reports that number as the truth. It launders bad
+// arithmetic into "reference".
+//
+// These checks are compiled out in Release (NDEBUG) and live in the Asserts / Debug tiers,
+// where a violated precondition stops the process instead of quietly making the reference
+// wrong. They only cover conditions that can NEVER be hit by correct input (non-finite
+// intermediate), so the probe cannot fire spuriously and block a release build.
+#ifndef NDEBUG
+#define DD_REQUIRE(cond)                                                        \
+  do {                                                                          \
+    if (!(cond)) {                                                              \
+      std::fprintf(stderr, "dd precondition failed: %s (%s:%d)\n", #cond,      \
+                   __FILE__, __LINE__);                                          \
+      std::abort();                                                             \
+    }                                                                           \
+  } while (0)
+#else
+#define DD_REQUIRE(cond) ((void)0)
+#endif
+
 // ── error-free transformations ─────────────────────────────────────────
 
 // s = fl(a+b), e = (a+b) - s exactly. Requires no overflow.
 inline DD twoSum(double a, double b) {
+  DD_REQUIRE(std::isfinite(a) && std::isfinite(b));
   const double s = a + b;
+  DD_REQUIRE(std::isfinite(s));
   const double bb = s - a;
   const double e = (a - (s - bb)) + (b - bb);
   return {s, e};
 }
 
-// Same, but assumes |a| >= |b|. Cheaper (3 flops instead of 6).
+// Same, but cheapest when |a| >= |b|. The fast path is only valid under that assumption,
+// so it falls back to the general form instead of asserting: a violated precondition here
+// would otherwise degrade the reference silently, which is the one outcome this header
+// must not have.
 inline DD quickTwoSum(double a, double b) {
+  if (std::fabs(a) < std::fabs(b)) return twoSum(a, b);
   const double s = a + b;
   const double e = b - (s - a);
   return {s, e};
@@ -56,6 +87,7 @@ inline DD quickTwoSum(double a, double b) {
 // whereas Dekker splitting is at the mercy of FMA contraction.
 inline DD twoProduct(double a, double b) {
   const double p = a * b;
+  DD_REQUIRE(std::isfinite(p));
   const double e = std::fma(a, b, -p);
   return {p, e};
 }
@@ -121,5 +153,32 @@ inline double relDiff(DD a, DD b) {
   if (isZero(s)) return isZero(d) ? 0.0 : std::numeric_limits<double>::infinity();
   return d.hi / s.hi;
 }
+
+// ── self check ───────────────────────────────────────
+//
+// The invariants the whole oracle rests on, in one place. Called once from the test's
+// main() in non-Release builds. If any of these fails, every number in the report is
+// suspect, so stopping here is far better than a green audit built on a broken reference.
+#ifndef NDEBUG
+inline void selfCheck() {
+  const DD one = fromDouble(1.0);
+  const DD two = fromDouble(2.0);
+
+  // A 106-bit quotient, then a round trip: 1/3 * 3 must return to 1 far beyond double's
+  // ulp. A double-only implementation would land around 1e-17 here.
+  DD_REQUIRE(relDiff(mul(div(one, fromDouble(3.0)), fromDouble(3.0)), one) < 1e-30);
+
+  // sqrt(2)^2 == 2 to the same standard, and sqrt itself must be correctly rounded.
+  const DD root2 = sqrt(two);
+  DD_REQUIRE(std::fabs(root2.hi - 1.4142135623730951) < 1e-15);
+  DD_REQUIRE(relDiff(mul(root2, root2), two) < 1e-30);
+
+  // 1 + 1e-20 must keep the small term in lo instead of rounding it away — this is the
+  // single behaviour that distinguishes double-double from double.
+  const DD bumped = add(one, fromDouble(1e-20));
+  DD_REQUIRE(bumped.hi == 1.0);
+  DD_REQUIRE(std::fabs(bumped.lo - 1e-20) <= 1e-36);
+}
+#endif
 
 }  // namespace dd
