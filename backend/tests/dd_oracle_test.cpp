@@ -24,6 +24,7 @@
 #include <limits>
 #include <random>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "dd_oracle.h"
@@ -504,6 +505,80 @@ void statCases() {
   for (const StatCase& c : cases) runStat(c);
 }
 
+// ── centring calibration ───────────────────────────────────
+//
+// The two rows above (1e6 and 1e8) are enough to see that variance degrades and not
+// enough to say by how much — and "by how much" is the whole basis for deciding whether a
+// runtime precision warning is worth building. So sweep the centre with the spread held
+// fixed: the only thing that changes is mu/sigma.
+//
+// Model: mean error delta ~ u*mu*sqrt(n), so the variance's relative error picks up a
+// term n*delta^2/ss = n*u^2*(mu/sigma)^2, i.e. 2 digits lost per decade of mu/sigma.
+void centringCalibration() {
+  const size_t n = 100000;
+  const double halfSpread = 1e-3;  // uniform(-h, h) => sigma = h/sqrt(3)
+  const double sigma = halfSpread / std::sqrt(3.0);
+
+  Rng rng;
+  std::vector<double> dev(n);
+  for (double& x : dev) x = (rng.uni(0.0, 1.0) - 0.5) * 2.0 * halfSpread;
+
+  std::printf("\ncentring-loss calibration (VAR, n=1e5, spread fixed at +/-%.0e):\n",
+              halfSpread);
+  std::printf("  %-10s %-11s %-11s %-7s %-7s\n", "centre", "mu/sigma", "rel.err", "digits",
+              "model");
+
+  std::vector<std::pair<double, double>> fit;  // (log10 mu/sigma, measured digits)
+  for (double centre : {0.0, 1e2, 1e4, 1e6, 1e8, 1e10}) {
+    std::vector<double> data(n);
+    for (size_t i = 0; i < n; ++i) data[i] = centre + dev[i];
+
+    const double got = engineAgg("VAR(A)", data);
+    const dd::DD ref = oracle::spread(data).var;
+    const double err = dd::relDiff(dd::fromDouble(got), ref);
+
+    const double ratio = centre / sigma;
+    const double digits = err > 0.0 ? -std::log10(err) : 16.0;
+    const double model = ratio > 0.0
+                             ? -std::log10(static_cast<double>(n) * kU * kU * ratio * ratio)
+                             : 16.0;
+    std::printf("  %-10.0e %-11.2e %-11.3e %-7.1f %-7.1f\n", centre, ratio, err, digits, model);
+
+    // Fit only where the loss is real and still measurable: below 14 digits (loss happened)
+    // and above the dd floor (the measurement is still trustworthy).
+    if (ratio > 1.0 && err > 0.0 && digits < 14.0) {
+      fit.emplace_back(std::log10(ratio), digits);
+    }
+  }
+
+  if (fit.size() >= 2) {
+    double mx = 0.0;
+    double my = 0.0;
+    for (const auto& p : fit) {
+      mx += p.first;
+      my += p.second;
+    }
+    mx /= static_cast<double>(fit.size());
+    my /= static_cast<double>(fit.size());
+    double num = 0.0;
+    double den = 0.0;
+    for (const auto& p : fit) {
+      num += (p.first - mx) * (p.second - my);
+      den += (p.first - mx) * (p.first - mx);
+    }
+    const double slope = den > 0.0 ? num / den : 0.0;
+    std::printf("  fitted over %zu points: %.2f digits lost per decade of mu/sigma"
+                " (model: 2.00)\n",
+                fit.size(), -slope);
+    // The model runs ahead of the measurement because n*u^2*(mu/sigma)^2 assumes the
+    // WORST-CASE summation error (delta ~ u*sum|x|). A naive sequential sum actually
+    // accumulates like a random walk, so the cliff is shallower than the bound predicts.
+    // The bound is still the right thing to gate on; it is just not an estimate.
+    std::printf("  model is a worst-case bound, not an estimate: expect the measurement to"
+                " sit 1-3 digits above it\n");
+  }
+}
+
 // ── report ────────────────────────────────────────────────────────────
 
 void report() {
@@ -540,6 +615,7 @@ int main() {
   caseSingular();
   caseExpressionPath();
   statCases();
+  centringCalibration();
   report();
 
   return failures == 0 ? 0 : 1;
