@@ -20,29 +20,20 @@ export function parseNumeric(token: string, fallback = NaN): number {
   return Number(token);
 }
 
-/** Format a value for display the way the Qt model did (`'g'` with 6 digits). */
+/** Format a value for display with the shortest text that round-trips to the same double.
+ *
+ * This replaces `toPrecision(6)` (the Qt `%.6g` behaviour). The reason is not aesthetics:
+ * six digits could not distinguish a column of measurements around 1e6 — `1000000.0004813797`
+ * and `1000000` both rendered as `1e+6`, so 3000 rows of real data looked like one repeated
+ * value and the table showed no evidence that anything was wrong.
+ *
+ * Shortest-round-trip spends digits only where they carry information: `0.5` stays `0.5`,
+ * while `1/3` shows all 16 digits that actually identify it. */
 export function formatCell(value: number): string {
   if (Number.isNaN(value)) return '—';
   if (!Number.isFinite(value)) return value > 0 ? '∞' : '-∞';
   if (value === 0) return '0';
-  // `toPrecision(6)` then trim is the closest match to printf("%.6g").
-  const abs = Math.abs(value);
-  if (abs >= 1e-4 && abs < 1e6) {
-    // Fixed notation would add trailing zeros; `toPrecision` normalises them away.
-    return trimNumber(value.toPrecision(6));
-  }
-  // Exponent form: JS writes `1e-7`, C writes `1e-07`.
-  return trimNumber(value.toExponential(5)).replace(/e([+-])(\d)$/, 'e$10$2');
-}
-
-function trimNumber(text: string): string {
-  if (!text.includes('.')) return text;
-  let out = text;
-  if (out.includes('e') || out.includes('E')) {
-    const [mantissa, exponent] = out.split(/[eE]/);
-    const trimmed = mantissa.includes('.') ? mantissa.replace(/\.?0+$/, '') : mantissa;
-    return `${trimmed}e${exponent}`;
-  }
-  if (out.includes('.')) out = out.replace(/\.?0+$/, '');
-  return out;
+  // Exponent spelling stays C-like (`1e-07`, not `1e-7`): exported text and the documents
+  // disagreeing about the same number is worse than a slightly wider cell.
+  return String(value).replace(/e([+-])(\d)$/, 'e$10$2');
 }

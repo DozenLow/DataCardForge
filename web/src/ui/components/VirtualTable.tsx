@@ -87,17 +87,24 @@ export function VirtualTable({
   const rowCount = matrix.rowCount();
   const columnCount = matrix.columnCount();
 
-  // Column widths: sized to the widest header label so `Pos.1` and long sensor
-  // names both stay readable.
+  // Column widths: the header label plus a sample of the rendered values. Sizing from the
+  // header alone was fine while every cell was at most six digits wide; shortest-round-trip
+  // text runs to 18 characters ("1000000.0004813797"), and a right-aligned cell with
+  // `overflow: hidden` clips its LEFT edge — i.e. it hides the most significant digits,
+  // which is the worst possible part to lose.
   const measuredWidths = useMemo(() => {
     const widths: number[] = [];
+    const sampleRows = Math.min(rowCount, 40);
     for (let c = 0; c < columnCount; ++c) {
-      const label = matrix.columnLabel(c);
-      const approx = 24 + label.length * 7;
-      widths.push(Math.min(240, Math.max(COLUMN_WIDTH, approx)));
+      let widest = matrix.columnLabel(c).length;
+      for (let r = 0; r < sampleRows; ++r) {
+        const text = formatCell(matrix.cell(r, c));
+        if (text.length > widest) widest = text.length;
+      }
+      widths.push(Math.min(MAX_COLUMN_WIDTH, Math.max(COLUMN_WIDTH, 24 + widest * 7.4)));
     }
     return widths;
-  }, [matrix, columnCount]);
+  }, [matrix, columnCount, rowCount]);
 
   useLayoutEffect(() => {
     setColumnWidths(measuredWidths);
@@ -303,15 +310,20 @@ export function VirtualTable({
                     />
                   );
                 }
+                // Cells clip rather than ellipsize (`white-space: nowrap` + `overflow:
+                // hidden`), and shortest-round-trip text is often wider than the 118px
+                // default column — so the full value has to stay reachable on hover.
+                const text = formatCell(value);
                 return (
                   <div
                     key={c}
                     className="vtable__cell"
+                    title={text}
                     onDoubleClick={() => {
                       if (!readOnly) setEditing({ row, col: c });
                     }}
                   >
-                    {formatCell(value)}
+                    {text}
                   </div>
                 );
               })}

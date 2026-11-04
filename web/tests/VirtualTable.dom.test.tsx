@@ -66,6 +66,31 @@ afterEach(async () => {
   document.body.innerHTML = '';
 });
 
+describe('virtual table column width', () => {
+  function widthsOf(host: HTMLElement): number[] {
+    const inner = host.querySelector<HTMLElement>('.vtable__header-inner')!;
+    return inner.style.gridTemplateColumns.split(' ').map((part) => parseFloat(part));
+  }
+
+  it('sizes a column from its values, not only from its header', async () => {
+    // Header-only sizing pinned every column at 118px. Shortest-round-trip text runs to 18
+    // characters, and a right-aligned cell clips its LEFT edge — i.e. it hides the most
+    // significant digits — so the width has to account for what the cells actually print.
+    const mat = new MatrixData();
+    mat.appendColumn('A', [1000000.0004813797, 999999.99941809254, 1]);
+    const host = await mount(mat);
+    // widths[0] is the row-number column.
+    expect(widthsOf(host)[1]).toBeGreaterThan(150);
+  });
+
+  it('keeps the default width when the values are short', async () => {
+    const mat = new MatrixData();
+    mat.appendColumn('A', [1, 2, 3]);
+    const host = await mount(mat);
+    expect(widthsOf(host)[1]).toBe(118);
+  });
+});
+
 describe('virtual table horizontal scroll', () => {
   it('moves the header by the scroll amount and leaves the rows to native scrolling', async () => {
     const host = await mount(table());
