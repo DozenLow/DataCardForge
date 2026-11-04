@@ -33,6 +33,7 @@
 
 #include "expression.h"
 #include "signature.h"
+#include "accuracy.h"
 
 namespace dc {
 
@@ -725,6 +726,22 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
       if (node->state == NodeState::Error) {
         out.set("code", Json(node->errorCode));
         out.set("params", node->errorParams);
+      }
+      return jsonOk(std::move(out));
+    }
+
+    if (suffix == "/accuracy" && req.method == "POST") {
+      // On demand only: never on the result path, never a state change, never an event.
+      // "unsupported" is a first-class answer — the caller must render nothing for it, so
+      // that "not measured" can never read as "measured and fine".
+      const AccuracyReport report = checkAccuracy(nodes_, store_, id);
+      Json out = Json::object({{"nodeId", Json(static_cast<int64_t>(id))},
+                               {"status", Json(report.status)}});
+      if (!report.reason.empty()) out.set("reason", Json(report.reason));
+      if (report.status != "unsupported") {
+        out.set("kappa", Json(report.kappa));
+        out.set("digits", Json(report.digits));
+        out.set("digitsLost", Json(report.digitsLost));
       }
       return jsonOk(std::move(out));
     }

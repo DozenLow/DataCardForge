@@ -82,6 +82,7 @@ add_library(dc_core
   src/signature.cpp
   src/summary.cpp
   src/nodes.cpp
+  src/accuracy.cpp
 )
 target_include_directories(dc_core PUBLIC src)
 target_link_libraries(dc_core PUBLIC Eigen3::Eigen)
@@ -174,6 +175,13 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(dc_kappa_probe_test PRIVATE -ffp-contract=off)
 endif()
 add_test(NAME kappa_probe COMMAND dc_kappa_probe_test)
+
+# On-demand accuracy endpoint (src/accuracy.cpp). Two jobs: the estimate must agree with
+# the published result it is judging, and it must decline — not guess — where it would be
+# blind (chained inputs) or has nothing to look at (never computed).
+add_executable(dc_accuracy_test tests/accuracy_test.cpp)
+target_link_libraries(dc_accuracy_test PRIVATE dc_core)
+add_test(NAME accuracy COMMAND dc_accuracy_test)
 
 # Card-layer fixtures: the SAME JSON the TypeScript side parses
 # (web/tests/cardFixtures.test.ts). TS judges how a card becomes port bindings; this judges
