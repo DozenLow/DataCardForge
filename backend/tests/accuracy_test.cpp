@@ -59,27 +59,26 @@ int main() {
   CHECK(good.nodeId > 0);
   nodes.recomputeSubtree(good.nodeId);
   const AccuracyReport goodReport = checkAccuracy(&nodes, &store, good.nodeId);
-  std::printf("VAR(A)        status=%s digits=%.1f kappa=%.2e reason=%s\n",
-              goodReport.status.c_str(), goodReport.digits, goodReport.kappa,
+  std::printf("VAR(A)        status=%s digits=%.1f gap=%.2e reason=%s\n",
+              goodReport.status.c_str(), goodReport.digits, goodReport.relativeGap,
               goodReport.reason.c_str());
   CHECK(goodReport.status == "ok");
 
   // 2) The textbook formula on the same column — two ~5e15 intermediates cancelling to a
-  //    1e-3 answer. NOTE what actually happens: a coherent data perturbation moves BOTH
-  //    intermediates by the same relative amount, so they cancel again and the measured
-  //    response is zero. The estimate cannot see this failure mode, and must say so rather
-  //    than report "ok" (false pass) or "degraded" (a lucky guess).
+  //    1e-3 answer. Feeding the SAME values in a different row order changes only the
+  //    rounding, and that rounding is the whole answer, so the jitter is enormous.
   const auto bad = nodes.createV2(
       kSigExpressionColumns, {binding},
       expressionParams("v", "(SUM(A*A) - COUNT(A)*AVG(A)*AVG(A)) / (COUNT(A)-1)"));
   CHECK(bad.nodeId > 0);
   nodes.recomputeSubtree(bad.nodeId);
   const AccuracyReport badReport = checkAccuracy(&nodes, &store, bad.nodeId);
-  std::printf("naive ss      status=%s digits=%.1f kappa=%.2e reason=%s\n",
-              badReport.status.c_str(), badReport.digits, badReport.kappa,
+  std::printf("naive ss      status=%s digits=%.1f gap=%.2e reason=%s\n",
+              badReport.status.c_str(), badReport.digits, badReport.relativeGap,
               badReport.reason.c_str());
-  CHECK(badReport.status == "unsupported");
-  CHECK(badReport.reason == "noMeasurableResponse");
+  CHECK(badReport.status == "degraded");
+  CHECK(badReport.digits < 8.0);
+  CHECK(badReport.relativeGap > 1e-6);
 
   // 3) A chained input must decline: this measurement is node-local and would be blind to
   //    inherited error. "unsupported" is the honest answer, and the client renders nothing.

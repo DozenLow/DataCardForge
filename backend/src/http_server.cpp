@@ -739,7 +739,7 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
                                {"status", Json(report.status)}});
       if (!report.reason.empty()) out.set("reason", Json(report.reason));
       if (report.status != "unsupported") {
-        out.set("kappa", Json(report.kappa));
+        out.set("relativeGap", Json(report.relativeGap));
         out.set("digits", Json(report.digits));
         out.set("digitsLost", Json(report.digitsLost));
       }

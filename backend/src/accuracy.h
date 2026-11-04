@@ -19,9 +19,9 @@ struct AccuracyReport {
   // "unsupported" no estimate was produced — the caller must render NOTHING, never "fine"
   std::string status = "unsupported";
   std::string reason;           // why unsupported (also the tooltip's fallback)
-  double kappa = 0.0;           // relative condition number, measured by perturbation
-  double digits = 0.0;          // estimated trustworthy significant digits
-  double digitsLost = 0.0;      // 15.95 - digits, clamped at 0
+  double relativeGap = 0.0;     // jitter between two scan orders of the same values
+  double digits = 0.0;          // 15.95 minus the jitter's magnitude, in decades
+  double digitsLost = 0.0;
 };
 
 // Measures how strongly the node's own output responds to a relative perturbation of its

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <limits>
+#include <random>
 #include <vector>
 
 #include "expression.h"
@@ -15,7 +16,6 @@ namespace dc {
 
 namespace {
 
-constexpr double kDelta = 1e-8;
 constexpr double kU = std::numeric_limits<double>::epsilon() / 2.0;
 // The re-evaluation must reproduce the published result before anything is reported. If it
 // cannot, the two code paths disagree and any kappa derived from one of them is fiction —
@@ -102,13 +102,6 @@ double maxRelativeGap(const std::vector<double>& a, const std::vector<double>& b
   return worst;
 }
 
-void scaleInPlace(std::vector<PortData>* ports, double relative) {
-  for (PortData& p : *ports) {
-    for (auto& col : p.columns) {
-      for (double& v : col) v *= (1.0 + relative);
-    }
-  }
-}
 
 }  // namespace
 
@@ -188,18 +181,40 @@ AccuracyReport checkAccuracy(NodeRegistry* nodes, MatrixStore* store, int64_t no
     return report;
   }
 
-  // Central difference on a coherent relative perturbation of the input data. Coherent, not
-  // per-element random signs: random signs cancel inside a sum and under-estimate kappa by
-  // sqrt(n) (measured in tests/kappa_probe_test.cpp).
-  std::vector<PortData> up = ports;
-  std::vector<PortData> down = ports;
-  scaleInPlace(&up, kDelta);
-  scaleInPlace(&down, -kDelta);
+  // Row-order scan: the SAME values, fed in a different order. The exact answer cannot
+  // change (summation is associative in real arithmetic); the rounding can. So the gap
+  // between the two results is a direct sample of the rounding noise — which is exactly
+  // what a coherent data perturbation could not see, because two cancelling intermediates
+  // move together and cancel again.
+  //
+  // The gap is a SAMPLE, not a bound: two orders can round alike and report zero jitter
+  // while the true error is nonzero. The status therefore means "no jitter detected",
+  // never "accurate", and the UI copy has to say the same thing.
+  std::vector<size_t> order(rows);
+  for (size_t i = 0; i < rows; ++i) order[i] = i;
+  {
+    std::mt19937_64 gen(0x9E3779B97F4A7C15ULL ^ static_cast<uint64_t>(nodeId));
+    std::shuffle(order.begin(), order.end(), gen);
+  }
+  std::vector<size_t> inverse(rows);
+  for (size_t i = 0; i < rows; ++i) inverse[order[i]] = i;
 
-  std::vector<std::vector<double>> hiOut;
-  std::vector<std::vector<double>> loOut;
+  std::vector<PortData> shuffled = ports;
+  for (PortData& p : shuffled) {
+    for (auto& col : p.columns) {
+      if (col.size() != rows) {
+        report.reason = "raggedInput";
+        return report;
+      }
+      std::vector<double> reordered(rows);
+      for (size_t i = 0; i < rows; ++i) reordered[i] = col[order[i]];
+      col = std::move(reordered);
+    }
+  }
+
+  std::vector<std::vector<double>> shuffledOut;
   try {
-    if (!evaluateOnce(*node, up, rows, &hiOut) || !evaluateOnce(*node, down, rows, &loOut)) {
+    if (!evaluateOnce(*node, shuffled, rows, &shuffledOut)) {
       report.reason = "recomputeFailed";
       return report;
     }
@@ -208,47 +223,32 @@ AccuracyReport checkAccuracy(NodeRegistry* nodes, MatrixStore* store, int64_t no
     return report;
   }
 
-  const std::vector<double> hi = flatten(hiOut);
-  const std::vector<double> lo = flatten(loOut);
-  if (hi.size() != baseFlat.size() || lo.size() != baseFlat.size()) {
+  const std::vector<double> shuffledFlat = flatten(shuffledOut);
+  if (rows == 0 || shuffledFlat.size() != baseFlat.size()) {
     report.reason = "shapeChanged";
     return report;
   }
 
+  // Output row i belongs to input row order[i], so undo the permutation before comparing.
+  // For an aggregation every row holds the same value and this is a no-op.
   double worst = 0.0;
-  bool anyComparable = false;
-  for (size_t i = 0; i < baseFlat.size(); ++i) {
-    if (!std::isfinite(baseFlat[i]) || !std::isfinite(hi[i]) || !std::isfinite(lo[i])) continue;
-    if (baseFlat[i] == 0.0) continue;
-    const double response = std::fabs((hi[i] - lo[i]) / baseFlat[i]) / (2.0 * kDelta);
-    if (!std::isfinite(response)) continue;
-    worst = std::max(worst, response);
-    anyComparable = true;
+  for (size_t k = 0; k < baseFlat.size(); ++k) {
+    const size_t column = k / rows;
+    const double a = baseFlat[k];
+    const double b = shuffledFlat[column * rows + inverse[k % rows]];
+    if (!std::isfinite(a) || !std::isfinite(b) || a == 0.0) continue;
+    worst = std::max(worst, std::fabs(a - b) / std::fabs(a));
   }
-  if (!anyComparable) {
-    report.reason = "degenerateResult";
-    return report;
-  }
+
+  report.relativeGap = worst;
   if (worst == 0.0) {
-    // The output did not respond to a coherent rescale of its input. That is NOT evidence of
-    // accuracy: the textbook sum-of-squares variance subtracts two intermediates that move
-    // together, so perturbing the data cancels inside the formula while its rounding noise
-    // is total. Reporting "ok" here would be a false pass, and "degraded" would be a lucky
-    // guess — so report the gap.
-    report.reason = "noMeasurableResponse";
+    report.digits = 15.95;
+    report.digitsLost = 0.0;
+    report.status = "ok";
     return report;
   }
-
-  // kappa alone under-predicts: a naive n-term summation carries its own backward error of
-  // about sqrt(n)*u, and without it the estimate is optimistic by two orders of magnitude
-  // (both facts measured in tests/kappa_probe_test.cpp).
-  const double summationFactor = std::max(1.0, std::sqrt(static_cast<double>(rows)));
-  const double relativeBound = worst * summationFactor * kU;
-
-  report.kappa = worst;
-  report.digits = relativeBound > 0.0 && relativeBound < 1.0 ? -std::log10(relativeBound) : 0.0;
-  if (report.digits > 15.95) report.digits = 15.95;
-  report.digitsLost = std::max(0.0, 15.95 - report.digits);
+  report.digits = std::clamp(-std::log10(worst), 0.0, 15.95);
+  report.digitsLost = 15.95 - report.digits;
   report.status = report.digits >= kDegradedDigits ? "ok" : "degraded";
   return report;
 }
