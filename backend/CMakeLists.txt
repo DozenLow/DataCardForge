@@ -137,6 +137,22 @@ add_executable(dc_ui_launch_test tests/ui_launch_test.cpp)
 target_include_directories(dc_ui_launch_test PRIVATE src)
 add_test(NAME ui_launch COMMAND dc_ui_launch_test)
 
+# Accuracy audit (tests/dd.h): recompute every engine operation in double-double
+# (~106 bits, u ≈ 1e-32) and report how many of double's 15.95 digits the shipped code
+# actually keeps. This is NOT a differential fixture — it has no expected values, only
+# measured error against a reference that is ~15 digits better than the thing it judges.
+# Well-conditioned cases are gated on the textbook bound (a breach is a bug); Hilbert and
+# near-singular cases are reported only, because there the error belongs to κ, not to the
+# code — conflating the two is how a conditioning problem gets "fixed" forever.
+# -ffp-contract=off: dd's error-free transformations assume each multiply and add rounds
+# exactly once. FMA contraction would fold them together and silently destroy the residual.
+add_executable(dc_dd_oracle_test tests/dd_oracle_test.cpp tests/dd_oracle.cpp)
+target_link_libraries(dc_dd_oracle_test PRIVATE dc_core)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(dc_dd_oracle_test PRIVATE -ffp-contract=off)
+endif()
+add_test(NAME dd_oracle COMMAND dc_dd_oracle_test)
+
 # Card-layer fixtures: the SAME JSON the TypeScript side parses
 # (web/tests/cardFixtures.test.ts). TS judges how a card becomes port bindings; this judges
 # what those bindings compute. Together they are the referee the v2 schema decision demands.
