@@ -66,6 +66,24 @@ const COLOR_BLUE = 'rgb(40, 120, 220)';
 const BLINK_INTERVAL_MS = 200;
 const BLINK_TICKS = 6;
 
+/**
+ * Half-extent of the connection mask's own *region*, in plane px.
+ *
+ * `<mask>` has no "infinite" default: its `x` / `y` / `width` / `height` default to
+ * -10% / 120% of the SVG viewport, and with `maskUnits="userSpaceOnUse"` those
+ * percentages resolve in the *plane* coordinate system. Leaving them unset therefore
+ * clipped the mask content — including the white backdrop rect below — to roughly one
+ * screenful anchored at the plane origin, and everything outside that box is masked to
+ * alpha 0: wires were erased, not drawn. That is the "line stops in mid-air while its
+ * target card is still on screen" defect, and it appeared at any zoom below 100% or
+ * after panning away from the origin, because the visible plane then reaches past the
+ * implicit region.
+ *
+ * The region must be stated explicitly and must be the same box the white rect paints,
+ * which is what `maskRegion.test` asserts.
+ */
+const MASK_EXTENT = 100000;
+
 export interface Connection {
   key: string;
   /** The target card's rectangle — the arrow parks on this frame. */
@@ -474,11 +492,28 @@ export function ConnectionLayer({
           (px, py) lands at (px*zoom - view.x, py*zoom - view.y) in viewport px. */}
       <g transform={`translate(${-view.x}, ${-view.y}) scale(${view.zoom})`}>
         <defs>
-          <mask id={maskId} maskUnits="userSpaceOnUse">
+          {/* The region is stated explicitly: an unset one defaults to one viewport of
+              plane coordinates anchored at the origin, which erases every wire beyond it
+              no matter how large the backdrop rect is. See MASK_EXTENT. */}
+          <mask
+            id={maskId}
+            maskUnits="userSpaceOnUse"
+            maskContentUnits="userSpaceOnUse"
+            x={-MASK_EXTENT}
+            y={-MASK_EXTENT}
+            width={MASK_EXTENT * 2}
+            height={MASK_EXTENT * 2}
+          >
             {/* Covers the whole unbounded plane, not just the viewport: this group is
                 counter-translated by the pan, so a `100%` rect would whiten only the first
                 screenful of plane coordinates and silently erase every line beyond it. */}
-            <rect x="-100000" y="-100000" width="200000" height="200000" fill="#ffffff" />
+            <rect
+              x={-MASK_EXTENT}
+              y={-MASK_EXTENT}
+              width={MASK_EXTENT * 2}
+              height={MASK_EXTENT * 2}
+              fill="#ffffff"
+            />
             {rectList.map((rect, index) => (
               <rect
                 key={index}

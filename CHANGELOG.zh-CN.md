@@ -7,6 +7,16 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.3] - 2026-11-04
+
+### 修复
+- 连线在「一屏」之外仍然被抹掉：连线的 mask 从来没有声明自己的区域，`<mask>` 便回落到默认的
+  「视口 -10% / 120%」——而在 `maskUnits="userSpaceOnUse"` 下这是**平面坐标**里的一屏。里面那个
+  铺满平面的白色矩形被这个隐式区域裁掉，区域之外一律按 alpha 0 处理，于是线不是被裁而是被**擦掉**：
+  缩到 100% 以下、或把视图平移离开平面原点之后，虚线就在半空断掉，而目标卡片明明还在屏幕上。
+  现在区域显式写死（`MASK_EXTENT`），与白色底衬完全一致。回归用例：
+  `ConnectionLayer.dom.test.tsx` →「states a mask region that covers the plane」
+
 ## [0.1.2] - 2026-11-03
 
 ### 修复

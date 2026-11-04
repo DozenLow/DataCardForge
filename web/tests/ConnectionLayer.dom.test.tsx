@@ -654,4 +654,51 @@ describe('connection lines', () => {
     // Flow speed is a screen quantity too, so the cycle duration does not change with zoom.
     expect(animationSeconds(wire)).toBeCloseTo(16 / 28, 6);
   });
+
+  // ── the mask must cover the plane, not one screenful (2026-11-04) ───
+
+  it('states a mask region that covers the plane instead of one viewport', async () => {
+    // Two cards three screens apart, viewed at 50%: the visible plane is twice the
+    // viewport, so an *implicit* mask region (-10% / 120% of the viewport, anchored at the
+    // plane origin) erased everything beyond it — the wire stopped in mid-air while its
+    // target card was still on screen. These four attributes have no default worth
+    // trusting: left out, they resolve to roughly one screenful of plane coordinates.
+    setupScene({
+      matrixAt: { x: 100, y: 80, width: 640, height: 420 },
+      chartAt: { x: 3200, y: 1800, width: 560, height: 400 },
+    });
+    setCanvasZoom(0.5);
+    const host = await mountLayer(null, 0.5);
+
+    const mask = host.querySelector('mask')!;
+    const region = {
+      x: Number(mask.getAttribute('x')),
+      y: Number(mask.getAttribute('y')),
+      width: Number(mask.getAttribute('width')),
+      height: Number(mask.getAttribute('height')),
+    };
+    expect(Number.isFinite(region.x) && Number.isFinite(region.y)).toBe(true);
+    expect(region.width).toBeGreaterThan(10000);
+    expect(region.height).toBeGreaterThan(10000);
+
+    // Every rect the mask paints — the white backdrop and each card hole — has to live
+    // inside the region, otherwise the region silently crops it.
+    const rects = [...mask.querySelectorAll('rect')];
+    expect(rects.length).toBeGreaterThan(1);
+    for (const rect of rects) {
+      const x = Number(rect.getAttribute('x') ?? 0);
+      const y = Number(rect.getAttribute('y') ?? 0);
+      const w = Number(rect.getAttribute('width'));
+      const h = Number(rect.getAttribute('height'));
+      expect(x).toBeGreaterThanOrEqual(region.x);
+      expect(y).toBeGreaterThanOrEqual(region.y);
+      expect(x + w).toBeLessThanOrEqual(region.x + region.width);
+      expect(y + h).toBeLessThanOrEqual(region.y + region.height);
+    }
+
+    // And the far card really is inside it: that is the hole the implicit region lost.
+    const holes = rects.filter((rect) => rect.getAttribute('fill') === '#000000');
+    expect(holes).toHaveLength(2);
+    expect(holes.some((rect) => Number(rect.getAttribute('x')) > 3000)).toBe(true);
+  });
 });

@@ -7,6 +7,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2026-11-04
+
+### Fixed
+- Wires were still erased outside a single screenful: the connection mask never declared its own
+  region, so `<mask>` fell back to its default `-10% / 120%` of the SVG viewport — which
+  `maskUnits="userSpaceOnUse"` resolves in *plane* coordinates. The white backdrop rect inside it
+  was cropped by that implicit box, and anything outside the box is masked to alpha 0, so the
+  wire was erased rather than clipped: below 100% zoom (or after panning away from the plane
+  origin) the dashed line stopped in mid-air while its target card was still on screen. The
+  region is now stated explicitly (`MASK_EXTENT`) and matches the backdrop. Regression test:
+  `ConnectionLayer.dom.test.tsx` → "states a mask region that covers the plane"
+
 ## [0.1.2] - 2026-11-03
 
 ### Fixed
