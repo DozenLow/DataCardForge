@@ -32,19 +32,15 @@ compute service does not, so function cards show the "backend unreachable" banne
 designed visible degradation, not a bug.
 The demo URL only serves after Pages is enabled once: **Settings → Pages → Source: GitHub Actions**.
 
-**From a release archive, no toolchain** — unzip `datacardforge-<os>-standard.zip`, run the binary, and
-it serves the bundled `web/` from the same origin and opens the browser. On Windows,
-`datacardforge.exe` is a console program on purpose: double-clicking gives you a window that prints
-the address and stays open (closing that window stops the service), plus a browser tab on it.
+**From a release archive, no toolchain** — unzip `datacardforge-<os>-standard.zip` and run the binary:
+it serves the bundled `web/` and opens the browser. On Windows the exe keeps a console window that
+prints the address — closing it stops the service.
 
 ```bash
-./datacardforge                 # serves the UI on http://127.0.0.1:37811/ and opens it
+./datacardforge                 # serve on http://127.0.0.1:37811/ and open it
 ./datacardforge --no-open       # serve only (CI, servers, remote shells)
 ./datacardforge --open          # open the browser even when stdout is not a console
 ```
-
-If the browser does not appear, the window says why (`--no-open`, `DC_NO_OPEN`, no `web/` found,
-a non-interactive console) and prints the address to open by hand.
 
 **Locally, with the compute backend** — install once, then one command builds the C++ service and
 starts both servers:
@@ -309,6 +305,6 @@ Pushing a `v*` tag publishes nine backend archives plus `README.txt` and `SHA256
 
 | Asset | Build | What it is for |
 |---|---|---|
-| `datacardforge-<os>-standard.zip` | `-O2 -g`, `NDEBUG` **left undefined** → Eigen assertions on | **the one to download**: near-Release speed, but it stops at the first violated contract instead of quietly computing a wrong number |
-| `datacardforge-<os>-fullperformance.zip` | `-O3 -DNDEBUG` | the full-performance tier — the ceiling on display, and the tier the tests and the perf gate measure |
-| `datacardforge-<os>-debug.zip` | `-O0 -g` | reproducing a defect; 2–10× slower, never benchmark with it (built for tags only) |
+| `datacardforge-<os>-standard.zip` | `-O2 -g`, `NDEBUG` undefined → assertions on | **download this one** |
+| `datacardforge-<os>-fullperformance.zip` | `-O3 -DNDEBUG` | fastest; what the tests and the perf gate measure |
+| `datacardforge-<os>-debug.zip` | `-O0 -g` | reproducing a defect (tags only) |
