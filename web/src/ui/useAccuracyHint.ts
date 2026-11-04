@@ -38,7 +38,12 @@ export type AccuracyHint =
  * as "checked and fine" when nothing was checked.
  */
 export function toAccuracyHint(
-  reply: { status?: string; digits?: number; relativeGap?: number } | null,
+  reply: {
+    status?: string;
+    digits?: number;
+    relativeGap?: number;
+    reason?: string;
+  } | null,
 ): AccuracyHint {
   if (!reply || reply.status === undefined) return { kind: 'idle' };
   if (reply.status === 'ok') return { kind: 'ok' };
