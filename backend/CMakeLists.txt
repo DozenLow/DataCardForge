@@ -162,6 +162,19 @@ add_executable(dc_matrix_invariants_test tests/matrix_invariants_test.cpp)
 target_link_libraries(dc_matrix_invariants_test PRIVATE dc_core)
 add_test(NAME matrix_invariants COMMAND dc_matrix_invariants_test)
 
+# P0 prototype for the accuracy-warning feature (tests/kappa_probe_test.cpp). It measures
+# whether perturbing the LEAF data can recover the end-to-end condition number of a
+# multi-node chain, and confirms the gap that motivated the approach: node 2's own
+# subtraction is exact (Sterbenz), so a per-node dd check reports "15 digits" while the
+# chain has lost almost all of them. Not a product feature — a falsifiable experiment. If
+# it stops asserting cleanly, the design is wrong and no warning should be built.
+add_executable(dc_kappa_probe_test tests/kappa_probe_test.cpp tests/dd_oracle.cpp)
+target_link_libraries(dc_kappa_probe_test PRIVATE dc_core)
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+  target_compile_options(dc_kappa_probe_test PRIVATE -ffp-contract=off)
+endif()
+add_test(NAME kappa_probe COMMAND dc_kappa_probe_test)
+
 # Card-layer fixtures: the SAME JSON the TypeScript side parses
 # (web/tests/cardFixtures.test.ts). TS judges how a card becomes port bindings; this judges
 # what those bindings compute. Together they are the referee the v2 schema decision demands.
