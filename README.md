@@ -32,12 +32,18 @@ so function cards show the "backend unreachable" banner — that is the designed
 The demo URL only starts serving after Pages is enabled once: **Settings → Pages → Source: GitHub Actions**.
 
 **From a release archive, no toolchain** — unzip `datacardforge-<os>-standard.zip`, run the binary, and it
-serves the bundled `web/` from the same origin and opens the browser:
+serves the bundled `web/` from the same origin and opens the browser. On Windows, `datacardforge.exe`
+is a console program on purpose: double-clicking it gives you a window that prints the address and
+stays open (closing that window stops the service), plus a browser tab on it:
 
 ```bash
 ./datacardforge                 # serves the UI on http://127.0.0.1:37811/ and opens it
 ./datacardforge --no-open       # serve only (CI, servers, remote shells)
+./datacardforge --open          # open the browser even when stdout is not a console
 ```
+
+If the browser does not appear, the window says why (`--no-open`, `DC_NO_OPEN`, no `web/` found,
+a non-interactive console) and prints the address to open by hand.
 
 **Locally, with the compute backend** — install once, then one command builds the C++ service and
 starts both servers:

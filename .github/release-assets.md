@@ -37,14 +37,20 @@ README.txt            # 本文件
 ## 运行
 
 ```bash
-# Windows: datacardforge.exe
+# Windows: 直接双击 datacardforge.exe —— 会弹出一个显示地址的控制台窗口，并自动打开浏览器
 ./datacardforge                 # 起服务并自动打开浏览器
 ./datacardforge --no-open       # 只起服务
+./datacardforge --open          # 即使 stdout 不是控制台也强制打开浏览器
 ./datacardforge --port 4000     # 换端口
 ./datacardforge --web-root DIR  # 指到别处的前端产物
 ```
 
-找不到 `web/` 时后端仍会启动，只提供 API，并在启动日志里说明（`ui: not found (API only)`）。
+Windows 上那个控制台窗口是刻意保留的：它就是运行状态（地址、前端目录、浏览器是否打开、失败原因）。
+**关掉窗口即停止服务**；启动失败时窗口会停留 15 秒，不会一闪而过。浏览器没打开时，窗口里会写明原因
+（`--no-open`、`DC_NO_OPEN`、没找到 `web/`、控制台不可交互）并给出可手动打开的地址；端口被占用时会
+提示是已有实例在跑（直接打开该地址）还是换端口。
+
+找不到 `web/` 时后端仍会启动，只提供 API，并在启动窗口里说明（`no web/ directory was found`）。
 
 ## 运行时依赖
 
@@ -113,15 +119,24 @@ dev server.
 ## Running
 
 ```bash
-# Windows: datacardforge.exe
+# Windows: just double-click datacardforge.exe — a console window shows the address and the
+#          browser opens on it
 ./datacardforge                 # start the service and open the browser
 ./datacardforge --no-open       # start the service only
+./datacardforge --open          # open the browser even when stdout is not a console
 ./datacardforge --port 4000     # use another port
 ./datacardforge --web-root DIR  # point at a front end built elsewhere
 ```
 
-When `web/` is missing the backend still starts, serving the API only, and says so in its startup log
-(`ui: not found (API only)`).
+That Windows console window is deliberate — it *is* the run state (address, front end directory,
+whether the browser was opened, and why not). **Closing it stops the service.** After a startup
+failure it stays open for 15 s instead of flashing by. When the browser is not opened the window
+says why (`--no-open`, `DC_NO_OPEN`, no `web/` found, a non-interactive console) and prints the
+address to open by hand; when the port is taken it tells you either to open the address of the
+instance that already runs or to pick another port.
+
+When `web/` is missing the backend still starts, serving the API only, and says so in that window
+(`no web/ directory was found`).
 
 ## Runtime requirements
 

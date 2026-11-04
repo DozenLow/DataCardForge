@@ -28,12 +28,15 @@
 在那里都能用；C++ 计算服务不在静态托管上，函数卡会显示「后端不可达」横幅——这是设计里的可见降级，不是故障。
 演示地址需要先在 **Settings → Pages → Source: GitHub Actions** 开启一次，否则打开是 404。
 
-**用发行包跑（无需工具链）**——解压 `datacardforge-<os>-standard.zip`，直接运行二进制，它会用同源的 `web/` 提供界面并自动打开浏览器：
+**用发行包跑（无需工具链）**——解压 `datacardforge-<os>-standard.zip`，直接运行二进制，它会用同源的 `web/` 提供界面并自动打开浏览器。Windows 上 `datacardforge.exe` 是刻意的**控制台程序**：双击会拿到一个打印着地址、并停留不走的窗口（关掉这个窗口即停止服务），同时打开浏览器标签页：
 
 ```bash
 ./datacardforge                 # 起在 http://127.0.0.1:37811/ 并打开浏览器
 ./datacardforge --no-open       # 只起服务（CI、服务器、远程 shell 用）
+./datacardforge --open          # 即使 stdout 不是控制台也强制打开浏览器
 ```
+
+浏览器没出现时，窗口里会写明原因（`--no-open`、`DC_NO_OPEN`、没找到 `web/`、控制台不可交互），并给出可直接手动打开的地址。
 
 **本地跑完整版（含计算后端）**——先装一次依赖，然后一条命令编译后端并起两个服务：
 

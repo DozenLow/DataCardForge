@@ -91,12 +91,23 @@ target_link_libraries(dc_core PUBLIC Eigen3::Eigen)
 add_library(dc_static STATIC src/static_files.cpp)
 target_include_directories(dc_static PUBLIC src)
 
-add_executable(dc_backend src/http_server.cpp src/main.cpp ${DC_SHA_HEADER})
+add_executable(dc_backend src/http_server.cpp src/main.cpp src/ui_launch.cpp ${DC_SHA_HEADER})
 target_include_directories(dc_backend PRIVATE ${CMAKE_BINARY_DIR}/generated)
 add_dependencies(dc_backend dc_build_sha)
 target_link_libraries(dc_backend PRIVATE dc_core dc_static Threads::Threads)
+
+# The shipped executable is a CONSOLE application on purpose: double-clicking it has to show a
+# window with the listening address, and the browser is opened after that window exists. Do not
+# set WIN32_EXECUTABLE here — a GUI-subsystem image starts with no console at all, which is the
+# state the bug report describes ("neither a browser nor a terminal"): printf goes to a dead
+# handle and `isatty(stdout)` is false, so the browser launch was silently skipped. main.cpp now
+# also allocates a console when one is missing (a launcher can still hide it), but the subsystem
+# stays the cheap, first-line guarantee. The release workflow asserts the subsystem of the exact
+# zip that ships (`.github/workflows/build-release.yml`, "Prepare release assets").
+set_target_properties(dc_backend PROPERTIES WIN32_EXECUTABLE OFF)
+
 if(WIN32)
-  target_link_libraries(dc_backend PRIVATE ws2_32)
+  target_link_libraries(dc_backend PRIVATE ws2_32 shell32)
 endif()
 
 # Fixture runner: the same xlayer JSON that gates the TS reference (stage-0 contract).
@@ -117,6 +128,14 @@ add_test(NAME node_registry COMMAND dc_nodes_test)
 add_executable(dc_static_test tests/static_path_test.cpp)
 target_link_libraries(dc_static_test PRIVATE dc_static)
 add_test(NAME static_paths COMMAND dc_static_test)
+
+# The console/browser launch rule (ui_launch.h). Header-only decision, so no platform code is
+# involved: this is the half of "double-click opens nothing" that a Linux CI can actually judge.
+# What it protects: the old rule required `isatty(stdout)`, and a launcher-started process has
+# no console — so the browser silently never opened while the server ran fine.
+add_executable(dc_ui_launch_test tests/ui_launch_test.cpp)
+target_include_directories(dc_ui_launch_test PRIVATE src)
+add_test(NAME ui_launch COMMAND dc_ui_launch_test)
 
 # Card-layer fixtures: the SAME JSON the TypeScript side parses
 # (web/tests/cardFixtures.test.ts). TS judges how a card becomes port bindings; this judges

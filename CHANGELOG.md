@@ -10,6 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.1.3] - 2026-11-04
 
 ### Fixed
+- The packaged exe opened neither a browser nor a terminal when double-clicked. It was one bug,
+  not two: the launch was gated on `isatty(stdout)`, and a process that Windows did not start
+  from a shell has **no console at all** — so the status lines went into a dead handle (the
+  window never appeared) and the browser launch was skipped while the server itself was running
+  fine. The backend now allocates a console window when it has none (re-binding
+  stdin/stdout/stderr to it), prints the address into it and into the window title, and opens
+  the browser through `ShellExecuteW` instead of `system("start …")` — no `cmd.exe` in the path,
+  and a refusal is reported instead of swallowed. The window now stays open for 15 s after a
+  startup failure so the message can be read, a busy port names both the URL to open and a free
+  port to try, and `--open` / `DC_OPEN=1` force the browser from a non-TTY context. The exe stays
+  a console image, asserted on the exact bytes that go into the zip by
+  `scripts/check-pe-subsystem.py`; the rule itself is covered by the `ui_launch` ctest gate
 - Wires were still erased outside a single screenful: the connection mask never declared its own
   region, so `<mask>` fell back to its default `-10% / 120%` of the SVG viewport — which
   `maskUnits="userSpaceOnUse"` resolves in *plane* coordinates. The white backdrop rect inside it

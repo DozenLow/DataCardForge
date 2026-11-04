@@ -241,6 +241,12 @@ jobs:
           cp backend/build/dc_backend.exe "$tmp/"
           env PATH="/c/Windows/system32:/c/Windows" "$tmp/dc_backend.exe" --help >/dev/null
           echo "clean-PATH smoke run: ok"
+          # And: a CONSOLE image, never a GUI one. A GUI-subsystem exe starts with no console
+          # at all, so double-clicking it shows neither a window nor a browser (isatty(stdout)
+          # is false) - the exact report this release fixes. See scripts/check-pe-subsystem.py.
+          # Windows runners have both, but not always both on PATH under bash.
+          py="$(command -v python3 || command -v python)"
+          "$py" scripts/check-pe-subsystem.py backend/build/dc_backend.exe
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
@@ -301,6 +307,12 @@ jobs:
           cp backend/build/dc_backend.exe "$tmp/"
           env PATH="/c/Windows/system32:/c/Windows" "$tmp/dc_backend.exe" --help >/dev/null
           echo "clean-PATH smoke run: ok"
+          # And: a CONSOLE image, never a GUI one. A GUI-subsystem exe starts with no console
+          # at all, so double-clicking it shows neither a window nor a browser (isatty(stdout)
+          # is false) - the exact report this release fixes. See scripts/check-pe-subsystem.py.
+          # Windows runners have both, but not always both on PATH under bash.
+          py="$(command -v python3 || command -v python)"
+          "$py" scripts/check-pe-subsystem.py backend/build/dc_backend.exe
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
@@ -425,6 +437,12 @@ jobs:
           cp backend/build/dc_backend.exe "$tmp/"
           env PATH="/c/Windows/system32:/c/Windows" "$tmp/dc_backend.exe" --help >/dev/null
           echo "clean-PATH smoke run: ok"
+          # And: a CONSOLE image, never a GUI one. A GUI-subsystem exe starts with no console
+          # at all, so double-clicking it shows neither a window nor a browser (isatty(stdout)
+          # is false) - the exact report this release fixes. See scripts/check-pe-subsystem.py.
+          # Windows runners have both, but not always both on PATH under bash.
+          py="$(command -v python3 || command -v python)"
+          "$py" scripts/check-pe-subsystem.py backend/build/dc_backend.exe
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v6
@@ -479,6 +497,12 @@ jobs:
             rm -rf "$stage"
             mkdir -p "$stage/web"
             cp "$bin" "$stage/$exe"
+            # The exact bytes that go into the zip: this is the only point where "what ships"
+            # is known, so the console-subsystem guarantee is asserted here as well as in the
+            # build jobs (a GUI image would double-click into silence: no window, no browser).
+            if [ "$exe" = "datacardforge.exe" ]; then
+              python3 scripts/check-pe-subsystem.py "$stage/$exe"
+            fi
             cp -r artifacts/web-dist/. "$stage/web/"
             ( cd "$stage" && zip -q -r "$GITHUB_WORKSPACE/release/${dir_name}.zip" . )
           done
