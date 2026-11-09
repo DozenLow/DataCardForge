@@ -248,6 +248,34 @@ def check_section_refs(root: Path, files: list[str], rep: Report) -> None:
                     rep.fail(rel, f"{where}，该文件里没有这一节")
 
 
+def check_details_blocks(root: Path, files: list[str], rep: Report) -> None:
+    """`<details>` 折叠块的结构：配平、顶格、summary 后必须空行。
+
+    GitHub 把 <details> 当 raw HTML 块：块在空行处结束，紧跟的 markdown 才会被解析。
+    少一个空行，里面的列表就变成一整段纯文本——折叠块看起来正常，内容却没排版。
+    """
+    for rel in files:
+        text = (root / rel).read_text(encoding="utf-8", errors="replace")
+        if "<details>" not in text:
+            continue
+        lines = text.split("\n")
+        opens = text.count("<details>")
+        closes = text.count("</details>")
+        if opens != closes:
+            rep.fail(rel, f"<details> 与 </details> 不配平（{opens} / {closes}）")
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped == "<details>" and not line.startswith("<details>"):
+                rep.fail(rel, f"第 {i+1} 行 <details> 未顶格——缩进 4 格会被当成代码块")
+            if stripped.startswith("<summary"):
+                if not line.startswith("<summary"):
+                    rep.fail(rel, f"第 {i+1} 行 <summary> 未顶格")
+                if i + 1 >= len(lines) or lines[i + 1].strip() != "":
+                    rep.fail(rel, f"第 {i+1} 行 <summary> 之后缺空行——块内的 markdown 不会被解析")
+            if stripped.startswith("<details>") and (i + 1 >= len(lines) or not lines[i + 1].startswith("<summary")):
+                rep.fail(rel, f"第 {i+1} 行 <details> 之后应紧跟一行 <summary>…</summary>")
+
+
 def check_bilingual(root: Path, rep: Report) -> None:
     for rel in BILINGUAL_MD:
         en = rel[: -len(".md")] + ".en.md"
@@ -280,6 +308,7 @@ def main() -> int:
     check_ascii_art(root, docs_md + root_md, rep)
     check_diagrams(root, docs_md + root_md, svgs, rep)
     check_section_refs(root, docs_md + root_md, rep)
+    check_details_blocks(root, docs_md + root_md, rep)
     check_bilingual(root, rep)
 
     checked = (

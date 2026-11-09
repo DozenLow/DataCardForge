@@ -76,39 +76,50 @@ pushes node state changes (dirty → computing → done | error) to drive the fo
 ## Features
 
 ### Data cards
-
 - **File → Open Data Files**, **right-click the empty area**, or **drop files onto the canvas**
-- Supports TXT / CSV / TSV / DAT / XLSX; parsing runs in a **Web Worker**, so a 10 000-row file does
-  not freeze the interface; CSV parsing handles quoted fields and sniffs the delimiter
-- **Automatic header detection**: a non-numeric first row becomes column titles (annotations)
 - **Replace the data behind a card** (*Replace file…*, or drop a file onto it). Replacing is a **data
   change** — dependent cards follow and recompute; *switching* the file of a multi-file card is a
   **view change** and asks before re-pointing dependents
+
+<details>
+<summary>Formats and delimiter sniffing · header detection · read-only/editing · Web Worker parsing · precision · backend registration</summary>
+
+- Supports TXT / CSV / TSV / DAT / XLSX; parsing runs in a **Web Worker**, so a 10 000-row file does
+  not freeze the interface; CSV parsing handles quoted fields and sniffs the delimiter
+- **Automatic header detection**: a non-numeric first row becomes column titles (annotations)
 - File-backed tables start **read-only**; a lock button unlocks editing. Unparseable cells show `—`
   instead of silently becoming 0
 - Values are displayed at their **shortest round-trip precision**, so a column of measurements around
   `1e6` stays readable instead of collapsing into one repeated string
 - Loaded matrices are **registered with the compute backend** in the background; the UI never blocks
 
+</details>
 ### Chart cards
-
 - Right-click a column header → **pick the chart type directly** (types that would run past the last
   column are disabled, with the reason in the tooltip)
 - **9 scientific chart types**, all SVG and therefore all exportable as **true vector**: line, scatter,
   **regression** (OLS with slope / R² / n), bar (grouped or stacked), **histogram** (Sturges auto-bin),
   **box plot** (median / quartiles / whiskers / Tukey outliers), **violin** (KDE + quartile rules),
   **mean ± error bars** (SD / SE / 95 % CI), **correlation heatmap** (pairwise Pearson)
+
+<details>
+<summary>Axis options · smoothing · export · zoom and pan</summary>
+
 - Log Y axis / second axis / fit line / reset-zoom appear only where the type supports them
 - **Smoothing**: moving average / exponential / median / Savitzky–Golay, redrawn live
 - **Export**: SVG (true vector) / PNG (1×/2×/4×) / PDF (raster wrapper, labelled as such in the UI)
 - Zoom and pan on both axes; dependent charts follow file switches automatically
 
+</details>
 ### Function cards
-
 - **Dependencies live in the envelope**: `inputs[]` is the single dependency representation, so the
   graph rebuilds in one pass with no card-type knowledge
 - **One node, K outputs**: a signature declares its ports and output count; `builtin:expression-columns`
   computes a whole wide table from one node
+
+<details>
+<summary>Explicit inputs · column-count contract · chaining · preview · no evaluation lock · binding-only signatures · in-UI manual</summary>
+
 - **Inputs are explicit matrices**: switching a file never silently re-points a function card. The card
   shows a **pending offer** with a column-difference preview and one confirmation
 - **Column-count contract**: naming an output column locks its width; upstream width drift makes the
@@ -122,10 +133,13 @@ pushes node state changes (dirty → computing → done | error) to drive the fo
   (cheat-sheet / column-reference syntax / examples); a test asserts the manual and the engine's
   function table are the same set
 
+</details>
 ### Expression engine
-
 The backend expression engine is a full semantic port of the TS reference — cross-tier JSON fixtures
 plus a randomized differential fuzz gate guarantee identical results.
+
+<details>
+<summary>Operators and functions · column references · matrix mode</summary>
 
 - Arithmetic, comparisons, aggregations (SUM / AVG / MIN / MAX / MEDIAN / STD / VAR / SEM, NaN-skipping
   and Bessel-corrected), element-wise math (ABS / SQRT / LOG / LN / LOG10 / EXP / POW / ROUND / FLOOR /
@@ -137,11 +151,15 @@ plus a randomized differential fuzz gate guarantee identical results.
   additionally `TRANSPOSE` / `DET` / `INV` / `SOLVE` / `MMUL` / `EMUL`. Shape mismatches produce
   structured `shapeMismatch` errors — never silent garbage
 
+</details>
 ### Canvas & interaction
-
 - **Unbounded canvas + whole-workbench zoom**: wheel zooms everything anchored on the cursor (10 %–300 %);
   over a card the wheel still belongs to the card, and Ctrl/Cmd+wheel zooms there too
 - **Pan**: middle-drag, space+left drag, or a left drag on the bare canvas
+
+<details>
+<summary>View actions · connection layer · close protection · i18n and persistence · availability banner</summary>
+
 - **View → Reset View** fits the whole workflow; **Tile / Cascade** lay out inside the visible area
 - **Connection layer**: one line per dependency edge, endpoints at card-window centres, a single cubic
   Bézier route; colour, dash pattern and flow direction all encode input vs output (colour-blind
@@ -150,6 +168,7 @@ plus a randomized differential fuzz gate guarantee identical results.
 - Runtime **Chinese/English switching**, **workspace persistence** (layout + dependencies + data), CSV export
 - **Backend availability banner** with a retry button — never a blank screen
 
+</details>
 ## Screenshots
 
 Every image is real headless-Chromium output of the production build, not a mock-up
