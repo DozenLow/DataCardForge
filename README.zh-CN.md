@@ -3,7 +3,7 @@
 [![CI](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml/badge.svg)](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml)
 [![Pages 演示](https://img.shields.io/badge/%E6%BC%94%E7%A4%BA-%E5%89%8D%E7%AB%AF%E5%9C%A8%E7%BA%BF-2ea44f)](https://dozenlow.github.io/DataCardForge/)
 [![许可证](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
-[![测试](https://img.shields.io/badge/tests-581%20unit%20%C2%B7%209%20ctest-brightgreen)](web/tests)
+[![测试](https://img.shields.io/badge/tests-594%20unit%20%C2%B7%2014%20ctest-brightgreen)](web/tests)
 
 **[English](README.md) | [中文](README.zh-CN.md)**
 
@@ -17,7 +17,7 @@
 
 **产品与仓库**：两者同名 **DataCardForge**。
 **作者与权属**：`DozenLow` · GPL-3.0 · 身份、时间线与提交锚点见 [`PROVENANCE.md`](PROVENANCE.md)。
-**当前实测状态**（2026-11-03 实测）：前端 581 个单元测试（14 个 opt-in 跳过）· 后端 9 个 ctest（4 个 opt-in）· 端到端 102 项检查，全绿。
+**当前实测状态**（2026-11-03 实测）：前端 594 个单元测试（14 个 opt-in 跳过）· 后端 14 个 ctest（4 个 opt-in）· 端到端 102 项检查，全绿。
 **尚未完成**：函数卡是半成品；连线的 hover 与断线编辑仍在路上——两者都在
 [状态与已知缺口](#状态与已知缺口)里写清楚了。
 
@@ -59,22 +59,9 @@ Eigen 3.4 头文件（`sudo apt install build-essential cmake ninja-build libeig
 
 ## 架构
 
-```
-┌─────────────────────────────────────────────────────┐
-│                   浏览器（Web）                      │
-│  React 19 · ECharts 6 · zustand · VirtualTable      │
-│  卡片布局 · 端口 · 连线 · 状态指示灯                  │
-│  纯交互——不做任何数值计算                            │
-└──────────────────────┬──────────────────────────────┘
-                       │ HTTP + JSON + DCM2 二进制帧
-                       ▼
-┌─────────────────────────────────────────────────────┐
-│              计算后端（C++17）                        │
-│  Eigen 3.4 · 表达式引擎 · 依赖图                     │
-│  矩阵存储 · 节点调度器 · 事件总线                     │
-│  所有数值/统计/矩阵计算                              │
-└─────────────────────────────────────────────────────┘
-```
+<img src="docs/diagrams/architecture.zh.svg" width="100%" alt="DataCardForge 架构：浏览器与 Web Worker 只做交互，计算全在 C++/Eigen 后端；两者经协议 v1（JSON 控制面 + DCM2 矩阵帧 + 长轮询事件）通信">
+
+图源：[`docs/diagrams/architecture.zh.svg`](docs/diagrams/architecture.zh.svg) · 交互版见 [`docs/diagrams/interactive.html`](docs/diagrams/interactive.html)（本地打开）。
 
 前端使用[协议 v1](docs/architecture/backend-protocol-v1.md)：HTTP 上的 JSON 控制消息 + DCM2 二进制矩阵帧（窗口 + 整表形状）。长轮询事件流推送节点状态变更（dirty → computing → done | error），驱动四态指示灯。
 
@@ -265,7 +252,7 @@ schema v2 把依赖升成信封、把绑定挪到端口之后，连线一度退�
 | 自研虚拟滚动 | 大表渲染 | 无第三方依赖 |
 | Web Worker（`src/loaders/parse.worker.ts`） | 解析离开主线程 | 大文件加载时界面不冻结 |
 | Node.js 22 | 前端运行时、开发服务器、CI | CI 固定 `node-version: 22`；按需 fuzz 门控需 `--experimental-transform-types` |
-| Vitest 5 + jsdom | 单元 / DOM 测试 | 581 个用例，14 个按需跳过 |
+| Vitest 5 + jsdom | 单元 / DOM 测试 | 594 个用例，14 个按需跳过 |
 | Playwright（Chromium） | 端到端冒烟 | 102 项检查，跑在 `vite preview` 上 |
 | **C++17**（实测 g++ 15） | 计算后端语言 | `CMAKE_CXX_STANDARD 17`，CMake 4.2 + Ninja |
 | **Eigen 3.4** | 线性代数/矩阵运算 | Header-only，`find_package(Eigen3 REQUIRED NO_MODULE)`，`/usr/include/eigen3` |
@@ -317,10 +304,10 @@ npm test                  # 单元测试（vitest，含跨层夹具）
 ### 测试
 
 ```bash
-# 前端：typecheck + 581 个单元测试（含 81 个跨层差分夹具、14 个 opt-in 跳过）
+# 前端：typecheck + 594 个单元测试（含 81 个跨层差分夹具、14 个 opt-in 跳过）
 cd web && npm run typecheck && npm test
 
-# 后端：9 个 ctest 用例（跨层夹具、矩阵算子、节点注册表、卡片夹具、静态路径规则；另有 4 个按需门控，默认 Skipped）
+# 后端：14 个 ctest 用例（跨层夹具、矩阵算子、节点注册表、卡片夹具、静态路径规则；另有 4 个按需门控，默认 Skipped）
 cd backend && ctest --test-dir build --output-on-failure
 
 # 按需门控：差分 fuzz（随机表达式 TS↔C++ 对拍）与 HTTP 畸形报文压测

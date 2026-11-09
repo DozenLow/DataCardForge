@@ -3,7 +3,7 @@
 [![CI](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml/badge.svg)](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml)
 [![Pages demo](https://img.shields.io/badge/demo-live%20(front%20end)-2ea44f)](https://dozenlow.github.io/DataCardForge/)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-589%20unit%20%C2%B7%2014%20ctest-brightgreen)](web/tests)
+[![Tests](https://img.shields.io/badge/tests-594%20unit%20%C2%B7%2014%20ctest-brightgreen)](web/tests)
 
 **[English](README.md) | [中文](README.zh-CN.md)**
 
@@ -18,7 +18,7 @@ drop a measurement file, get a card you can plot, transform and chain.
 </p>
 
 **Author & provenance**: `DozenLow` · GPL-3.0 · see [`PROVENANCE.md`](PROVENANCE.md).
-**Verified state**: 589 frontend unit tests (14 opt-in skipped) · 14 backend ctest cases
+**Verified state**: 594 frontend unit tests (14 opt-in skipped) · 14 backend ctest cases
 (4 opt-in) · 102 end-to-end smoke checks — all green.
 **Not finished yet**: function cards are API-stable but UX-incomplete — see
 [Known gaps](#known-gaps).
@@ -65,22 +65,9 @@ a C++17 compiler and the Eigen 3.4 headers
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────┐
-│                   Browser (Web)                     │
-│  React 19 · ECharts 6 · zustand · VirtualTable      │
-│  Card layout · Ports · Connections · Status lamps   │
-│  Pure interaction — NO numeric computation          │
-└──────────────────────┬──────────────────────────────┘
-                       │ HTTP + JSON + DCM2 binary
-                       ▼
-┌─────────────────────────────────────────────────────┐
-│              Compute Backend (C++17)                │
-│  Eigen 3.4 · Expression engine · Dependency graph   │
-│  Matrix store · Node scheduler · Event bus          │
-│  All numeric / statistical / matrix computation     │
-└─────────────────────────────────────────────────────┘
-```
+<img src="docs/diagrams/architecture.en.svg" width="100%" alt="DataCardForge architecture: the browser and a Web Worker handle interaction only, while a C++/Eigen backend does all the compute; the two sides speak protocol v1 (JSON control plane + DCM2 matrix frames + long-poll events)">
+
+Source: [`docs/diagrams/architecture.en.svg`](docs/diagrams/architecture.en.svg) · interactive version: [`docs/diagrams/interactive.html`](docs/diagrams/interactive.html) (open locally).
 
 The frontend speaks [protocol v1](docs/architecture/backend-protocol-v1.md): JSON control messages over
 HTTP plus DCM2 binary frames for dense-matrix windows (window + full shape). A long-poll event stream
@@ -215,7 +202,7 @@ The current state, the next task and the open questions live in `STATE.md` at th
 | Hand-rolled virtual scrolling | Large-table rendering | No third-party dependency |
 | Web Worker (`src/loaders/parse.worker.ts`) | Off-thread file parsing | Keeps the UI responsive |
 | Node.js 22 | Frontend runtime, dev server, CI | CI pins `node-version: 22` |
-| Vitest 5 + jsdom | Unit / DOM tests | 589 tests, 14 opt-in skipped |
+| Vitest 5 + jsdom | Unit / DOM tests | 594 tests, 14 opt-in skipped |
 | Playwright (Chromium) | End-to-end smoke | 102 checks against `vite preview` |
 | **C++17** (verified with g++ 15) | Compute backend language | `CMAKE_CXX_STANDARD 17`, CMake 3.24+ + Ninja |
 | **Eigen 3.4** | Linear algebra / matrix operations | Header-only, `find_package(Eigen3 REQUIRED NO_MODULE)` |

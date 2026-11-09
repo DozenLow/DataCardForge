@@ -123,10 +123,7 @@
 
 ## Projection map
 
-```
-this file (single source of truth)
- ├─► FunctionSignature registry — isomorphic in C++/TS, built-ins register first (the five stats.ts candidates are the first stress test)
- ├─► dc_plugin.h — the C projection. Not frozen; the revisit trigger is in the upstream decision
- ├─► Rust repr(C) mirror — the WASM layer (Rust has no stable ABI; repr(C) + extern "C" is the only path)
- └─► card-level differential fixtures — web/tests/fixtures/cards/ (following the xlayer judge pattern)
-```
+![Projection map: this file is the single source of truth, projecting the signature registry, the C projection, the Rust repr(C) mirror and the card-level differential fixtures](../diagrams/port-projection.en.svg)
+
+This file is the only authority; the four layers below are **projections** of it, and where one disagrees, this file wins.
+Interactive version (language/theme toggle, click to inspect): [`diagrams/interactive.html`](../diagrams/interactive.html).

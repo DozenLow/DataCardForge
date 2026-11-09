@@ -121,10 +121,7 @@
 
 ## 投影关系
 
-```
-本文件（单一事实源）
- ├─► FunctionSignature 注册表 —— C++/TS 同构，内置函数先行注册（stats.ts 五个候选是首批压力测试）
- ├─► dc_plugin.h —— C 投影。未冻结，触发条件见上游决策 §重访触发
- ├─► Rust repr(C) 镜像 —— WASM 层（Rust 无稳定 ABI，repr(C)+extern "C" 是唯一路径）
- └─► 卡片层差分夹具 —— web/tests/fixtures/cards/（照抄 xlayer 裁判模式）
-```
+![投影关系：本文件是单一事实源，向下投影出签名注册表、C 投影、Rust repr(C) 镜像与卡片层差分夹具](../diagrams/port-projection.zh.svg)
+
+本文件是唯一权威；下面四层都是它的**投影**，任一层与本文冲突时以本文为准。
+交互版（可切换中英/主题、点选查看）见 [`diagrams/interactive.html`](../diagrams/interactive.html)。

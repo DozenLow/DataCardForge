@@ -21,29 +21,10 @@
 
 ## 2. 决策流向图
 
-```
-2026-08-07  ┌─ 后端先行，前端搁置 ────────────────┐
-            │  Eigen 线性代数 + 逐元素公式 = 后端    │
-            │  视图层暂用 Qt Widgets 凑合           │
-            └──────────────┬───────────────────────┘
-                           │ (前端选型暂停)
-2026-10-14  ┌──────────────▼───────────────────────┐
-            │  前端抢跑：定为 Web (React/Vite/TS)    │
-            │  权重反转：矢量导出是硬需求            │
-            │  代价：core/ 算法"重写为 TypeScript"   │  ← TS 做数学的诞生点（副产品）
-            └──────────────┬───────────────────────┘
-                           │
-2026-10-15  ┌──────────────▼───────────────────────┐
-            │  仓库治理：web/ 进版本控制，Qt 树删除  │
-            │  兜底原则：三层 T1(TS) / T2(WASM) / T3(后端) │  ← TS 被追认为"永远可用的基线"
-            └──────────────┬───────────────────────┘
-                           │
-2026-10-17  ┌──────────────▼───────────────────────┐
-            │  用户拍板：后端持有数据与计算        │
-            │  浏览器退化为纯交互界面                │
-            │  TS 计算退出生产路径，转差分测试基准   │  ← 终点：回到 8 月的"后端优先"
-            └──────────────────────────────────────┘
-```
+![决策流向：四次主要方向推翻 —— 后端先行 → 定为 Web → 仓库治理 → 后端持有计算](diagrams/decision-flow.zh.svg)
+
+> 交互版（点选阶段看当时的判断与出处、切中英/主题）：[`diagrams/interactive.html`](diagrams/interactive.html)
+> 生成方式与约定见 [导航](README.md#图diagrams)。
 
 **一眼可见的讽刺**：终点（后端算）与起点（后端先行）同名，但此后端非彼后端——
 8 月的 Eigen "已在后端就绪"**从来不存在**（§3.1），10 月的后端是**从零写的 C++/Eigen 服务**。
@@ -72,10 +53,24 @@
 | 2026-10-17 | **后端持有计算拍板**：后端持有数据与计算，浏览器退化为纯交互界面 | 决策 | [decisions/2026-10-17-backend-owns-compute](decisions/2026-10-17-backend-owns-compute.md) |
 | 2026-10-17 | 后端协议 v1 草案（传输/资源/端点/二进制帧/错误/差分夹具） | 架构 | [architecture/backend-protocol-v1](architecture/backend-protocol-v1.md) |
 | 2026-10-17 | 工具链核实：g++ 15.2 / cmake 4.2 / ninja 1.13 / Eigen 3.4 **已预装** | 环境 | [decisions/2026-10-17-backend-owns-compute](decisions/2026-10-17-backend-owns-compute.md) |
+| 2026-10-21 | 阶段 3：公式卡计算权威切到后端 · 差分 fuzz 门禁 · 画布改为无边界平面 | 决策/实现 | [decisions/2026-10-21-infinite-canvas](decisions/2026-10-21-infinite-canvas.md) · [log/2026-10-21](log/2026-10-21.md) |
+| 2026-10-26 | 卡片数据结构 v2：依赖升到信封、函数卡 = 单节点 K 输出 | 决策 | [decisions/2026-10-26-card-schema-v2](decisions/2026-10-26-card-schema-v2.md) |
+| 2026-10-27 | 函数卡的三个契约：列数 · 参数归属 · 单列端口 | 决策 | [decisions/2026-10-27-card-contracts](decisions/2026-10-27-card-contracts.md) |
+| 2026-10-27 | 摘要（`builtin:summary`）v1：统计量目录、惰性求值、数字归后端 | 决策 | [decisions/2026-10-27-summary-builtin](decisions/2026-10-27-summary-builtin.md) |
 | 2026-10-28 | 端口级连线：依赖边携带 portId、端点落端口、方向箭头 | 修复 | [decisions/2026-10-28-port-level-connections](decisions/2026-10-28-port-level-connections.md) · [log/2026-10-28](log/2026-10-28.md) |
 | 2026-10-28 | **表达式列引用语法**：`Pos.N`/注解名/`[列名]`/端口限定 + 全角标点；公式卡对带表头文件恢复可用 | 决策 | [decisions/2026-10-28-expression-reference-syntax](decisions/2026-10-28-expression-reference-syntax.md) |
 | 2026-10-28 | 空状态「打开数据文件」按钮恢复：画布 `setPointerCapture` 吞掉了 click | 修复 | [log/2026-10-28](log/2026-10-28.md) |
 | 2026-10-28 | 公式卡帮助入口（帮助菜单 + `?` + 悬停 1 s 位置提示 + 可点列芯片） | 实现 | [log/2026-10-28](log/2026-10-28.md) |
+| 2026-10-28 | 函数卡输出绑定的三处真缺陷：本地 id / 上传竞态 / 结果表为空的连带入口消失 | 决策 | [decisions/2026-10-28-function-card-output-binding](decisions/2026-10-28-function-card-output-binding.md) |
+| 2026-10-29 | 结果预览与稠密帧：**DCM2** 帧头 24 字节、携带整表形状 | 决策 | [decisions/2026-10-29-result-preview](decisions/2026-10-29-result-preview.md) |
+| 2026-10-29 | 连线锚点改落端口中心（不再从卡片边中点出入） | 决策 | [decisions/2026-10-29-connection-center-anchors](decisions/2026-10-29-connection-center-anchors.md) |
+| 2026-10-29 | 引擎层性能门禁：12 个用例、p50×3 预算、1.3× 回归护栏 | 决策 | [decisions/2026-10-29-perf-gate](decisions/2026-10-29-perf-gate.md) |
+| 2026-10-31 | 回归卡改名「关系枚举」：选列变成端口绑定、列头带 `X : Y` | 决策 | [decisions/2026-10-31-relation-enum-card](decisions/2026-10-31-relation-enum-card.md) |
+| 2026-10-31 | 数据卡可以换文件：换数据自动跟随，切文件仍显式重指向 | 决策 | [decisions/2026-10-31-file-replacement](decisions/2026-10-31-file-replacement.md) |
+| 2026-11-03 | 仓库公开；`main` 经 PR #1–#4 推进约 20 提交，作者名统一改写（id 不变） | 治理 | `STATE.md` |
+| 2026-11-03 | 0.1.1 / 0.1.2：发行包变成「二进制 + `web/`」，后端自己托管界面；Windows 包改全静态链接 | 发布 | [CHANGELOG](../CHANGELOG.md) |
+| 2026-11-04 | 0.1.3（未打 tag）：双击启动链——控制台子系统断言 + `AllocConsole` + `ShellExecuteW` | 发布 | [CHANGELOG](../CHANGELOG.md) · `STATE.md` |
+| 2026-11-04 | 精度审计：`dd_oracle`（double-double 参考）+ `matrix_invariants`；表格改最短往返显示；新增 `/accuracy` 端点 | 审计 | `STATE.md` · [CHANGELOG](../CHANGELOG.md) |
 
 ---
 
@@ -214,7 +209,9 @@ C++/Qt 树曾作"行为参照"保留 → 发现它**成本 215 MB、还让主实
 
 ---
 
-## 7. 现状盘点（2026-10-17）
+## 7. 现状盘点（2026-10-17 快照）
+
+> **这是快照，不是现状。** 2026-10-17 当时的判断原样保留（历史不改写）；**现在的状态**见 §7.4 与仓库根 `STATE.md`（后者是"现在在哪"的唯一权威）。
 
 ### 7.1 已确立
 
@@ -223,7 +220,7 @@ C++/Qt 树曾作"行为参照"保留 → 发现它**成本 215 MB、还让主实
 | 前端 | Web，`web/`（React 19 / TS 7 / Vite 8 / ECharts 6 @ SVG） | 10-14 决策 |
 | 后端 | **新建 `backend/`**：C++/CMake 服务，矩阵存储 + 依赖图 + Eigen 算子 + 调度 | 10-17 决策 |
 | 计算归属 | **全部在服务端**；前端只做渲染布局（坐标轴/虚拟滚动取窗/SVG 位图导出） | 10-17 决策 |
-| 传输 | HTTP/1.1 本地服务（默认 `127.0.0.1:37811`），JSON 控制 + 二进制帧（magic `DCM1`）+ 长轮询事件 | 协议 v1 |
+| 传输 | HTTP/1.1 本地服务（默认 `127.0.0.1:37811`），JSON 控制 + 二进制帧（当时 magic `DCM1`；自 10-29 服务端只发 `DCM2`，见 §7.4）+ 长轮询事件 | 协议 v1 |
 | 环境 | g++ 15.2.0 / cmake 4.2.3 / ninja 1.13.2 / **Eigen 3.4.0 已预装**（冒烟编译通过） | 10-17 决策 |
 | 错误契约 | 服务端只发 `code + params`，**永不发面向用户的句子**；文案由前端 i18n 渲染 | 协议 v1 |
 | 回滚基线 | tag `v1.0.0`（`d077fce`） | commit |
@@ -244,6 +241,20 @@ C++/Qt 树曾作"行为参照"保留 → 发现它**成本 215 MB、还让主实
 - 无鉴权；跨机部署前必须补 token
 - PDF 是**位图封装**、**不提供 EPS**（浏览器端无 PostScript 生成路径，属平台约束）
 
+### 7.4 截至 2026-11-04 的现状
+
+| 维度 | 现态 | 出处 |
+|---|---|---|
+| 版本 | 0.1.3（未打 tag）；发行包 =「二进制 + `web/`」三档资产（standard / perf / debug） | [CHANGELOG](../CHANGELOG.md) |
+| 后端 | C++17/Eigen 服务，`127.0.0.1:37811`，同进程托管 `web/` 静态界面；`/api/hello` 的 `build` 必须等于当前 HEAD | `STATE.md` |
+| 传输 | 协议 v1：JSON 控制面 + **DCM2** 帧（24 字节头、带整表形状）+ 长轮询事件；`DCM1` 仅作 legacy 输入被接收 | [协议 v1](architecture/backend-protocol-v1.md) |
+| 前端 | React 19 / Vite / TS / ECharts 6（SVG 渲染）；Web Worker 解析万行文件；只做交互，不做数值计算 | [README.zh-CN.md](../README.zh-CN.md) |
+| 测试 | vitest **594 passed / 14 skipped**（本机 2026-11-04 实测）；ctest **14/14**（4 项 opt-in 跳过） | `npx vitest run` · `ctest` · `STATE.md` |
+| 精度 | `dd_oracle` 参考 + `matrix_invariants` 不变量；表格改最短往返显示（不再 6 位封顶）；`POST /api/nodes/{id}/accuracy` 已就绪，**前端提示待做** | `STATE.md` · [CHANGELOG](../CHANGELOG.md) |
+| 已知缺口 | 函数卡参数表单未按签名渲染 / K>1 无输出选择器；`web/src/core/stats.ts` 仍在算统计；性能门禁只盖引擎层；无撤销栈；Windows 真机双击未复测 | `STATE.md` |
+
+> 维护方式：本表**只放指针，不放细节**——细节在 `STATE.md` 与各决策里；`STATE.md` 变了，这里只改"截至日期"和被点名的结论。
+
 ---
 
 ## 8. 本整理发现的文档不一致（建议后续修正）
@@ -262,15 +273,24 @@ C++/Qt 树曾作"行为参照"保留 → 发现它**成本 215 MB、还让主实
 | 5 | **architecture/ 的定位描述过时**：写"尚未拍板、需要继续论证的对比"，但 `backend-protocol-v1` 已是 v1 草案规范 | [docs/README L16](../README.md#L16) | 拆为"规范"与"权衡"两类 | ✅ 已修（2026-10-21：导航拆为 📐 规范 / ⚖️ 权衡两类；协议文档状态行由"草案"改为"v1 规范"） |
 | 6 | **致谢署名待复核**：README 称本项目由 **GitHub Copilot** 辅助开发，但仓库 9 个提交**无任何 agent 署名 trailer**，作者串含 `DataCardForge Dev <dev@datacardforge.local>` / `DataCardForge audit <agent@local>` | [README.zh-CN L164](../README.zh-CN.md#L164) · [README L167](../README.md#L167) | 按实际使用的工具更新署名 | ✅ 已修（2026-10-21：中英 README 改为"AI 编程助手（DeepSeek Harness / Claude 等 agent 工具，以及早期的 GitHub Copilot）"） |
 
-> **2026-10-28 补充**：本节的时间线此前止于 2026-10-17，10-21（无边界画布）、10-26（schema v2）、
-> 10-27（卡片契约 / 摘要签名）三档决策未回填时间线，本次只补了 2026-10-28 的四行。
-> 回填时请以各决策文件头部的日期与状态为准。
+| 7 | **导航漏登三篇决策**：`2026-10-28-function-card-output-binding`、`2026-10-29-connection-center-anchors`、`2026-10-29-result-preview` 从未进过导航 | [docs/README](README.md) | 补进导航 | ✅ 已修（2026-11-04：导航重写） |
+| 8 | **`audits/` 与 `sampleData/` 不进导航**：vault 里有、README 里没有，等于藏起来了 | [docs/README](README.md) | 各加一节 | ✅ 已修（2026-11-04） |
+| 9 | **§7 容易被当成"现状"读**：标题写着 2026-10-17，正文却在讲"待办 / 已知缺口" | `history.md` §7 | 标注为快照，并把当前状态挪到 §7.4 | ✅ 已修（2026-11-04） |
+| 10 | **权威口径冲突**：docs/README 说"权威文档 = 根 README"，`AGENTS.md` 说"以 `STATE.md` 为当前真相" | [docs/README](README.md) · `AGENTS.md` | 拆成三入口：是什么 / 现在在哪 / 为什么 | ✅ 已修（2026-11-04） |
+| 11 | **公开 vault 里留有私有目录**：`docs/private/` 被 gitignore，但目录仍在 vault 内，与"只写可公开内容"的约定冲突 | `.gitignore` · `docs/README` | 在 README 明说它是本地私有、不在发布范围 | ✅ 已说明（2026-11-04） |
+| 12 | **字符画示意图**：决策流向图、投影关系树、根 README 架构图，共 6 处；改一个字宽就错位，手机上完全不可读 | `history.md` §2 · `architecture/port-semantics-v1.md` · `README*.md` | 一律改 SVG（中英成对） | ✅ 已修（2026-11-04：见 [`diagrams/`](diagrams/)） |
+| 13 | **测试数字过期**：§7.1 写 507 passed / ctest 8，中文 README 写 581 / 9，现已 594 / 14 | `history.md` §7.1 | 由 §7.4 接管最新数字，§7 保留快照 | ✅ 已修（2026-11-04） |
+
+> **2026-11-04 补充**：§3 时间线此前止于 2026-10-28，缺 10-21、10-26、10-27、10-29、10-31 与 11 月的
+> 发布/审计记录；本次按各决策文件头部日期回填，11 月两笔因没有对应 `log/`，出处直接写 `CHANGELOG.md` 与 `STATE.md`。
+> 仍需注意：`log/` 只记到 2026-10-31，11-03 / 11-04 没有日志文件。
 
 ---
 
 ## 9. 关联
 
 - 导航：[vault 导航](README.md)
+- 现在在哪（权威）：仓库根 `STATE.md` —— 文档与代码不同步时以它为准
 - 核心原则：[兜底原则](decisions/2026-10-15-max-headroom-principle.md)
 - 当前裁定：[后端持有数据与计算](decisions/2026-10-17-backend-owns-compute.md)
 - 协议：[后端协议 v1](architecture/backend-protocol-v1.md)
