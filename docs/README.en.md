@@ -119,6 +119,9 @@ When adding a diagram:
    at openable files; they are kept as citations of "where this rule came from".
 6. **History is not rewritten**: decisions and logs record what we thought *then*. To update a conclusion,
    annotate in place and point at the newer document instead of editing the old judgement.
+7. **Codenames resolve in place**: any number or codename in the prose (option A/B/C, T1/T2/T3,
+   P0/P2…) must be defined in the same document or glossed on the spot, and retired codenames are never
+   reused. The test: could someone reading only that sentence, a year from now, follow it?
 
 ## Language policy
 

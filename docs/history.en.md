@@ -133,8 +133,10 @@ the earlier mistake:
 
 **Decision (made by the user)**: all numeric / statistical / matrix computation belongs to the server;
 the browser only renders and interacts.
-The user's words: *"now go straight to B… if dynamic needs really appear, send the formula to the
-backend to parse or even compile later — but do not compute in the frontend."*
+The half of that sentence which outlived the conclusion — **parsing and compiling a formula counts as
+computation too**, and it does not move back to the frontend either:
+> "If dynamic needs really appear, send the formula to the backend to parse or even compile — but do
+> not compute in the frontend."
 
 **What triggered it was a measurement** (the function-card design review exposed the layering hole):
 
