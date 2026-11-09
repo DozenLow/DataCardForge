@@ -27,7 +27,7 @@ were considered and dropped. Three entrances, each answering one question:
 ## Navigation
 
 - 🧭 **Project history** (`history.md`) — the decisions, logs, lessons and audits chained into one
-  causal history: four eras, four spirals, a lesson list and an inventory of doc inconsistencies
+  causal history: four eras, four spirals, a lesson list and the current state
   - [Project history (DataCardForge)](history.en.md) ← **read this one before the individual volumes**
 - 📌 **Decision records** (`decisions/`) — settled, direction-setting conclusions
   - [Regression card renamed to "relation enumeration": picking a column is a port binding, headers carry X : Y](decisions/2026-10-31-relation-enum-card.md) ← **latest: cards can finally pick columns; horizontal table-scroll alignment fixed too**
@@ -69,7 +69,8 @@ were considered and dropped. Three entrances, each answering one question:
 - 🗃 **Sample data** (`sampleData/`) — synthetic data for demos and manual checks; the generator reproduces it
   - [`1.txt`](sampleData/1.txt) · [`2.txt`](sampleData/2.txt) · [`generate_matrix.py`](sampleData/generate_matrix.py)
 - 🖼 **Diagrams** (`diagrams/`) — every diagram as SVG plus the interactive page, see [Diagrams](#diagrams)
-- 📅 **Development log** (`log/`) — progress by date (**stops at 2026-10-31**; after that see `CHANGELOG.md` and `STATE.md`)
+- 📅 **Development log** (`log/`) — progress by date (**latest 2026-11-04**)
+  - [2026-11-04](log/2026-11-04.md) (docs rework: ASCII diagrams replaced with SVG + interactive page · navigation and facts · docs-check in CI)
   - [2026-10-31](log/2026-10-31.md) (data cards can replace files: replace follows · the 409 ordering problem · closeAllCards releases backend resources)
   - [2026-10-28](log/2026-10-28.md) (two user complaints → three real defects: pointer capture swallowing click · no usable column name on files with headers · the formula area squeezed to 0 by the result table)
   - [2026-10-27](log/2026-10-27.md) (function cards from spec to working: v2 landed · re-point confirmation · column-count contract · results plottable/chainable · the regression signature disproves generality)

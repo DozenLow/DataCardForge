@@ -2,14 +2,14 @@
 
 [中文](history.md) | English
 
-- **Compiled**: 2026-10-17
-- **Nature**: a second pass. This document **creates no new decisions**; it only threads the fragments
-  scattered across `decisions/`, `log/`, `lessons/` and `audits/` into one history along a **causal
-  chain**. Every conclusion cites its source, and the source is authoritative.
+- **Nature**: the decisions, logs, lessons and audits chained into one causal history. This document
+  **creates no new decisions**; every conclusion cites its source, and the source is authoritative.
+- **As of**: 2026-11-04. This document explains *why we ended up here*; **where we are now** is the
+  repository-root `STATE.md`.
 - **Tags**: `#history #navigation #evolution #decision`
 
-> How to read: for the quick version, see §1 and the flow diagram in §2; to understand "why we went the
-> long way round", see the four spirals in §5 and the lessons in §6.
+> How to read: for the quick version, §1 and the flow diagram in §2; to understand "why we went the long
+> way round", the four spirals in §5 and the lessons in §6.
 
 ---
 
@@ -158,6 +158,14 @@ computation too**, and it does not move back to the frontend either:
 production compute path; `expression.ts` / `stats.ts` / `Smoothing.ts` are **frozen as the differential
 reference baseline and retired step by step**.
 
+**Landing order** (stages 0–3, all done; dates in §3): cross-tier shared fixtures → the `backend/`
+skeleton and protocol handshake → porting `expression.ts` semantics to C++ → formula-card compute
+authority moved to the backend. `stats.ts` / `Smoothing.ts` follow the function cards.
+
+**The error contract fixed on the same day**: the server sends only `code + params` and **never a
+user-facing sentence**; the copy is rendered by frontend i18n
+(→ [protocol v1](architecture/backend-protocol-v1.en.md)).
+
 ---
 
 ## 5. Four "spirals" (the same question met again and again)
@@ -259,100 +267,51 @@ selector and never verified **position, reachability or visual correctness**.
 
 ---
 
-## 7. State of play (2026-10-17 snapshot)
+## 7. Current state
 
-> **This is a snapshot, not the current state.** The judgements of 2026-10-17 are kept as they were (history is not rewritten); **the current state** lives in §7.4 and in the repository-root `STATE.md`, which is the only authority on "where we are now".
-
-### 7.1 Established
-
-| Dimension | Current state | Source |
-|---|---|---|
-| Frontend | Web, `web/` (React 19 / TS 7 / Vite 8 / ECharts 6 @ SVG) | 10-14 decision |
-| Backend | **new `backend/`**: C++/CMake service, matrix store + dependency graph + Eigen operators + scheduler | 10-17 decision |
-| Compute ownership | **all on the server**; the frontend only renders and lays out (axes / virtual-scroll window fetch / SVG-to-bitmap export) | 10-17 decision |
-| Transport | HTTP/1.1 local service (default `127.0.0.1:37811`), JSON control + binary frames (magic `DCM1` at the time; since 10-29 the server only emits `DCM2`, see §7.4) + long-poll events | protocol v1 |
-| Environment | g++ 15.2.0 / cmake 4.2.3 / ninja 1.13.2 / **Eigen 3.4.0 preinstalled** (smoke compile passed) | 10-17 decision |
-| Error contract | the server sends only `code + params`, **never user-facing sentences**; copy is rendered by frontend i18n | protocol v1 |
-| Rollback baseline | tag `v1.0.0` (`d077fce`) | commit |
-
-### 7.2 To do (from the 10-17 decision)
-
-- **Stage 0**: cross-tier shared fixtures first (`web/tests/fixtures/xlayer/`)
-- **Stage 1**: `backend/` skeleton + protocol handshake + Matrix/Node endpoints
-- **Then**: port `expression.ts` semantics to C++ (including the `code + params` error table), Eigen
-  operators, turn `workspaceStore` from "holds matrices" into "commands + subscribing client", a
-  windowed data source for `VirtualTable`
-- `stats.ts` / `Smoothing.ts` move after function cards; **since 10-17 the frontend adds no new numeric
-  computation**
-
-### 7.3 Known gaps (stated, not silent)
-
-- Backend unreachable ⇒ no compute at all (**single-point dependency**; countermeasures: explicit
-  banner + retry + liveness probe on page load)
-- Local fixed latency ≈ 1.1 ms per round trip
-- Large results cannot be downloaded whole (10⁷ rows cannot travel as JSON) ⇒ windowing + binary frames
-- No authentication; a token must be added before cross-machine deployment
-- PDF is a **bitmap wrapper** and **EPS is not offered** (the browser has no PostScript generation path;
-  a platform constraint)
-
-### 7.4 Current state, as of 2026-11-04
+In one sentence: **compute in the backend, the interface in the browser, formulas and statistics never
+back in the frontend**; the product ships as a "binary + `web/`" archive.
+Numbers move — this document keeps conclusions only, and the repository-root `STATE.md` is the authority.
 
 | Dimension | Current state | Source |
 |---|---|---|
-| Version | 0.1.3 (untagged); the release archive is "binary + `web/`" in three asset tiers (standard / perf / debug) | [CHANGELOG](../CHANGELOG.md) |
-| Backend | C++17/Eigen service on `127.0.0.1:37811`, serving the `web/` UI from the same process; the `build` field of `/api/hello` must equal the current HEAD | `STATE.md` |
-| Transport | Protocol v1: JSON control plane + **DCM2** frames (24-byte header, carries the full table shape) + long-poll events; `DCM1` is only accepted as legacy input | [protocol v1](architecture/backend-protocol-v1.en.md) |
-| Frontend | React 19 / Vite / TS / ECharts 6 (SVG rendering); a Web Worker parses ten-thousand-row files; interaction only, no numeric computation | [README.md](../README.md) |
-| Tests | vitest **594 passed / 14 skipped** (measured locally on 2026-11-04); ctest **14/14** (4 opt-in skipped) | `npx vitest run` · `ctest` · `STATE.md` |
-| Precision | `dd_oracle` reference + `matrix_invariants` invariants; the table prints the shortest round-trip form (no longer capped at six digits); `POST /api/nodes/{id}/accuracy` is ready, **the front-end hint is not** | `STATE.md` · [CHANGELOG](../CHANGELOG.md) |
-| Known gaps | function-card parameter form not rendered from the signature / no K>1 output selector; `web/src/core/stats.ts` still computes statistics; the perf gate only covers the engine; no undo stack; the Windows double-click was never re-tested on real hardware | `STATE.md` |
+| Version / release | 0.1.3 (untagged); three asset tiers `standard` / `perf` / `debug`; Windows statically linked | [CHANGELOG](../CHANGELOG.md) |
+| Backend | C++17/Eigen on `127.0.0.1:37811`, serving the `web/` UI from the same process | `STATE.md` |
+| Transport | protocol v1: JSON control plane + **DCM2** frames (24-byte header, carries the full table shape) + long-poll events; `DCM1` accepted only as legacy input | [protocol v1](architecture/backend-protocol-v1.en.md) |
+| Frontend | React 19 / Vite / TS / ECharts 6 (SVG rendering); a Web Worker parses ten-thousand-row files | [README.md](../README.md) |
+| Tests | vitest **594** passed / 14 skipped; ctest **14** (4 opt-in) | measured locally |
+| Precision | `dd_oracle` reference + `matrix_invariants` invariants; the table prints the shortest round-trip form; `/accuracy` is ready, the front-end hint is not | `STATE.md` |
 
-> Maintenance rule: this table holds **pointers only, never detail** — the detail lives in `STATE.md` and
-> the decision records. When `STATE.md` moves, only the "as of" date and the named conclusions change here.
+**Design constraints (unchanged since 10-17)**
 
----
+- backend unreachable ⇒ no compute at all — a single-point dependency, answered with a **visible banner
+  and a retry button**, never silence
+- fixed local latency ≈ 1.1 ms per round trip — which is why small matrices must stay entirely on one
+  side (§4.4's arithmetic)
+- large results never travel whole: dense matrices go as windows plus the full shape in the DCM2 header
+- no authentication: add a token before any cross-machine deployment
+- PDF is a bitmap wrapper and EPS is not offered (the browser has no PostScript generation path)
 
-## 8. Documentation inconsistencies found during this pass (suggested fixes)
+**Known gaps** (the same top 5 as `STATE.md`, plus why each is still open)
 
-> These are "document vs document" contradictions found while reading 20 documents. They **do not
-> affect the code**, but they mislead the next reader.
-> **Re-check (2026-10-21)**: every row was re-verified against the current repository and a "status"
-> column added — #1/#4 were fixed by later commits; #2/#3 mostly fixed; #5/#6 fixed that day. One new
-> finding was also recorded: **the README claimed cell edits were persisted to the backend, while that
-> forwarding existed only in an uncommitted working-tree diff** (exactly §6.1-3 "『the docs say so』≠
-> 『the code has it』" repeating — a feature claim should carry a code reference and be reviewed
-> together with the commit).
+- function cards: the parameter form is not rendered from the signature, and K>1 has no output selector
+  — the signature is settled, the interaction is not
+- `web/src/core/stats.ts` still computes statistics — the last leftover that conflicts with "the backend
+  owns compute"
+- the performance gate covers the engine only; HTTP, cache hits and cold start are uncovered
+- multi-file cards can replace a file but not add or remove one; no undo stack; connection hover and wire
+  re-editing are missing
+- the Windows launch chain stops at "cross-compile + assertions"; the double-click was never re-tested on
+  real hardware
 
-| # | Problem | Location | Suggestion | Status (re-checked 2026-10-21) |
-|---|---|---|---|---|
-| 1 | **Dead link**: navigation points at `log/2026-10-17`, but that log file **does not exist** | [docs/README](../README.md#L23) | write the log, or drop the navigation entry | ✅ fixed (the log file now exists) |
-| 2 | **The main README had not followed the 10-17 decision**: it still said "layering (TS → WASM → backend) is the automatic upgrade path" and "the compute fallback tier… must be built" | [README.zh-CN L14](../README.zh-CN.md#L14) · [L133](../README.zh-CN.md#L133) · [L141](../README.zh-CN.md#L141) | rewrite per the 10-17 decision as "backend = baseline" | ✅ mostly fixed (the design-philosophy section now says backend-owned compute; the residual risk became "docs ahead of code", see the new finding above) |
-| 3 | **The README's "current priorities" were stale**: it said "per-element formulas + headroom principle", while the real priority was "backend-owned compute + stage-0 fixtures" | [README.zh-CN L131](../README.zh-CN.md#L131) | sync with the 10-17 decision | ✅ fixed (now a "short-term goals" checklist with ticks as commits land) |
-| 4 | **The chart-library decision was missing from navigation** | [docs/README](../README.md) | navigation never registered `2026-10-14-chart-library-audit` | ✅ fixed (registered) |
-| 5 | **The `architecture/` description was stale**: it called it "comparisons not yet decided, still to be argued", but `backend-protocol-v1` was already a v1 draft spec | [docs/README L16](../README.md#L16) | split into "specifications" and "trade-offs" | ✅ fixed (2026-10-21: navigation split into 📐 specs / ⚖️ trade-offs; the protocol status line went from "draft" to "v1 specification") |
-| 6 | **Acknowledgement attribution to re-check**: the README said the project is developed with the aid of **GitHub Copilot**, yet the nine commits carried **no agent trailer** and author strings included `DataCardForge Dev <dev@datacardforge.local>` / `DataCardForge audit <agent@local>` | [README.zh-CN L164](../README.zh-CN.md#L164) · [README L167](../README.md#L167) | update the attribution to the tools actually used | ✅ fixed (2026-10-21: both READMEs now say "AI coding agents (DeepSeek Harness / Claude-class tooling, and earlier GitHub Copilot)") |
-
-| 7 | **Three decision records missing from navigation**: `2026-10-28-function-card-output-binding`, `2026-10-29-connection-center-anchors`, `2026-10-29-result-preview` were never registered | [docs/README](README.en.md) | register them | ✅ fixed (2026-11-04: navigation rewritten) |
-| 8 | **`audits/` and `sampleData/` were not in the navigation at all**: present in the vault, invisible in the index | [docs/README](README.en.md) | add a section for each | ✅ fixed (2026-11-04) |
-| 9 | **§7 reads like "current state"**: the heading says 2026-10-17, yet the body talks about to-dos and known gaps | `history.md` §7 | mark it as a snapshot and move the current state to §7.4 | ✅ fixed (2026-11-04) |
-| 10 | **Conflicting authority**: docs/README says "the authoritative document is the root README", `AGENTS.md` says "`STATE.md` is the current truth" | [docs/README](README.en.md) · `AGENTS.md` | split into three entrances: what / where are we now / why | ✅ fixed (2026-11-04) |
-| 11 | **A private directory inside a public vault**: `docs/private/` is gitignored but still sits in the vault, contradicting "publishable content only" | `.gitignore` · `docs/README` | state in the README that it is local-private and out of scope for publication | ✅ documented (2026-11-04) |
-| 12 | **Character-drawn diagrams**: the decision flow, the projection tree and the root README architecture block — 6 places; one changed glyph width breaks the alignment, and they are unreadable on a phone | `history.md` §2 · `architecture/port-semantics-v1.md` · `README*.md` | replace with SVG (Chinese/English pairs) | ✅ fixed (2026-11-04: see [`diagrams/`](diagrams/)) |
-| 13 | **Stale test numbers**: §7.1 said 507 passed / ctest 8, the Chinese README said 581 / 9, now 594 / 14 | `history.md` §7.1 | §7.4 carries the current numbers, §7 keeps the snapshot | ✅ fixed (2026-11-04) |
-
-> **Added 2026-11-04**: the §3 timeline used to stop at 2026-10-28 and was missing 10-21, 10-26, 10-27,
-> 10-29, 10-31 and the November releases/audit. It is now backfilled from each decision file's header; the
-> two November entries have no `log/` file, so their sources are `CHANGELOG.md` and `STATE.md`.
-> Note that `log/` still stops at 2026-10-31 — there are no log files for 11-03 or 11-04.
+> Maintenance: this section holds **pointers and reasons**. Numbers and gaps live in `STATE.md`; when it
+> moves, only the named conclusions change here.
 
 ---
 
-## 9. Related
+## 8. Related
 
-- Navigation: [vault navigation](README.en.md)
-- Where we are now (authoritative): the repository-root `STATE.md` — when docs and code disagree, it wins
-- Core principle: [headroom principle](decisions/2026-10-15-max-headroom-principle.md)
-- Current ruling: [the backend owns data and compute](decisions/2026-10-17-backend-owns-compute.md)
-- Protocol: [backend protocol v1](architecture/backend-protocol-v1.en.md)
-- Authoritative document ("what"): repository root [`README.zh-CN.md`](../README.zh-CN.md); this vault
-  records "why"
+- Navigation of this vault: [README](README.en.md)
+- Principles: [headroom principle](decisions/2026-10-15-max-headroom-principle.md) · [backend owns data and compute](decisions/2026-10-17-backend-owns-compute.md)
+- Contracts: [backend protocol v1](architecture/backend-protocol-v1.en.md) · [port semantics v1](architecture/port-semantics-v1.en.md)
+- "What it is": [README.md](../README.md) · "Where we are now": `STATE.md`
