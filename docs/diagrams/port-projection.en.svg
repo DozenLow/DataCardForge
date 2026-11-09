@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 340" width="900" height="340" role="img" aria-labelledby="dcp-title dcp-desc">
+  <title id="dcp-title">Port semantics v1: projection relationships</title>
+  <desc id="dcp-desc">This document is the single source of truth; it projects into four representations: the FunctionSignature registry, the C projection in dc_plugin.h, the Rust repr(C) mirror that becomes the WASM layer, and the card-level differential fixtures.</desc>
+
+  <style>
+    text { font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+    .root-title { font-size: 15px; font-weight: 600; fill: var(--dcp-ink, #0f172a); }
+    .root-sub { font-size: 12px; font-weight: 400; fill: var(--dcp-muted, #64748b); }
+    .leaf-title { font-size: 13.5px; font-weight: 600; fill: var(--dcp-ink, #0f172a); }
+    .leaf-sub { font-size: 12px; font-weight: 400; fill: var(--dcp-text, #475569); }
+    .root { fill: var(--dcp-root-bg, #eef2ff); stroke: var(--dcp-root-line, #6366f1); stroke-width: 1.5; rx: 12; }
+    .leaf { fill: var(--dcp-leaf-bg, #f8fafc); stroke: var(--dcp-leaf-line, #cbd5e1); stroke-width: 1.25; rx: 8; }
+    .link { fill: none; stroke: var(--dcp-link, #94a3b8); stroke-width: 1.5; }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --dcp-ink: #e2e8f0;
+        --dcp-text: #cbd5e1;
+        --dcp-muted: #94a3b8;
+        --dcp-root-bg: #1e1b4b;
+        --dcp-root-line: #818cf8;
+        --dcp-leaf-bg: #1e293b;
+        --dcp-leaf-line: #475569;
+        --dcp-link: #64748b;
+      }
+    }
+  </style>
+
+  <defs>
+    <marker id="dcp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 Z" fill="var(--dcp-link, #94a3b8)"/>
+    </marker>
+  </defs>
+
+  <!-- Single source of truth -->
+  <rect class="root" x="16" y="118" width="190" height="104"/>
+  <text class="root-title" x="34" y="152">This file</text>
+  <text class="root-sub" x="34" y="176">(single source of truth)</text>
+  <text class="root-sub" x="34" y="198">Port semantics v1</text>
+
+  <!-- Projection links -->
+  <path class="link" d="M206 170 H296 V50 H 322" marker-end="url(#dcp-arrow)"/>
+  <path class="link" d="M206 170 H296 V130 H 322" marker-end="url(#dcp-arrow)"/>
+  <path class="link" d="M206 170 H296 V210 H 322" marker-end="url(#dcp-arrow)"/>
+  <path class="link" d="M206 170 H296 V290 H 322" marker-end="url(#dcp-arrow)"/>
+
+  <!-- Projection one -->
+  <rect class="leaf" x="330" y="16" width="550" height="68"/>
+  <text class="leaf-title" x="346" y="38">FunctionSignature registry</text>
+  <text class="leaf-sub" x="346" y="58">isomorphic in C++/TS; built-ins register first</text>
+  <text class="leaf-sub" x="346" y="74">(the five stats.ts candidates are the first stress test)</text>
+
+  <!-- Projection two -->
+  <rect class="leaf" x="330" y="96" width="550" height="68"/>
+  <text class="leaf-title" x="346" y="118">dc_plugin.h — the C projection</text>
+  <text class="leaf-sub" x="346" y="138">not frozen; the revisit trigger lives in the upstream decision</text>
+
+  <!-- Projection three -->
+  <rect class="leaf" x="330" y="176" width="550" height="68"/>
+  <text class="leaf-title" x="346" y="198">Rust repr(C) mirror — the WASM layer</text>
+  <text class="leaf-sub" x="346" y="218">Rust has no stable ABI; repr(C) + extern "C" is the only path</text>
+
+  <!-- Projection four -->
+  <rect class="leaf" x="330" y="256" width="550" height="68"/>
+  <text class="leaf-title" x="346" y="278">Card-level differential fixtures — web/tests/fixtures/cards/</text>
+  <text class="leaf-sub" x="346" y="298">following the xlayer judge pattern (one JSON, two judges)</text>
+</svg>

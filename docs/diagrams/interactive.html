@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="auto">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DataCardForge · 设计记录图（交互版）</title>
+<meta name="description" content="docs/diagrams 的交互增件：决策流向、端口投影、当前架构三张图，可切换中英与主题，点选节点查看来龙去脉。">
+<style>
+  :root {
+    --bg: #ffffff;
+    --fg: #0f172a;
+    --muted: #64748b;
+    --card: #f8fafc;
+    --line: #e2e8f0;
+    --accent: #2563eb;
+    --accent-soft: #dbeafe;
+    color-scheme: light;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0d1117;
+      --fg: #e2e8f0;
+      --muted: #94a3b8;
+      --card: #161b22;
+      --line: #30363d;
+      --accent: #60a5fa;
+      --accent-soft: #1e3a8a;
+      color-scheme: dark;
+    }
+  }
+  html[data-theme="light"] {
+    --bg: #ffffff; --fg: #0f172a; --muted: #64748b; --card: #f8fafc;
+    --line: #e2e8f0; --accent: #2563eb; --accent-soft: #dbeafe; color-scheme: light;
+  }
+  html[data-theme="dark"] {
+    --bg: #0d1117; --fg: #e2e8f0; --muted: #94a3b8; --card: #161b22;
+    --line: #30363d; --accent: #60a5fa; --accent-soft: #1e3a8a; color-scheme: dark;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    background: var(--bg);
+    color: var(--fg);
+    font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", "Noto Sans SC", "Noto Sans CJK SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  header { max-width: 1200px; margin: 0 auto 20px; }
+  h1 { font-size: 20px; margin: 0 0 6px; }
+  .hint { margin: 0 0 16px; color: var(--muted); font-size: 13px; }
+  .hint code { background: var(--card); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; }
+
+  .controls { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
+  [role="tablist"] { display: flex; gap: 6px; flex-wrap: wrap; }
+  button {
+    font: inherit; font-size: 13px; cursor: pointer;
+    color: var(--fg); background: var(--card);
+    border: 1px solid var(--line); border-radius: 8px; padding: 7px 14px;
+  }
+  button:hover { border-color: var(--accent); }
+  button[aria-selected="true"], button[aria-pressed="true"] {
+    background: var(--accent-soft); border-color: var(--accent); color: var(--fg); font-weight: 600;
+  }
+  button:focus-visible, [tabindex]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .toggles { display: flex; gap: 6px; }
+
+  main { max-width: 1200px; margin: 0 auto; display: grid; gap: 20px; grid-template-columns: 1fr; }
+  @media (min-width: 1080px) {
+    main { grid-template-columns: minmax(0, 1fr) 320px; align-items: start; }
+  }
+
+  .figure {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 14px; overflow-x: auto;
+  }
+  .figure img, .figure svg { display: block; width: 100%; height: auto; max-width: 1100px; }
+  .figure svg .node-group, .figure svg .stage { cursor: pointer; }
+  .figure svg g:focus { outline: none; }
+  .figure svg g:focus-visible { outline: 2px dashed var(--accent); outline-offset: 4px; }
+  .figure svg.is-focused .node-group { opacity: .4; transition: opacity .15s ease; }
+  .figure svg.is-focused .node-group.is-on { opacity: 1; }
+  .figure svg.is-focused path[data-from] { opacity: .2; transition: opacity .15s ease; }
+  .figure svg.is-focused path[data-from].is-on { opacity: 1; stroke-width: 2.75; }
+  .figure svg .stage.is-on rect { stroke-width: 3.25; }
+  .note { margin: 12px 0 0; font-size: 12.5px; color: var(--muted); }
+  .note[hidden] { display: none; }
+
+  .panel {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 16px 18px; min-height: 120px;
+  }
+  .panel h2 { font-size: 15px; margin: 0 0 4px; }
+  .panel .when { font-size: 12.5px; color: var(--muted); margin: 0 0 10px; }
+  .panel p { margin: 0 0 10px; font-size: 13.5px; }
+  .panel ul { margin: 0 0 12px; padding-left: 18px; font-size: 13.5px; }
+  .panel li { margin-bottom: 6px; }
+  .panel .empty { color: var(--muted); font-size: 13.5px; margin: 0; }
+  .panel .src { font-size: 13px; }
+  .panel .src a { color: var(--accent); text-decoration: none; }
+  .panel .src a:hover { text-decoration: underline; }
+  .panel .src li { margin-bottom: 4px; }
+  footer { max-width: 1200px; margin: 24px auto 0; color: var(--muted); font-size: 12.5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>DataCardForge · 设计记录图</h1>
+  <p class="hint">
+    本页是 <code>docs/diagrams/*.svg</code> 的交互增件，权威内容仍是各篇 <code>.md</code>。
+    点图里的阶段块或组件可看它的来龙去脉。
+  </p>
+  <div class="controls">
+    <div role="tablist" aria-label="选择图">
+      <button role="tab" aria-selected="true" data-diagram="decision-flow">决策流向</button>
+      <button role="tab" aria-selected="false" data-diagram="port-projection">端口投影</button>
+      <button role="tab" aria-selected="false" data-diagram="architecture">当前架构</button>
+    </div>
+    <div class="toggles">
+      <button id="lang" aria-pressed="false" title="切换中英文">EN</button>
+      <button id="theme" title="切换主题">主题：自动</button>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div id="figure" class="figure" role="tabpanel" aria-live="polite"></div>
+  <aside id="panel" class="panel" aria-live="polite">
+    <p class="empty">点选图中的阶段或组件，这里显示它当时的判断、留下的坑与出处。</p>
+  </aside>
+</main>
+
+<footer>
+  图源：<code>decision-flow</code> / <code>port-projection</code> / <code>architecture</code> 的
+  <code>.zh.svg</code> 与 <code>.en.svg</code>。中文为原版。
+</footer>
+
+<script>
+(() => {
+  const LETTERS = { zh: 'zh', en: 'en' };
+  const state = { diagram: 'decision-flow', lang: 'zh', theme: 'auto' };
+
+  const TABS = {
+    zh: { 'decision-flow': '决策流向', 'port-projection': '端口投影', 'architecture': '当前架构' },
+    en: { 'decision-flow': 'Decision flow', 'port-projection': 'Port projection', 'architecture': 'Architecture' },
+  };
+  const THEME_LABEL = { auto: '主题：自动', light: '主题：浅色', dark: '主题：深色' };
+  const THEME_LABEL_EN = { auto: 'theme: auto', light: 'theme: light', dark: 'theme: dark' };
+  const EMPTY = {
+    zh: '点选图中的阶段或组件，这里显示它当时的判断、留下的坑与出处。',
+    en: 'Click a stage or a component to see what was decided, what it cost, and where it is recorded.',
+  };
+
+  const D = '../decisions/';
+  const A = '../architecture/';
+
+  const DETAILS = {
+    'decision-flow': {
+      zh: {
+        s1: {
+          title: '2026-08-07 · 后端先行，前端搁置',
+          points: [
+            '当时信奉：后端能算什么决定前端能展示什么 —— 先把 Eigen 线性代数与逐元素公式做扎实。',
+            '埋下的坑：README 把 Eigen 列为 Next priority，但 <code>third_party/eigen</code> 只是一个没有 <code>.gitmodules</code> 的裸 gitlink，clone 后必然是空目录。',
+            '所以「Eigen 已在后端就绪」从未成立；整月的优先级排序建立在一个不存在的资产上。',
+          ],
+          sources: [
+            ['决策：后端先行，前端搁置', D + '2026-08-07-backend-first-frontend-paused.md'],
+            ['决策：连线从属原则', D + '2026-08-07-connection-subordination.md'],
+          ],
+        },
+        s2: {
+          title: '2026-10-14 · 前端抢跑：定为 Web',
+          points: [
+            '权重重估：矢量导出从「可能的需求」变成终点需求（ECharts SVG 原生，ImPlot 明确无导出）。',
+            '同一天把「用 TS 做数学计算」写进了「代价」一节，却从未被单独提出 —— 它是后来 T1 基线的诞生点。',
+          ],
+          sources: [
+            ['决策：前端选型定为 Web', D + '2026-10-14-frontend-web-chosen.md'],
+            ['决策：图表库保持 ECharts', D + '2026-10-14-chart-library-audit.md'],
+          ],
+        },
+        s3: {
+          title: '2026-10-15 · 仓库治理与兜底原则',
+          points: [
+            'web/ 进版本控制，随后删除 Qt/C++ 树（仓库 221 MB 中约 215 MB 属于 Qt 侧）。',
+            '兜底原则确立三层 T1(TS) / T2(WASM) / T3(后端) 与三个契约：可见降级、跨层语义一致、最坏情况有界。',
+          ],
+          sources: [
+            ['决策：彻底移除 Qt 实现', D + '2026-10-15-qt-implementation-removed.md'],
+            ['决策：兜底原则（最大余量）', D + '2026-10-15-max-headroom-principle.md'],
+          ],
+        },
+        s4: {
+          title: '2026-10-17 · 用户拍板：后端持有数据与计算',
+          points: [
+            '浏览器退化为纯交互界面；TS 计算退出生产路径，转作差分测试基准。',
+            '代价：后端是单点依赖 —— 不可达时计算全不可用，对策是带重试按钮的可见横幅，绝不静默。',
+          ],
+          sources: [
+            ['决策：后端持有数据与计算', D + '2026-10-17-backend-owns-compute.md'],
+            ['规范：后端协议 v1', A + 'backend-protocol-v1.md'],
+          ],
+        },
+      },
+      en: {
+        s1: {
+          title: '2026-08-07 · backend first, frontend paused',
+          points: [
+            'The belief: what the backend can compute decides what the frontend can show — so Eigen and per-element formulas came first.',
+            'The trap: the README listed Eigen as the next priority, but <code>third_party/eigen</code> was a bare gitlink with no <code>.gitmodules</code> — a guaranteed empty directory after clone.',
+            'So "Eigen is already ready in the backend" never held; a month of prioritisation rested on an asset that did not exist.',
+          ],
+          sources: [
+            ['Decision: backend first, frontend paused', D + '2026-08-07-backend-first-frontend-paused.md'],
+            ['Decision: connection subordination', D + '2026-08-07-connection-subordination.md'],
+          ],
+        },
+        s2: {
+          title: '2026-10-14 · the frontend jumps ahead: settle on Web',
+          points: [
+            'Weights reversed: vector export went from "a possibly useful feature" to a destination requirement (ECharts SVG is native; ImPlot has no export at all).',
+            '"Doing maths in TypeScript" entered the decision as a line item under "price" — never proposed on its own. It became the T1 baseline later.',
+          ],
+          sources: [
+            ['Decision: frontend choice settled on Web', D + '2026-10-14-frontend-web-chosen.md'],
+            ['Decision: the chart library stays ECharts', D + '2026-10-14-chart-library-audit.md'],
+          ],
+        },
+        s3: {
+          title: '2026-10-15 · repository governance and the headroom principle',
+          points: [
+            'web/ went into version control, then the Qt/C++ tree was deleted (of 221 MB, about 215 MB belonged to the Qt side).',
+            'Headroom principle: three tiers T1(TS) / T2(WASM) / T3(backend) plus three contracts — visible degradation, cross-tier semantic parity, bounded worst case.',
+          ],
+          sources: [
+            ['Decision: Qt implementation removed entirely', D + '2026-10-15-qt-implementation-removed.md'],
+            ['Decision: the headroom principle', D + '2026-10-15-max-headroom-principle.md'],
+          ],
+        },
+        s4: {
+          title: '2026-10-17 · the user decides: the backend owns data and compute',
+          points: [
+            'The browser degrades to a pure interaction surface; TypeScript compute leaves the production path and becomes the differential baseline.',
+            'The price: the backend is a single point of failure — when it is unreachable, no compute at all. The answer is a visible banner with a retry button, never silence.',
+          ],
+          sources: [
+            ['Decision: the backend owns data and compute', D + '2026-10-17-backend-owns-compute.md'],
+            ['Specification: backend protocol v1', A + 'backend-protocol-v1.md'],
+          ],
+        },
+      },
+    },
+    'architecture': {
+      zh: {
+        'n-user': {
+          title: '用户',
+          points: ['拖入文件、右键建卡、在画布上连线；界面上看到的每个数字都来自后端。'],
+          sources: [['产品说明：怎么用', '../../README.zh-CN.md']],
+        },
+        'n-files': {
+          title: '数据文件',
+          points: ['TXT / CSV / TSV / DAT / XLSX；解析后得到列式矩阵（行 = 样本，列 = 变量）。'],
+          sources: [['产品说明：支持格式', '../../README.zh-CN.md']],
+        },
+        'n-worker': {
+          title: 'Web Worker',
+          points: ['万行级文件在 Worker 里解析，界面不冻结；没有 Worker 时回退主线程。'],
+          sources: [['日志：解析与渲染的取舍', '../log/2026-10-14.md']],
+        },
+        'n-browser': {
+          title: '浏览器 · React 19',
+          points: [
+            '只做渲染、输入与布局：卡片、端口、连线、四态指示灯。',
+            '对后端数据只保留按 revision 键控的只读缓存；导出 SVG/PNG/PDF 在浏览器侧完成。',
+          ],
+          sources: [
+            ['决策：后端持有数据与计算', D + '2026-10-17-backend-owns-compute.md'],
+            ['决策：卡片数据结构 v2', D + '2026-10-26-card-schema-v2.md'],
+          ],
+        },
+        'n-service': {
+          title: '后端服务（HTTP）',
+          points: [
+            '协议 v1：JSON 控制面 + DCM2 矩阵帧（窗口 + 整表形状）+ 长轮询事件流。',
+            '同一个进程托管 web/ 静态界面（--web-root 自动探测），默认 127.0.0.1:37811；无鉴权，跨机部署前必须补 token。',
+          ],
+          sources: [['规范：后端协议 v1', A + 'backend-protocol-v1.md']],
+        },
+        'n-engine': {
+          title: '表达式引擎 · 依赖图',
+          points: [
+            '节点状态机 dirty → computing → done | error，成环直接拒绝；上游变化级联重算。',
+            '签名（FunctionSignature）注册表决定函数卡的能力，参数属于签名、不属于卡片。',
+          ],
+          sources: [
+            ['决策：函数卡的三个契约', D + '2026-10-27-card-contracts.md'],
+            ['规范：端口语义 v1', A + 'port-semantics-v1.md'],
+          ],
+        },
+        'n-store': {
+          title: '矩阵存储',
+          points: [
+            '数据、依赖图与计算定义的权威副本都在这里；浏览器那侧只是可丢弃的显示缓存。',
+            '大结果不整包下传 —— 稠密矩阵走窗口化 + DCM2 头部的整表形状。',
+          ],
+          sources: [
+            ['决策：结果预览与稠密帧', D + '2026-10-29-result-preview.md'],
+            ['决策：卡片数据结构 v2', D + '2026-10-26-card-schema-v2.md'],
+          ],
+        },
+      },
+      en: {
+        'n-user': {
+          title: 'User',
+          points: ['Drops files, creates cards from the context menu, wires cards together; every number on screen comes from the backend.'],
+          sources: [['Product doc: how to use it', '../../README.md']],
+        },
+        'n-files': {
+          title: 'Data files',
+          points: ['TXT / CSV / TSV / DAT / XLSX; parsed into a column-major matrix (rows = samples, columns = variables).'],
+          sources: [['Product doc: supported formats', '../../README.md']],
+        },
+        'n-worker': {
+          title: 'Web Worker',
+          points: ['Ten-thousand-row files are parsed in a Worker so the UI never freezes; without a Worker it falls back to the main thread.'],
+          sources: [['Log: parsing and rendering trade-offs', '../log/2026-10-14.md']],
+        },
+        'n-browser': {
+          title: 'Browser · React 19',
+          points: [
+            'Rendering, input and layout only: cards, ports, wires, the four-state lamps.',
+            'Holds a revision-keyed read cache of backend data; SVG/PNG/PDF export happens here.',
+          ],
+          sources: [
+            ['Decision: the backend owns data and compute', D + '2026-10-17-backend-owns-compute.md'],
+            ['Decision: card data structure v2', D + '2026-10-26-card-schema-v2.md'],
+          ],
+        },
+        'n-service': {
+          title: 'Backend service (HTTP)',
+          points: [
+            'Protocol v1: JSON control plane + DCM2 matrix frames (window + full shape) + long-poll events.',
+            'The same process serves the web/ UI (--web-root auto-detect) on 127.0.0.1:37811. No auth; add a token before any cross-machine deployment.',
+          ],
+          sources: [['Specification: backend protocol v1', A + 'backend-protocol-v1.md']],
+        },
+        'n-engine': {
+          title: 'Expression engine · dependency graph',
+          points: [
+            'Node state machine dirty → computing → done | error, with cycles refused outright and cascade recompute downstream.',
+            'The signature registry defines what a function card can do; parameters belong to the signature, not the card.',
+          ],
+          sources: [
+            ['Decision: the three contracts of a function card', D + '2026-10-27-card-contracts.md'],
+            ['Specification: port semantics v1', A + 'port-semantics-v1.md'],
+          ],
+        },
+        'n-store': {
+          title: 'Matrix store',
+          points: [
+            'The authoritative copy of data, dependency graph and computation definitions; the browser side is a disposable display cache.',
+            'Large results are never shipped whole — dense matrices travel as windowed DCM2 frames carrying the full shape.',
+          ],
+          sources: [
+            ['Decision: result preview and dense frames', D + '2026-10-29-result-preview.md'],
+            ['Decision: card data structure v2', D + '2026-10-26-card-schema-v2.md'],
+          ],
+        },
+      },
+    },
+    'port-projection': { zh: {}, en: {} },
+  };
+
+  const figure = document.getElementById('figure');
+  const panel = document.getElementById('panel');
+  const langBtn = document.getElementById('lang');
+  const themeBtn = document.getElementById('theme');
+  const tabButtons = [...document.querySelectorAll('[data-diagram]')];
+
+  let svgStyleOriginal = '';
+  let svgStyleWithoutMedia = '';
+  let darkVars = {};
+  let selected = null;
+
+  const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
+
+  // 只转义纯文本，<code> 由调用方保证安全（本项目内部常量）。
+  const rich = (s) => s.replace(/<code>(.*?)<\/code>/g, (_, t) => `<code>${escapeHtml(t)}</code>`)
+    .replace(/&(?!(amp|lt|gt|quot|#39);)/g, '&amp;');
+
+  function splitSvgStyle(text) {
+    const at = text.indexOf('@media');
+    if (at < 0) return { original: text, without: text, dark: {} };
+    let depth = 0, end = -1;
+    const open = text.indexOf('{', at);
+    for (let i = open; i < text.length; i++) {
+      if (text[i] === '{') depth += 1;
+      else if (text[i] === '}') {
+        depth -= 1;
+        if (depth === 0) { end = i + 1; break; }
+      }
+    }
+    if (end < 0) return { original: text, without: text, dark: {} };
+    const block = text.slice(at, end);
+    const dark = {};
+    for (const m of block.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) dark[m[1]] = m[2].trim();
+    return { original: text, without: text.slice(0, at) + text.slice(end), dark };
+  }
+
+  function clearVars(svg) {
+    for (const key of Object.keys(darkVars)) svg.style.removeProperty(key);
+  }
+
+  function applySvgTheme() {
+    const svg = figure.querySelector('svg');
+    if (!svg) return;
+    const styleEl = svg.querySelector('style');
+    if (state.theme === 'auto') {
+      if (styleEl && svgStyleOriginal) styleEl.textContent = svgStyleOriginal;
+      clearVars(svg);
+      return;
+    }
+    if (styleEl) styleEl.textContent = svgStyleWithoutMedia;
+    if (state.theme === 'dark') {
+      for (const [k, v] of Object.entries(darkVars)) svg.style.setProperty(k, v);
+    } else {
+      clearVars(svg);
+    }
+  }
+
+  function setTheme(theme) {
+    state.theme = theme;
+    document.documentElement.dataset.theme = theme;
+    const labels = state.lang === 'zh' ? THEME_LABEL : THEME_LABEL_EN;
+    themeBtn.textContent = labels[theme];
+    themeBtn.setAttribute('aria-pressed', theme === 'dark' ? 'true' : 'false');
+    applySvgTheme();
+  }
+
+  function paintSelection() {
+    const svg = figure.querySelector('svg');
+    if (!svg) return;
+    svg.classList.toggle('is-focused', Boolean(selected));
+    for (const g of svg.querySelectorAll('.node-group, .stage')) {
+      g.classList.toggle('is-on', g.dataset.id === selected || g.id === selected);
+    }
+    for (const path of svg.querySelectorAll('path[data-from]')) {
+      path.classList.toggle('is-on', Boolean(selected)
+        && (path.dataset.from === selected || path.dataset.to === selected));
+    }
+  }
+
+  function showDetails(id) {
+    const map = DETAILS[state.diagram] && DETAILS[state.diagram][state.lang];
+    const item = map && map[id];
+    if (!item) {
+      selected = null;
+      paintSelection();
+      panel.innerHTML = `<p class="empty">${escapeHtml(EMPTY[state.lang])}</p>`;
+      return;
+    }
+    selected = id;
+    paintSelection();
+    const points = item.points.map((p) => `<li>${rich(p)}</li>`).join('');
+    const sources = item.sources
+      .map(([label, href]) => `<li><a href="${href}">${escapeHtml(label)}</a></li>`)
+      .join('');
+    panel.innerHTML = `
+      <h2>${escapeHtml(item.title)}</h2>
+      <ul>${points}</ul>
+      <div class="src"><strong>${state.lang === 'zh' ? '出处' : 'Sources'}</strong>
+        <ul>${sources}</ul>
+      </div>`;
+    if (window.matchMedia('(max-width: 1079px)').matches) {
+      panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }
+
+  function wireDiagram(svg) {
+    const map = DETAILS[state.diagram] && DETAILS[state.diagram][state.lang];
+    if (!map || !Object.keys(map).length) return;
+    for (const g of svg.querySelectorAll('.node-group, .stage')) {
+      const id = g.dataset.id || g.id;
+      if (!id || !map[id]) continue;
+      g.setAttribute('tabindex', '0');
+      g.setAttribute('role', 'button');
+      g.setAttribute('aria-label', map[id].title);
+      g.addEventListener('click', () => showDetails(id));
+      g.addEventListener('keydown', (ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          showDetails(id);
+        }
+      });
+    }
+  }
+
+  async function load() {
+    selected = null;
+    const name = `${state.diagram}.${LETTERS[state.lang]}.svg`;
+    const alt = state.lang === 'zh' ? '设计记录图（中文）' : 'Design record diagram (English)';
+    figure.innerHTML = `<img src="${name}" alt="${alt}">`;
+    svgStyleOriginal = svgStyleWithoutMedia = '';
+    darkVars = {};
+    try {
+      const res = await fetch(name, { cache: 'no-cache' });
+      if (!res.ok) throw new Error(String(res.status));
+      const text = await res.text();
+      figure.innerHTML = text;
+      const svg = figure.querySelector('svg');
+      if (!svg) throw new Error('no <svg>');
+      svg.removeAttribute('width');
+      svg.removeAttribute('height');
+      const styleEl = svg.querySelector('style');
+      if (styleEl) {
+        const parts = splitSvgStyle(styleEl.textContent);
+        svgStyleOriginal = parts.original;
+        svgStyleWithoutMedia = parts.without;
+        darkVars = parts.dark;
+      }
+      applySvgTheme();
+      wireDiagram(svg);
+    } catch {
+      // file:// 下 fetch 会被拦，静态 <img> 仍可用 —— 给出可读的提示即可。
+      const note = document.createElement('p');
+      note.className = 'note';
+      note.textContent = state.lang === 'zh'
+        ? '当前是静态图。用本地服务器打开本页（例如在 docs/diagrams 下跑 python3 -m http.server）即可启用点选交互。'
+        : 'Static image. Serve this page over HTTP (e.g. python3 -m http.server in docs/diagrams) to enable click-to-inspect.';
+      figure.appendChild(note);
+    }
+    showDetails(null);
+  }
+
+  function setLang(lang) {
+    state.lang = lang;
+    document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+    langBtn.textContent = lang === 'zh' ? 'EN' : '中文';
+    langBtn.setAttribute('aria-pressed', lang === 'en' ? 'true' : 'false');
+    for (const btn of tabButtons) {
+      btn.textContent = TABS[lang][btn.dataset.diagram];
+    }
+    themeBtn.textContent = (lang === 'zh' ? THEME_LABEL : THEME_LABEL_EN)[state.theme];
+    load();
+  }
+
+  for (const btn of tabButtons) {
+    btn.addEventListener('click', () => {
+      state.diagram = btn.dataset.diagram;
+      for (const other of tabButtons) {
+        other.setAttribute('aria-selected', other === btn ? 'true' : 'false');
+      }
+      load();
+    });
+    btn.addEventListener('keydown', (ev) => {
+      const i = tabButtons.indexOf(btn);
+      const next = ev.key === 'ArrowRight' ? tabButtons[(i + 1) % tabButtons.length]
+        : ev.key === 'ArrowLeft' ? tabButtons[(i - 1 + tabButtons.length) % tabButtons.length]
+        : null;
+      if (next) { ev.preventDefault(); next.focus(); next.click(); }
+    });
+  }
+
+  langBtn.addEventListener('click', () => setLang(state.lang === 'zh' ? 'en' : 'zh'));
+  themeBtn.addEventListener('click', () => {
+    const order = ['auto', 'light', 'dark'];
+    setTheme(order[(order.indexOf(state.theme) + 1) % order.length]);
+  });
+
+  setLang('zh');
+  setTheme('auto');
+})();
+</script>
+</body>
+</html>

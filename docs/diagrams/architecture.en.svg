@@ -1,0 +1,130 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 672" width="960" height="672" role="img" aria-labelledby="dca-title dca-desc">
+  <title id="dca-title">DataCardForge architecture: the browser only interacts, the backend computes</title>
+  <desc id="dca-desc">The browser and a Web Worker form a front end that only handles interaction; dropped data files are parsed in the Worker. The browser reaches the backend service over protocol v1 (JSON control plane + DCM2 matrix frames). The backend service schedules the expression engine and dependency graph, reads and writes the matrix store, and pushes node state back over a long-poll event stream that drives the four-state lamps.</desc>
+
+  <style>
+    text { font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+    .region-label { font-size: 12px; font-weight: 600; fill: var(--dca-muted, #64748b); }
+    .title { font-size: 13.5px; font-weight: 600; fill: var(--dca-ink, #0f172a); }
+    .sub { font-size: 12px; font-weight: 400; fill: var(--dca-text, #475569); }
+    .edge-label { font-size: 11.5px; font-weight: 400; fill: var(--dca-muted, #64748b); }
+    .region { fill: none; stroke: var(--dca-region-line, #cbd5e1); stroke-width: 1.25; stroke-dasharray: 6 5; rx: 14; }
+    .node { stroke-width: 1.5; rx: 10; }
+    .ext { fill: var(--dca-ext-bg, #f8fafc); stroke: var(--dca-ext-line, #94a3b8); stroke-dasharray: 5 4; }
+    .fe { fill: var(--dca-fe-bg, #eff6ff); stroke: var(--dca-fe-line, #3b82f6); }
+    .fe2 { fill: var(--dca-fe2-bg, #f0f9ff); stroke: var(--dca-fe2-line, #38bdf8); }
+    .be { fill: var(--dca-be-bg, #ecfdf5); stroke: var(--dca-be-line, #059669); }
+    .be2 { fill: var(--dca-be2-bg, #f0fdf4); stroke: var(--dca-be2-line, #10b981); }
+    .be3 { fill: var(--dca-be3-bg, #f5f3ff); stroke: var(--dca-be3-line, #8b5cf6); }
+    .solid { fill: none; stroke: var(--dca-edge, #64748b); stroke-width: 1.75; }
+    .dashed { fill: none; stroke: var(--dca-edge-soft, #94a3b8); stroke-width: 1.5; stroke-dasharray: 5 4; }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --dca-ink: #e2e8f0;
+        --dca-text: #cbd5e1;
+        --dca-muted: #94a3b8;
+        --dca-region-line: #334155;
+        --dca-ext-bg: #111827; --dca-ext-line: #64748b;
+        --dca-fe-bg: #172554; --dca-fe-line: #60a5fa;
+        --dca-fe2-bg: #0c2f4a; --dca-fe2-line: #38bdf8;
+        --dca-be-bg: #052e2b; --dca-be-line: #34d399;
+        --dca-be2-bg: #062e21; --dca-be2-line: #10b981;
+        --dca-be3-bg: #2e1065; --dca-be3-line: #a78bfa;
+        --dca-edge: #94a3b8;
+        --dca-edge-soft: #64748b;
+      }
+    }
+  </style>
+
+  <defs>
+    <marker id="dca-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 Z" fill="var(--dca-edge, #64748b)"/>
+    </marker>
+    <marker id="dca-arrow-soft" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 Z" fill="var(--dca-edge-soft, #94a3b8)"/>
+    </marker>
+  </defs>
+
+  <!-- Regions -->
+  <rect class="region" x="24" y="180" width="476" height="270"/>
+  <text class="region-label" x="496" y="170" text-anchor="end">front end (web/)</text>
+  <rect class="region" x="590" y="180" width="350" height="470"/>
+  <text class="region-label" x="936" y="170" text-anchor="end">compute backend (backend/)</text>
+
+  <!-- Externals -->
+  <g class="node-group" id="n-user">
+    <rect class="node ext" x="290" y="16" width="190" height="56"/>
+    <text class="title" x="385" y="40" text-anchor="middle">User</text>
+    <text class="sub" x="385" y="59" text-anchor="middle">operator</text>
+  </g>
+
+  <g class="node-group" id="n-files">
+    <rect class="node ext" x="34" y="104" width="190" height="64"/>
+    <text class="title" x="129" y="128" text-anchor="middle">Data files</text>
+    <text class="sub" x="129" y="148" text-anchor="middle">TXT · CSV · TSV · DAT · XLSX</text>
+  </g>
+
+  <!-- Front-end nodes -->
+  <g class="node-group" id="n-worker">
+    <rect class="node fe2" x="44" y="260" width="170" height="130"/>
+    <text class="title" x="60" y="284">Web Worker</text>
+    <text class="sub" x="60" y="308">parse · no freeze</text>
+    <text class="sub" x="60" y="330">fallback: main thread</text>
+  </g>
+
+  <g class="node-group" id="n-browser">
+    <rect class="node fe" x="286" y="240" width="194" height="170"/>
+    <text class="title" x="302" y="264">Browser · React 19</text>
+    <text class="sub" x="302" y="288">ECharts 6 · zustand</text>
+    <text class="sub" x="302" y="310">VirtualTable scroll</text>
+    <text class="sub" x="302" y="332">cards · ports · wires</text>
+    <text class="sub" x="302" y="354">no numeric computation</text>
+  </g>
+
+  <!-- Backend nodes -->
+  <g class="node-group" id="n-service">
+    <rect class="node be" x="608" y="230" width="314" height="110"/>
+    <text class="title" x="624" y="254">Backend service (HTTP)</text>
+    <text class="sub" x="624" y="278">protocol v1 control plane · serves web/</text>
+    <text class="sub" x="624" y="300">DCM2 frames (window + full shape)</text>
+    <text class="sub" x="624" y="322">port 37811 · --web-root auto-detect</text>
+  </g>
+
+  <g class="node-group" id="n-engine">
+    <rect class="node be2" x="608" y="374" width="314" height="110"/>
+    <text class="title" x="624" y="398">Expression engine · dependency graph</text>
+    <text class="sub" x="624" y="422">evaluate · cascade · cycle refusal</text>
+    <text class="sub" x="624" y="444">dirty → computing → done | error</text>
+    <text class="sub" x="624" y="466">FunctionSignature registry · K outputs</text>
+  </g>
+
+  <g class="node-group" id="n-store">
+    <rect class="node be3" x="608" y="518" width="314" height="110"/>
+    <text class="title" x="624" y="542">Matrix store</text>
+    <text class="sub" x="624" y="566">authoritative data / graph / definitions</text>
+    <text class="sub" x="624" y="588">column-major: rows = samples, cols = vars</text>
+    <text class="sub" x="624" y="610">browser keeps a revision-keyed read cache</text>
+  </g>
+
+  <!-- Edges -->
+  <path class="solid" d="M385 72 V 232" data-from="n-user" data-to="n-browser" marker-end="url(#dca-arrow)"/>
+
+  <path class="solid" d="M129 168 V 252" data-from="n-files" data-to="n-worker" marker-end="url(#dca-arrow)"/>
+  <text class="edge-label" x="141" y="196">drop / open</text>
+
+  <path class="solid" d="M214 325 H 280" data-from="n-worker" data-to="n-browser" marker-end="url(#dca-arrow)"/>
+  <text class="edge-label" x="247" y="317" text-anchor="middle">register</text>
+
+  <path class="solid" d="M480 300 H 600" data-from="n-browser" data-to="n-service" marker-end="url(#dca-arrow)"/>
+  <text class="edge-label" x="540" y="292" text-anchor="middle">JSON · DCM2</text>
+
+  <path class="dashed" d="M608 372 H 482" data-from="n-service" data-to="n-browser" marker-end="url(#dca-arrow-soft)"/>
+  <text class="edge-label" x="548" y="390" text-anchor="middle">long-poll events</text>
+
+  <path class="solid" d="M765 340 V 366" data-from="n-service" data-to="n-engine" marker-end="url(#dca-arrow)"/>
+  <text class="edge-label" x="777" y="358">schedule</text>
+
+  <path class="solid" d="M765 484 V 510" data-from="n-engine" data-to="n-store" marker-end="url(#dca-arrow)"/>
+  <text class="edge-label" x="777" y="502">read / write</text>
+</svg>

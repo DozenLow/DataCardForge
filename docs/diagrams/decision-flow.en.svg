@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 604" width="900" height="604" role="img" aria-labelledby="dcf-title dcf-desc">
+  <title id="dcf-title">DataCardForge decision flow: four major reversals</title>
+  <desc id="dcf-desc">Four stages top to bottom: 2026-08-07 backend first, frontend paused; 2026-10-14 the frontend jumps ahead and settles on Web; 2026-10-15 repository governance and the headroom principle; 2026-10-17 the user decides the backend owns data and compute. The right column holds the side effects each stage left behind.</desc>
+
+  <style>
+    text { font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; }
+    .date { font-size: 13px; font-weight: 600; font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace; fill: var(--dcf-muted, #475569); }
+    .title { font-size: 15px; font-weight: 600; fill: var(--dcf-ink, #0f172a); }
+    .body { font-size: 13px; font-weight: 400; fill: var(--dcf-text, #334155); }
+    .note { font-size: 12px; font-weight: 400; font-style: italic; fill: var(--dcf-note, #64748b); }
+    .conn { font-size: 12px; font-weight: 400; fill: var(--dcf-muted, #64748b); }
+    .box { stroke-width: 1.5; rx: 10; }
+    .leader { stroke: var(--dcf-line-soft, #cbd5e1); stroke-width: 1; stroke-dasharray: 3 3; }
+    .flow { stroke: var(--dcf-line, #94a3b8); stroke-width: 1.75; fill: none; }
+    .s1 .box { fill: var(--dcf-s1-bg, #f1f5f9); stroke: var(--dcf-s1-line, #64748b); }
+    .s2 .box { fill: var(--dcf-s2-bg, #eff6ff); stroke: var(--dcf-s2-line, #3b82f6); }
+    .s3 .box { fill: var(--dcf-s3-bg, #fffbeb); stroke: var(--dcf-s3-line, #d97706); }
+    .s4 .box { fill: var(--dcf-s4-bg, #ecfdf5); stroke: var(--dcf-s4-line, #059669); }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --dcf-ink: #e2e8f0;
+        --dcf-text: #cbd5e1;
+        --dcf-muted: #94a3b8;
+        --dcf-note: #94a3b8;
+        --dcf-line: #64748b;
+        --dcf-line-soft: #475569;
+        --dcf-s1-bg: #1e293b; --dcf-s1-line: #64748b;
+        --dcf-s2-bg: #172554; --dcf-s2-line: #60a5fa;
+        --dcf-s3-bg: #3b2f14; --dcf-s3-line: #fbbf24;
+        --dcf-s4-bg: #052e2b; --dcf-s4-line: #34d399;
+      }
+    }
+  </style>
+
+  <defs>
+    <marker id="dcf-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 Z" fill="var(--dcf-line, #94a3b8)"/>
+    </marker>
+  </defs>
+
+  <!-- Stage one -->
+  <g class="stage s1" data-id="s1">
+    <text class="date" x="104" y="40" text-anchor="end">2026-08-07</text>
+    <rect class="box" x="120" y="16" width="440" height="104"/>
+    <text class="title" x="140" y="40">Backend first, frontend paused</text>
+    <text class="body" x="140" y="64">Eigen linear algebra + per-element formulas = backend</text>
+    <text class="body" x="140" y="86">view layer muddles along on Qt Widgets</text>
+  </g>
+  <line class="leader" x1="566" y1="36" x2="582" y2="36"/>
+  <text class="note" x="588" y="40">Eigen "already ready in the backend" never existed</text>
+
+  <path class="flow" d="M340 120 V 150" marker-end="url(#dcf-arrow)"/>
+  <text class="conn" x="352" y="139">(frontend choice paused)</text>
+
+  <!-- Stage two -->
+  <g class="stage s2" data-id="s2">
+    <text class="date" x="104" y="180" text-anchor="end">2026-10-14</text>
+    <rect class="box" x="120" y="156" width="440" height="104"/>
+    <text class="title" x="140" y="180">Frontend jumps ahead: settle on Web</text>
+    <text class="body" x="140" y="204">weights reversed: vector export is a hard requirement</text>
+    <text class="body" x="140" y="226">price: core/ algorithms "rewritten in TypeScript"</text>
+  </g>
+  <line class="leader" x1="566" y1="176" x2="582" y2="176"/>
+  <text class="note" x="588" y="180">where TS-does-maths was born (a side effect)</text>
+
+  <path class="flow" d="M340 260 V 290" marker-end="url(#dcf-arrow)"/>
+
+  <!-- Stage three -->
+  <g class="stage s3" data-id="s3">
+    <text class="date" x="104" y="320" text-anchor="end">2026-10-15</text>
+    <rect class="box" x="120" y="296" width="440" height="104"/>
+    <text class="title" x="140" y="320">Repository governance</text>
+    <text class="body" x="140" y="344">web/ into version control, Qt tree deleted</text>
+    <text class="body" x="140" y="366">headroom principle: T1(TS) / T2(WASM) / T3(backend)</text>
+  </g>
+  <line class="leader" x1="566" y1="316" x2="582" y2="316"/>
+  <text class="note" x="588" y="320">"the always-available baseline" (retroactive)</text>
+
+  <path class="flow" d="M340 400 V 430" marker-end="url(#dcf-arrow)"/>
+
+  <!-- Stage four -->
+  <g class="stage s4" data-id="s4">
+    <text class="date" x="104" y="460" text-anchor="end">2026-10-17</text>
+    <rect class="box" x="120" y="436" width="440" height="104"/>
+    <text class="title" x="140" y="460">User decides: the backend owns data and compute</text>
+    <text class="body" x="140" y="484">the browser degrades to a pure interaction surface</text>
+    <text class="body" x="140" y="506">TS compute leaves the production path,</text>
+    <text class="body" x="140" y="528">and becomes the differential baseline</text>
+  </g>
+  <line class="leader" x1="566" y1="456" x2="582" y2="456"/>
+  <text class="note" x="588" y="460">destination: back to August's "backend first"</text>
+
+  <text class="note" x="120" y="580">Same name, different thing: August's Eigen was never "ready in the backend"; October's backend is a C++/Eigen service written from scratch.</text>
+</svg>

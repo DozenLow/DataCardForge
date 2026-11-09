@@ -1,0 +1,67 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 340" width="900" height="340" role="img" aria-labelledby="dcp-title dcp-desc">
+  <title id="dcp-title">端口语义 v1 的投影关系</title>
+  <desc id="dcp-desc">本文件是单一事实源，向下投影出四层表示：FunctionSignature 注册表、dc_plugin.h 的 C 投影、Rust repr(C) 镜像的 WASM 层，以及卡片层差分夹具。</desc>
+
+  <style>
+    text { font-family: 'Noto Sans SC', 'Noto Sans CJK SC', 'Source Han Sans SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', system-ui, -apple-system, 'Segoe UI', sans-serif; }
+    .root-title { font-size: 15px; font-weight: 600; fill: var(--dcp-ink, #0f172a); }
+    .root-sub { font-size: 12px; font-weight: 400; fill: var(--dcp-muted, #64748b); }
+    .leaf-title { font-size: 13.5px; font-weight: 600; fill: var(--dcp-ink, #0f172a); }
+    .leaf-sub { font-size: 12px; font-weight: 400; fill: var(--dcp-text, #475569); }
+    .root { fill: var(--dcp-root-bg, #eef2ff); stroke: var(--dcp-root-line, #6366f1); stroke-width: 1.5; rx: 12; }
+    .leaf { fill: var(--dcp-leaf-bg, #f8fafc); stroke: var(--dcp-leaf-line, #cbd5e1); stroke-width: 1.25; rx: 8; }
+    .link { fill: none; stroke: var(--dcp-link, #94a3b8); stroke-width: 1.5; }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --dcp-ink: #e2e8f0;
+        --dcp-text: #cbd5e1;
+        --dcp-muted: #94a3b8;
+        --dcp-root-bg: #1e1b4b;
+        --dcp-root-line: #818cf8;
+        --dcp-leaf-bg: #1e293b;
+        --dcp-leaf-line: #475569;
+        --dcp-link: #64748b;
+      }
+    }
+  </style>
+
+  <defs>
+    <marker id="dcp-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M0 0 L10 5 L0 10 Z" fill="var(--dcp-link, #94a3b8)"/>
+    </marker>
+  </defs>
+
+  <!-- 单一事实源 -->
+  <rect class="root" x="16" y="118" width="190" height="104"/>
+  <text class="root-title" x="34" y="152">本文件</text>
+  <text class="root-title" x="34" y="176">（单一事实源）</text>
+  <text class="root-sub" x="34" y="200">端口语义 v1 规范</text>
+
+  <!-- 投影连线 -->
+  <path class="link" d="M206 170 H296 V50 H 322" marker-end="url(#dcp-arrow)"/>
+  <path class="link" d="M206 170 H296 V130 H 322" marker-end="url(#dcp-arrow)"/>
+  <path class="link" d="M206 170 H296 V210 H 322" marker-end="url(#dcp-arrow)"/>
+  <path class="link" d="M206 170 H296 V290 H 322" marker-end="url(#dcp-arrow)"/>
+
+  <!-- 投影目标一 -->
+  <rect class="leaf" x="330" y="16" width="550" height="68"/>
+  <text class="leaf-title" x="346" y="38">FunctionSignature 注册表</text>
+  <text class="leaf-sub" x="346" y="58">C++/TS 同构，内置函数先行注册</text>
+  <text class="leaf-sub" x="346" y="74">（stats.ts 五个候选是首批压力测试）</text>
+
+  <!-- 投影目标二 -->
+  <rect class="leaf" x="330" y="96" width="550" height="68"/>
+  <text class="leaf-title" x="346" y="118">dc_plugin.h —— C 投影</text>
+  <text class="leaf-sub" x="346" y="138">未冻结；重访触发条件写在上游决策里</text>
+
+  <!-- 投影目标三 -->
+  <rect class="leaf" x="330" y="176" width="550" height="68"/>
+  <text class="leaf-title" x="346" y="198">Rust repr(C) 镜像 —— WASM 层</text>
+  <text class="leaf-sub" x="346" y="218">Rust 无稳定 ABI，repr(C) + extern "C" 是唯一路径</text>
+
+  <!-- 投影目标四 -->
+  <rect class="leaf" x="330" y="256" width="550" height="68"/>
+  <text class="leaf-title" x="346" y="278">卡片层差分夹具 —— web/tests/fixtures/cards/</text>
+  <text class="leaf-sub" x="346" y="298">照抄 xlayer 裁判模式（同一份 JSON 双边裁判）</text>
+</svg>
