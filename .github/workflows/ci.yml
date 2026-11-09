@@ -106,3 +106,14 @@ jobs:
 
       - name: End-to-end smoke test
         run: node scripts/smoke.mjs http://127.0.0.1:4173
+
+  docs-check:
+    # Docs are long-lived design records: navigation coverage, dead links, leftover ASCII
+    # diagrams, orphaned SVGs and bilingual pairing are all mechanically decidable, so they
+    # get a gate instead of a note in a file nobody re-reads (scripts/docs-check.py).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Check docs invariants
+        run: python3 scripts/docs-check.py
