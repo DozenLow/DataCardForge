@@ -8,7 +8,7 @@ were considered and dropped. Three entrances, each answering one question:
 | Question | Where |
 |---|---|
 | **What is it, how do I use it** | repository root [`README.md`](../README.md) / [`README.zh-CN.md`](../README.zh-CN.md) |
-| **Where are we now, what do I verify next** | repository root `STATE.md` — the only authority; when docs and code disagree, it wins |
+| **Where the project is now, what to verify next** | repository root `STATE.md` — the only authority; when docs and code disagree, it wins |
 | **Why is it like this, what did we give up** | this directory |
 
 - **Last reviewed**: 2026-11-04 (the HEAD at review time is in `STATE.md`)
@@ -105,7 +105,7 @@ When adding a diagram:
 
 ## Ground rules
 
-1. **Three entrances, three jobs**: what → root `README.md`; where we are now → `STATE.md`; why → this
+1. **Three entrances, three jobs**: what → root `README.md`; where the project is now → `STATE.md`; why → this
    directory. When they disagree, that is the order of precedence.
 2. **User perspective first, technical plan second**: every architecture discussion starts from "how does
    the user think about this", technical analysis comes after ([decision background](decisions/2026-08-07-backend-first-frontend-paused.md)).
@@ -118,11 +118,14 @@ When adding a diagram:
    definition** of connection geometry, the red/blue/grey palette, close protection and similar rules is
    now the TypeScript source and its tests. C++ file names left in historical documents no longer point
    at openable files; they are kept as citations of "where this rule came from".
-6. **History is not rewritten**: decisions and logs record what we thought *then*. To update a conclusion,
+6. **History is not rewritten**: decisions and logs record the judgement of that day. To update a conclusion,
    annotate in place and point at the newer document instead of editing the old judgement.
 7. **Codenames resolve in place**: any number or codename in the prose (option A/B/C, T1/T2/T3,
    P0/P2…) must be defined in the same document or glossed on the spot, and retired codenames are never
    reused. The test: could someone reading only that sentence, a year from now, follow it?
+8. **Neutral register**: state facts, mechanisms, evidence and cost. No evaluation ("the most expensive",
+   "obviously", "actually", "precisely"), no self-narration ("we thought" → "the judgement at the time"),
+   no commentary ("the irony is…"). Quotes of the user's words stay verbatim.
 
 ## Language policy
 
@@ -133,7 +136,7 @@ When adding a diagram:
 - **Diagrams are bilingual**: `X.zh.svg` / `X.en.svg`; the interactive page toggles language in place, so
   there is no `.en.html`.
 - **Historical records are Chinese-only**: `decisions/`, `log/`, `lessons/`, `audits/` and `tasks/`
-  record "what we thought on that day". Back-translating them adds little, so no English version is
+  record "the judgement of that day". Back-translating them adds little, so no English version is
   provided; translate on demand.
 - **Requirement for new documents**: new specification documents must ship `X.en.md` alongside; new
   decision records and logs need not; new diagrams must ship the `.en.svg`.

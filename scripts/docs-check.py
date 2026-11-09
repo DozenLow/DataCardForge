@@ -47,9 +47,13 @@ ROOT_DOCS = [
     "CHANGELOG.zh-CN.md",
     "PROVENANCE.md",
     "AGENTS.md",
+    "web/README.md",
+    "web/docs/screenshots/README.md",
 ]
 
 LINK_RE = re.compile(r"!?\[[^\]]*\]\(([^)\s]+)(?:\s+\"[^\"]*\")?\)")
+# 「某篇 .md 的 §N」——跨文件小节引用。指错了，读者就找不到那一节。
+SECREF_RE = re.compile(r"([\w./-]+\.md)`?[^\n§]{0,60}?§\s*(\d+(?:\.\d+)?)")
 
 
 class Report:
@@ -202,6 +206,48 @@ def check_svg(path: Path, rel: str, rep: Report) -> None:
             rep.fail(rel, "<style> 里 @import 了外部样式")
 
 
+def heading_numbers(path: Path) -> set[str]:
+    """收集一篇文档里出现过的小节编号（##/###/#### 开头的阿拉伯数字）。"""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return set()
+    return {
+        m.group(1)
+        for m in re.finditer(r"(?m)^#{2,4}\s+(\d+(?:\.\d+)?)[.、\s]", text)
+    }
+
+
+def check_section_refs(root: Path, files: list[str], rep: Report) -> None:
+    """`foo.md §N` 里的 N 必须是 foo.md 真实存在的小节编号。"""
+    cache: dict[Path, set[str]] = {}
+    for rel in files:
+        path = root / rel
+        try:
+            text = path.read_text(encoding="utf-8")
+        except (OSError, UnicodeDecodeError):
+            continue
+        for lineno, line in enumerate(text.split("\n"), 1):
+            for m in SECREF_RE.finditer(line):
+                target_raw, num = m.group(1), m.group(2)
+                if target_raw.isdigit():
+                    continue
+                target = (path.parent / target_raw).resolve()
+                if target == path.resolve() or not target.exists():
+                    continue  # 同文件引用与死链交给别的检查
+                if target not in cache:
+                    cache[target] = heading_numbers(target)
+                heads = cache[target]
+                top = num.split(".")[0]
+                if num in heads or top in heads:
+                    continue
+                where = f"第 {lineno} 行引用 {target_raw} §{num}"
+                if not heads:
+                    rep.fail(rel, f"{where}，但该文件没有编号小节——按小节标题引用")
+                else:
+                    rep.fail(rel, f"{where}，该文件里没有这一节")
+
+
 def check_bilingual(root: Path, rep: Report) -> None:
     for rel in BILINGUAL_MD:
         en = rel[: -len(".md")] + ".en.md"
@@ -233,6 +279,7 @@ def main() -> int:
     check_links(root, docs_md + root_md, rep)
     check_ascii_art(root, docs_md + root_md, rep)
     check_diagrams(root, docs_md + root_md, svgs, rep)
+    check_section_refs(root, docs_md + root_md, rep)
     check_bilingual(root, rep)
 
     checked = (

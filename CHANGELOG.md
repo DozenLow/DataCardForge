@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The table prints every number at its **shortest round-trip precision** instead of six
   significant digits. Six digits could not separate a column of measurements centred on
   1e6 — 3000 distinct rows rendered as 3000 copies of `1e+6` — so the table now shows what
-  is actually stored. Columns are sized from a sample of their values, and every cell keeps
+  is stored. Columns are sized from a sample of their values, and every cell keeps
   a tooltip with the full text.
 - Formula cards report **rounding jitter** for their output, three seconds after the
   definition stops changing. It is measured, not guessed: the backend re-runs the same node
@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fine. The backend now allocates a console window when it has none (re-binding
   stdin/stdout/stderr to it), prints the address into it and into the window title, and opens
   the browser through `ShellExecuteW` instead of `system("start …")` — no `cmd.exe` in the path,
-  and a refusal is reported instead of swallowed. The window now stays open for 15 s after a
+  and a refusal is reported instead of ignored. The window now stays open for 15 s after a
   startup failure so the message can be read, a busy port names both the URL to open and a free
   port to try, and `--open` / `DC_OPEN=1` force the browser from a non-TTY context. The exe stays
   a console image, asserted on the exact bytes that go into the zip by

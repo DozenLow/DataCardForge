@@ -157,7 +157,7 @@ Eigen 3.4 头文件（`sudo apt install build-essential cmake ninja-build libeig
 - **结果可再流动**：右键函数卡结果列头 → 建图或「新建公式卡…」。函数卡的输出是普通矩阵，
   所以既能画图、也能喂给下一张函数卡（A → B 链式），重算后下游自动更新——数据流闭环
 - **结果预览 100 行**：函数卡默认只渲染结果前 100 行（帧里同时报告整表 10000 行的形状），
-  不再为了看一眼结果就把整张表铺出来
+  不再为查看一次结果而渲染整张表
 - **求值不持锁**：慢函数不会冻结整个节点注册表（最大余量原则）
 - **签名可以完全不像公式卡**：`builtin:linear-regression` 是双单列端口、无表达式参数、
   输出形状由签名固定的函数（1 行 × 5 列），右键数据列「新建关系枚举卡…」即可。建好后输入区
@@ -182,7 +182,7 @@ Eigen 3.4 头文件（`sudo apt install build-essential cmake ninja-build libeig
 | ![折线图](web/docs/screenshots/line.png) | ![散点图](web/docs/screenshots/scatter.png) | ![回归图](web/docs/screenshots/regression.png) |
 | **折线图**——一列或多列按行号展开，可缩放/对数轴/平滑 | **散点图**——两列配对 (X, Y)，可叠加最小二乘线 | **回归图**——散点 + OLS 拟合，标注斜率与 R² |
 | ![直方图](web/docs/screenshots/histogram.png) | ![箱线图](web/docs/screenshots/boxplot.png) | ![小提琴图](web/docs/screenshots/violin.png) |
-| **直方图**——Sturges 自动分箱或显式指定箱数 | **箱线图**——中位数/四分位/须线/Tukey 离群点 | **小提琴图**——KDE 轮廓 + 四分位线，双峰一眼可见 |
+| **直方图**——Sturges 自动分箱或显式指定箱数 | **箱线图**——中位数/四分位/须线/Tukey 离群点 | **小提琴图**——KDE 轮廓 + 四分位线，双峰结构清晰 |
 | ![柱状图](web/docs/screenshots/bar.png) | ![均值±误差](web/docs/screenshots/errorbar.png) | ![相关性热力图](web/docs/screenshots/correlation-heatmap.png) |
 | **柱状图**——分组/堆叠，按行号展开 | **均值±误差**——每列均值 + SD/SE/95% CI | **相关性热力图**——两两 Pearson 矩阵 |
 
@@ -395,7 +395,7 @@ header-only（已编译进二进制）。完整说明见 [`.github/release-asset
 
 - [ ] **条件筛选卡**：按行/列谓词切割矩阵后再喂入函数卡
 - [ ] **扩展卡（ExtensionCard）**：专用于服务特定卡片的**快速参数设置 + 实时预览**面板，只能通过父卡片创建并视其为父窗口、随父卡关闭；解决"卡片一多、参数设置分散"的瓶颈（支持滚轮快速调参 + 实时预览，如分段拟合项数、平滑窗口等）。
-- [ ] **摘要面板（`builtin:summary`，名称待定）**——任意卡片上的描述性统计，**只在点名要的时候才算**。卡内可折叠面板；载荷是一张普通矩阵（行 = 统计量，列 = 变量），因此直接继承 CSV 导出、虚拟滚动表格，将来还能物化成真正的卡片去喂图表。首批 12 项：`n · nan · mean · sd · var · min · q1 · median · q3 · max · iqr · sem`；口径写死（样本 ddof = n−1、分位数线性插值、NaN 跳过但计数），统计量**在后端算**，保证全仓只有一份定义；失效沿用既有的定义版本守卫，`dirty` 带原因（`unrequested` 与 `upstream-changed` 分开），让「还没算」不会被读成「坏了」。
+- [ ] **摘要面板（`builtin:summary`，名称待定）**——任意卡片上的描述性统计，**只在点名要的时候才算**。卡内可折叠面板；载荷是一张普通矩阵（行 = 统计量，列 = 变量），因此直接继承 CSV 导出、虚拟滚动表格，后续可以物化为卡片供图表使用。首批 12 项：`n · nan · mean · sd · var · min · q1 · median · q3 · max · iqr · sem`；口径固定（样本 ddof = n−1、分位数线性插值、NaN 跳过但计数），统计量**在后端算**，保证全仓只有一份定义；失效沿用既有的定义版本守卫，`dirty` 带原因（`unrequested` 与 `upstream-changed` 分开），让「还没算」不会被读成「坏了」。
 - [ ] **隐式方程求解**：从 A=B 关系中提取无法解析隔离的 B（当前单公式设计的已知限制）
 - [ ] 平滑算法的更多模式，平滑算法考虑支持公式卡或者函数卡
 - [ ] **多函数卡并行执行**：后端调度器 + job ID + 取消 + 乱序完成

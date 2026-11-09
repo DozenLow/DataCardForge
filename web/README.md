@@ -46,7 +46,7 @@ node scripts/smoke.mjs http://127.0.0.1:4173
 
 ![小提琴图](docs/screenshots/violin.png)
 
-> 小提琴图揭示了数据的**双峰**结构——这正是它在科研场景中比箱线图更有价值的地方。
+> 小提琴图显示分布形状；**双峰**结构在箱线图里看不到，这是它在本场景下的主要用途。
 > 图中还能看到四分位虚线、中位实线，以及 KDE 曲线随样本范围延伸的镜像边缘。
 
 ![相关性热力图](docs/screenshots/correlation-heatmap.png)
@@ -132,47 +132,46 @@ PDF 绘图算子，工作量大且保真度风险高。本项目**手写了一�
   `getDataURL({type:'svg'})` / `getSvgDataURL()` 直接给出矢量串。**不需要换库。**
 - **图型覆盖**：`bar` / `line` / `scatter` / `boxplot` / `heatmap` / `candlestick` /
   `custom` 等均已内置（见 `node_modules/echarts/lib/chart/`）。
-- 只有 **小提琴图** 与 **误差棒** 没有原生类型，二者用 ECharts 真正的
+- 只有 **小提琴图** 与 **误差棒** 没有原生类型，二者用 ECharts 的
   `custom` series（矢量图元）实现，因此**没有牺牲矢量导出**。
 
 对比过的替代方案：Plotly.js / Observable Plot / Vega-Lite 在「小提琴、误差棒、回归拟合线」
-上的覆盖并没有更好，而包体更大、SVG 导出更绕；换库无法解决唯一真正的短板（EPS），
+上的覆盖并没有更好，而包体更大、SVG 导出更绕；换库无法解决唯一的短板（EPS），
 却会丢掉已经验证过的连线层与卡片几何。**故保留 ECharts，把工作投入在补齐图型上。**
 
 ## 目录结构
 
-```
-src/
-├── core/                    # 与前端框架无关的数据层（对应 C++ 的 core/）
-│   ├── MatrixData.ts        #   列式矩阵：Pos.N 列 + annotation + number[]
-│   ├── FileLoader.ts        #   加载器抽象 + 首行标题识别 + 文本解码
-│   ├── DependencyGraph.ts   #   卡片依赖图（dependent → dependsOn）+ 环检测 + 边去重
-│   ├── Smoothing.ts         #   4 种平滑算法 + SG 系数求解
-│   ├── stats.ts             #   统计量：分位数/KDE/直方图/OLS/相关/离群点
-│   └── numeric.ts           #   严格数字解析（fast_float 的替代）
-├── charts/                  # 图表层（与 React 无关，可单测）
-│   ├── chartTypes.ts        #   图型注册表 + 导出格式声明
-│   ├── chartModel.ts        #   图表配置：图型 + 数据列 + 呈现选项
-│   ├── chartOptions.ts      #   每种图型 → ECharts option（含 custom series）
-│   ├── export.ts            #   SVG / PNG / PDF 导出管线
-│   ├── pdf.ts               #   无依赖的极简 PDF 生成器
-│   └── palette.ts           #   色盲友好调色板（Okabe–Ito）
-├── loaders/                 # 具体格式解析
-│   ├── parse.worker.ts      #   worker 入口：解析并回传 ColumnPayload[]
-│   ├── parseWorker.ts       #   主线程侧客户端 + 无 worker 时的内联回退
-│   └── parseTypes.ts        #   两侧共享的线格式（独立模块，避免 import 期访问 self）
-├── ui/
-│   ├── App.tsx              #   根组件：菜单动作、文件摄取、导入导出
-│   ├── workspaceStore.ts    #   卡片状态 + 依赖图 + 关闭规则
-│   ├── cardMetrics.ts       #   卡片矩形测量（连线端点 = 卡片顶部中心）
-│   ├── ConnectionLayer.tsx  #   SVG 卡片级连线层（一条依赖边一条线）
-│   ├── i18n.ts              #   中英词典
-│   ├── fileActions.ts       #   文件选择 / 下载 / 工作区读写
-│   └── components/          #   CardCanvas / CardShell / MatrixCard / ChartCard / ColumnDock …
-scripts/smoke.mjs            # headless Chromium 端到端冒烟（65 项检查）
-tests/                       # vitest：394 个用例（*.dom.test.tsx 走 jsdom）
-docs/screenshots/            # 文档配图
-```
+`src/` 按层划分，框架依赖只出现在 `ui/` 与 `loaders/`：
+
+- `core/` — 与前端框架无关的数据层（对应 C++ 的 `core/`）
+  - `MatrixData.ts` — 列式矩阵：`Pos.N` 列 + annotation + `number[]`
+  - `FileLoader.ts` — 加载器抽象 + 首行标题识别 + 文本解码
+  - `DependencyGraph.ts` — 卡片依赖图（dependent → dependsOn）+ 环检测 + 边去重
+  - `Smoothing.ts` — 4 种平滑算法 + SG 系数求解
+  - `stats.ts` — 统计量：分位数 / KDE / 直方图 / OLS / 相关 / 离群点
+  - `numeric.ts` — 严格数字解析（`fast_float` 的替代）
+- `charts/` — 图表层（与 React 无关，可单测）
+  - `chartTypes.ts` — 图型注册表 + 导出格式声明
+  - `chartModel.ts` — 图表配置：图型 + 数据列 + 呈现选项
+  - `chartOptions.ts` — 每种图型 → ECharts option（含 `custom` series）
+  - `export.ts` — SVG / PNG / PDF 导出管线
+  - `pdf.ts` — 无依赖的极简 PDF 生成器
+  - `palette.ts` — 色盲友好调色板（Okabe–Ito）
+- `loaders/` — 具体格式解析
+  - `parse.worker.ts` — worker 入口：解析并回传 `ColumnPayload[]`
+  - `parseWorker.ts` — 主线程侧客户端 + 无 worker 时的内联回退
+  - `parseTypes.ts` — 两侧共享的线格式（独立模块，避免 import 期访问 `self`）
+- `ui/`
+  - `App.tsx` — 根组件：菜单动作、文件摄取、导入导出
+  - `workspaceStore.ts` — 卡片状态 + 依赖图 + 关闭规则
+  - `cardMetrics.ts` — 卡片矩形测量（连线端点 = 卡片顶部中心）
+  - `ConnectionLayer.tsx` — SVG 卡片级连线层（一条依赖边一条线）
+  - `i18n.ts` — 中英词典
+  - `fileActions.ts` — 文件选择 / 下载 / 工作区读写
+  - `components/` — `CardCanvas` / `CardShell` / `MatrixCard` / `ChartCard` / `ColumnDock` …
+- `scripts/smoke.mjs` — headless Chromium 端到端冒烟
+- `tests/` — vitest：594 个用例（`*.dom.test.tsx` 走 jsdom）
+- `docs/screenshots/` — 文档配图
 
 ## 移植来源：C++ → TypeScript 映射
 
@@ -210,13 +209,15 @@ docs/screenshots/            # 文档配图
 
 ## 构建产物
 
-```
-dist/index.html                  0.42 kB │ gzip   0.32 kB
-dist/assets/index-*.css         11.9  kB │ gzip   2.8  kB
-dist/assets/index-*.js         341    kB │ gzip 107    kB   ← 首屏
-dist/assets/echarts-*.js     1 124    kB │ gzip 374    kB   ← 首开图表时加载
-dist/assets/xlsx-*.js          492    kB │ gzip 160    kB   ← 首次打开 xlsx 时加载
-```
+单次生产构建的实测体积（数字随依赖版本变化）：
+
+| 产物 | 原始 | gzip | 载入时机 |
+|---|---|---|---|
+| `dist/index.html` | 0.42 kB | 0.32 kB | 入口 |
+| `dist/assets/index-*.css` | 11.9 kB | 2.8 kB | 入口 |
+| `dist/assets/index-*.js` | 341 kB | 107 kB | 首屏 |
+| `dist/assets/echarts-*.js` | 1 124 kB | 374 kB | 首次打开图表 |
+| `dist/assets/xlsx-*.js` | 492 kB | 160 kB | 首次打开 xlsx |
 
 ## 已知限制
 

@@ -11,7 +11,7 @@
 > ② the "large-table performance" worry was disproved by measurement — under virtual scrolling a
 > 10 000-row table renders only 23 row nodes, and ECharts downsamples 10⁵ points with LTTB;
 > ③ the whole "embed ImGui in a WebView" complexity source **disappeared** (there is no host any more;
-> the browser is the host). This document keeps the original reasoning as a record of "why we hesitated
+> the browser is the host). This document keeps the original reasoning as a record of "why the choice was paused
 > back then".
 
 ## The two routes

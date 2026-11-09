@@ -79,7 +79,7 @@
 
 - `backend/tests/nodes_test.cpp`：带表头矩阵走**真实节点路径**（v1 表达式节点与
   `builtin:expression-columns` 两条求值点）验证四种写法 + 三种结构化错误参数。
-  两条路径都测，是因为 `A.pos.1` 曾经只在 v1 路径可用、在用户真正用的公式卡上失效。
+  两条路径都测，是因为 `A.pos.1` 曾经只在 v1 路径可用、在用户实际使用的公式卡上失效。
 - `web/tests/expression.test.ts`：写法表、限定引用、错误参数。
 - `web/tests/fixtures/xlayer/expression.v1.json`：两套引擎的共同裁判（81 例）。
 - `web/scripts/smoke.mjs`：真实浏览器里建一张公式卡，断言表达式行可见、能算出列、

@@ -145,8 +145,7 @@ Every field below is **purely additive**: a v1 client that only sends `varName` 
   the number of expressions is **data**; K stays 1.
 - **Port binding `mode`**: `"matrix"` binds the whole table; `"cell"` + `columnIndex` binds that
   single column (out of range ⇒ `unknownColumn`). In v1 `mode` was decorative — marking `cell` still
-  bound the whole table — but two-input signatures need exactly "port = one column", so it now really
-  means something.
+  bound the whole table — but two-input signatures need exactly "port = one column", so it now carries semantics.
 - `builtin:linear-regression`: ports `x` / `y` (one column each), no parameters, output `fit` fixed by
   the signature at 1 row × 5 columns (slope/intercept/r/r2/n). It has no expression shape — its reason
   for existing is to prove the signature model generalises.

@@ -17,7 +17,7 @@
 | [`line.png`](line.png) | 折线图 | 多列叠加、图例、缩放/平移 |
 | [`histogram.png`](histogram.png) | 直方图 | Sturges 自动分箱、箱边界描边 |
 | [`boxplot.png`](boxplot.png) | 箱线图 | 中位数 / 四分位 / 须线 / Tukey 离群点 |
-| [`violin.png`](violin.png) | 小提琴图 | **KDE 轮廓 + 四分位线；双峰列一眼可见** |
+| [`violin.png`](violin.png) | 小提琴图 | **KDE 轮廓 + 四分位线；双峰列清晰可辨** |
 | [`errorbar.png`](errorbar.png) | 均值±误差棒 | 均值点 + 须线 + 帽（SD / SE / 95% CI） |
 | [`regression.png`](regression.png) | 回归图 | 散点 + OLS 直线，图例含斜率与 R² |
 | [`correlation-heatmap.png`](correlation-heatmap.png) | 相关性热力图 | 两两 Pearson 系数、发散配色、单元格数值 |

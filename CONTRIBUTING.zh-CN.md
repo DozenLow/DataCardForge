@@ -12,7 +12,7 @@
 - **DCO 1.1，不要 CLA**。每个提交用 `git commit -s` 签名，正文末尾会多出一行
   `Signed-off-by: 你的名字 <you@example.com>`。这一行表示：这个改动是你写的（或你有权提交），
   且你同意它按 GPL-3.0 分发。全文见 <https://developercertificate.org>；
-  本项目的权属说明在 [PROVENANCE.md](PROVENANCE.md) §4。
+  本项目的权属说明在 [PROVENANCE.md](PROVENANCE.md) 的「贡献」一节。
 - **保持礼貌**。目前还没有行为准则文件，规矩就一句话：不人身攻击、不骚扰。对设计的分歧不仅允许，
   而且欢迎。
 - **语言**：issue 和 PR 用中文或英文都可以。文档是双语的

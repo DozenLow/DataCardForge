@@ -23,10 +23,10 @@ backports.
 These are documented boundaries. Reports that only confirm one of them are not actionable;
 please do not file them.
 
-1. **The compute backend has NO authentication.** Protocol v1 is a single-user,
-   local-machine design (`docs/architecture/backend-protocol-v1.md`, §13: "无鉴权…跨机部署前必须
-   先补 token"). Any local process — or anyone who can reach the port — has full access to the
-   matrix / node API.
+1. **The compute backend has NO authentication.** Protocol v1 is a single-user, local-machine design
+   (`docs/architecture/backend-protocol-v1.md`, "Transport": no authentication; a token must be added
+   before any cross-machine deployment). Any local process — or anyone who can reach the port — has
+   full access to the matrix / node API.
 2. **The backend listens on 127.0.0.1 only.** It is not reachable from the network unless
    something else forwards it. Cross-machine deployment is explicitly unsupported until a
    token is added.

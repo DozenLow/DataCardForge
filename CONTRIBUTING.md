@@ -14,7 +14,7 @@ to keep it small and to show the gate output.
   `Signed-off-by: Your Name <you@example.com>`. That line is your statement that you wrote
   the change (or have the right to submit it) and agree to its distribution under GPL-3.0.
   Full text: <https://developercertificate.org>. Quotes and plain paragraphs live in
-  [PROVENANCE.md](PROVENANCE.md) §4.
+  [PROVENANCE.md](PROVENANCE.md), "Contributions" section.
 - **Be civil.** There is no code-of-conduct file yet; the rule is simply no personal
   attacks, no harassment. Disagreement about a design is welcome and expected.
 - **Language**: issues and PRs are fine in English or Chinese. Documentation lives in both
@@ -26,7 +26,7 @@ to keep it small and to show the gate output.
 Most welcome: bug reports with a reproduction, documentation fixes, a test that exposes a
 real defect, a self-contained feature that respects the contracts below.
 
-Poor use of both our time: drive-by reformatting of large files, "rewrite it in framework
+Poor use of review time: drive-by reformatting of large files, "rewrite it in framework
 X", dependency updates without a reason, or a PR that changes behaviour and adds no test.
 
 ## Before you open a PR
@@ -51,7 +51,7 @@ cd web && npm run build && npx vite preview --port 4173 &
 node web/scripts/smoke.mjs http://127.0.0.1:4173   # end-to-end, needs the real backend on :37811
 ```
 
-CI runs exactly the same gates (`.github/workflows/ci.yml`).
+CI runs the same gates (`.github/workflows/ci.yml`).
 
 ## Contracts you must not break
 

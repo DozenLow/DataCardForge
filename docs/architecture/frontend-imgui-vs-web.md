@@ -38,7 +38,7 @@
 
 1. **连线从属原则**下，WebView 若作为卡片嵌入 ImGui，**走子窗口模式即可**，无需 OSR（见 [连线从属原则](../decisions/2026-08-07-connection-subordination.md)）
 2. **若"矢量导出 + SVG 编辑"被证实为高频需求** → Web 权重应大幅上调（这是 ImGui 最大相对劣势）
-3. ImPlot 生态：健康但偏小，v1.1 处于 API 重写期（见 [ImPlot v1.1 API 大改](../lessons/implot-v1.1-api.md)）；ImGui 生态庞大且极其健康
+3. ImPlot 生态：健康但偏小，v1.1 处于 API 重写期（见 [ImPlot v1.1 API 大改](../lessons/implot-v1.1-api.md)）；ImGui 生态规模大、维护活跃
 4. 导出管线应**与交互显示分离**（交互用 ImGui/ImPlot，导出用 matplotlib 桥或数据驱动 SVG），无论选哪条路都成立
 
 ## 未来重新评估的触发条件

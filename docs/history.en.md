@@ -4,12 +4,11 @@
 
 - **Nature**: the decisions, logs, lessons and audits chained into one causal history. This document
   **creates no new decisions**; every conclusion cites its source, and the source is authoritative.
-- **As of**: 2026-11-04. This document explains *why we ended up here*; **where we are now** is the
+- **As of**: 2026-11-04. This document explains *why the project ended up here*; **where we are now** is the
   repository-root `STATE.md`.
 - **Tags**: `#history #navigation #evolution #decision`
 
-> How to read: for the quick version, §1 and the flow diagram in §2; to understand "why we went the long
-> way round", the four spirals in §5 and the lessons in §6.
+> How to read: for the quick version, §1 and the flow diagram in §2; to understand why the direction changed four times, the four spirals in §5 and the lessons in §6.
 
 ---
 
@@ -31,11 +30,6 @@ there must be no wall in the worst case**.
 > Interactive version (click a stage for its reasoning and sources; language/theme toggle):
 > [`diagrams/interactive.html`](diagrams/interactive.html). Conventions: [navigation](README.en.md#diagrams).
 
-**The irony is visible at a glance**: the destination (backend computes) and the starting point
-(backend first) share a name, but this backend is not that backend — August's Eigen "already ready in
-the backend" **never existed** (§3.1), and October's backend is a **C++/Eigen service written from
-scratch**.
-
 ---
 
 ## 3. Timeline (by date, with sources)
@@ -50,7 +44,7 @@ scratch**.
 | 2026-10-14 | `web/` implemented in full: each algorithm ported to TS along the C++ module boundaries (core/loaders/ui) | implementation | [log/2026-10-14](log/2026-10-14.md) |
 | 2026-10-14 | Chart-library audit: **keep ECharts**, fill in error bars / violin via a `custom` series | decision | [decisions/2026-10-14-chart-library-audit](decisions/2026-10-14-chart-library-audit.md) |
 | 2026-10-14 | Nine statistical chart types + the SVG/PNG/PDF export pipeline delivered | implementation | same as above |
-| 2026-10-14 | Five porting defects fixed (including "switch file → charts follow", which never actually worked in the Qt version) | fix | [log/2026-10-14](log/2026-10-14.md) |
+| 2026-10-14 | Five porting defects fixed (including "switch file → charts follow", which never worked in the Qt version) | fix | [log/2026-10-14](log/2026-10-14.md) |
 | 2026-10-15 | **Repository governance**: `web/` into version control → then remove the Qt/C++ tree (215 MB) | decision | [decisions/2026-10-15-qt-implementation-removed](decisions/2026-10-15-qt-implementation-removed.md) |
 | 2026-10-15 | CRLF pollution cleaned up: workspace diff dropped from 23 775 lines to 231 | governance | [log/2026-10-15](log/2026-10-15.md) |
 | 2026-10-15 | Defect family A/B/D/E/F fixed (dead anchors, same-name file reusing old data, cycle detection…) | fix | same as above |
@@ -86,10 +80,10 @@ scratch**.
 ### 4.1 Era one · Qt/C++ monolith (≤ 2026-08-07)
 
 **Shape**: a C++/Qt Widgets desktop app, `core/` as the data layer, `widgets/` as the UI.
-**What we believed**: what the backend can compute decides what the frontend can show → build the
+**The belief at the time**: what the backend can compute decides what the frontend can show → build the
 backend (Eigen linear algebra, per-element formulas) solidly first.
 
-**The trap it laid (the most expensive one)**:
+**The backend of that era did not exist**:
 > the README listed **Eigen as "Next priority"**, but `third_party/eigen` was only a **bare gitlink with
 > no `.gitmodules`**, so a clone necessarily yields an empty directory; `CMakeLists.txt` and `src/` had
 > **zero Eigen references**.
@@ -115,8 +109,8 @@ whole of August's prioritisation rested on an asset that did not exist.
 the whole "embed ImGui in a WebView" complexity gone (the browser is the host). The performance worry
 was disproved by measurement (10 000 rows need only 23 DOM row nodes).
 
-**This is the project's most consequential side effect**:
-> "do the maths in TS" **was never proposed on its own**. It hid in the **"price"** section of the
+**The side effect: doing maths in TS was never proposed on its own.**
+> It hid in the **"price"** section of the
 > 10-14 decision — "the algorithms in `core/` are rewritten in TypeScript under `web/src/core/`, with
 > semantic alignment enforced by tests rather than a shared binary". The same day's log left the door
 > open: *"the Web side must evaluate WASM versus a TS implementation"*.
@@ -133,8 +127,7 @@ the earlier mistake:
 
 **Decision (made by the user)**: all numeric / statistical / matrix computation belongs to the server;
 the browser only renders and interacts.
-The half of that sentence which outlived the conclusion — **parsing and compiling a formula counts as
-computation too**, and it does not move back to the frontend either:
+**The same ruling also drew the boundary**:
 > "If dynamic needs really appear, send the formula to the backend to parse or even compile — but do
 > not compute in the frontend."
 
@@ -152,7 +145,7 @@ computation too**, and it does not move back to the frontend either:
 > process ≈ 0.075 ms (**≈ 110×**).
 > Conclusion: **a mixed layering (this card on T1, that one on T3) necessarily degrades to paying per
 > edge in small-matrix workflows** → only "the whole graph stays on one side" works, and of the two
-> extremes we chose **the whole graph in the backend**.
+> the extreme chosen was **the whole graph in the backend**.
 
 **Revision of the previous generation of decisions**: T1 is no longer the baseline and leaves the
 production compute path; `expression.ts` / `stats.ts` / `Smoothing.ts` are **frozen as the differential
@@ -170,8 +163,7 @@ user-facing sentence**; the copy is rendered by frontend i18n
 
 ## 5. Four "spirals" (the same question met again and again)
 
-The value of history is not in dates but in **which questions keep coming back**. Each of these four
-went round at least twice:
+Four questions recur in this history; each went round at least twice:
 
 ### Spiral one · where compute lives: frontend → backend → frontend (TS) → backend
 
@@ -195,10 +187,10 @@ out that they disagreed.
 
 ### Spiral three · repository shape: one implementation vs two
 
-The C++/Qt tree was kept as a "behavioural reference" → we found it **cost 215 MB and left the main
+The C++/Qt tree was kept as a "behavioural reference" → it **cost 215 MB and left the main
 implementation `web/` outside version control** → deleted entirely.
 > The method distilled from it: **first bring what stays under version control, then delete what goes** —
-> nominally irreversible, actually reversible.
+> nominally irreversible, but reversible in practice.
 
 ### Spiral four · how we verify: assertions → real artefacts → pixels/geometry
 
@@ -206,7 +198,7 @@ implementation `web/` outside version control** → deleted entirely.
 opens outside the viewport" that made a core feature completely unusable — because the tests clicked by
 selector and never verified **position, reachability or visual correctness**.
 > Lesson: **an end-to-end test passing ≠ the UI works**; assertion counts cannot validate visualisation
-> either — **you must actually look at the picture** (hence fixed screenshot artefacts).
+> either — **the picture has to be looked at** (hence fixed screenshot artefacts).
 >
 > On 2026-10-27 another variant of the same family was caught: a function card fetched only one
 > `count=5000` result window, so a 10 000-row source table showed only its first half inside the card —
@@ -314,4 +306,4 @@ Numbers move — this document keeps conclusions only, and the repository-root `
 - Navigation of this vault: [README](README.en.md)
 - Principles: [headroom principle](decisions/2026-10-15-max-headroom-principle.md) · [backend owns data and compute](decisions/2026-10-17-backend-owns-compute.md)
 - Contracts: [backend protocol v1](architecture/backend-protocol-v1.en.md) · [port semantics v1](architecture/port-semantics-v1.en.md)
-- "What it is": [README.md](../README.md) · "Where we are now": `STATE.md`
+- "What it is": [README.md](../README.md) · "Where the project is now": `STATE.md`

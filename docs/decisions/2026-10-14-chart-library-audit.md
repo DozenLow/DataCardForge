@@ -45,7 +45,7 @@ chart.getDataURL({ type: 'svg' | 'png' | 'jpeg' })// 类型定义中明确列出
 | 小提琴图 | 无原生 | ⚠️ 需自绘 |
 | 回归 + 置信带 | `line` + 自算 OLS | ✅ 可行 |
 
-**唯一的两个缺口是「误差棒」与「小提琴图」**，二者用 ECharts 真正的 `custom` series 实现
+**唯一的两个缺口是「误差棒」与「小提琴图」**，二者用 ECharts 的 `custom` series 实现
 （矢量图元，非 canvas 覆盖层），因此**没有牺牲矢量导出能力**。
 
 > 踩坑记录：`Extract<SeriesOption, { type: 'custom' }>` 在 ECharts 6 里解析为 `never`
@@ -66,7 +66,7 @@ chart.getDataURL({ type: 'svg' | 'png' | 'jpeg' })// 类型定义中明确列出
    Observable Plot 与 Vega-Lite 同样缺误差棒原生支持。
 2. **包体更大、SVG 导出更绕**。Plotly 为 3 MB+ 级别且以 canvas 为主，取矢量要额外走
    `toImage`/kaleido 路径。
-3. **唯一真正的短板换库也解决不了**。需求中隐含「期刊投稿」场景，而其中部分期刊要 **EPS**；
+3. **唯一的短板换库也解决不了**。需求中隐含「期刊投稿」场景，而其中部分期刊要 **EPS**；
    浏览器端没有可行的 PostScript 生成路径（EPS 是 PostScript 程序）。这是**平台约束**，
    不是库的问题。务实做法是 SVG + 本地转换（`inkscape --export-type=eps`）。
 4. **换库会丢掉已投入验证的资产**：连线层几何、卡片坐标系、`chartMetrics` 的 DOM 测量、
