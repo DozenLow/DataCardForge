@@ -6,8 +6,8 @@
 - **Status**: 🔒 semantics locked / **byte layout not frozen**
 - **Role**: the **single source of truth** for function-card ports. The `FunctionSignature` registry
   (built-ins), the future `dc_plugin.h` (C projection), the Rust `repr(C)` mirror (WASM layer) and the
-  card-level differential fixtures are all projections of this file; on conflict this file wins, and
-  changing it requires a new decision record.
+  card-level differential fixtures are all its projections; on conflict this file wins, and changing it
+  requires a new decision record.
 - **Upstream decision**: [card data structure v2](../decisions/2026-10-26-card-schema-v2.md)
 - **Sibling document**: [backend protocol v1](backend-protocol-v1.md) (transport layer; this file is
   the function layer)
@@ -125,5 +125,6 @@
 
 ![Projection map: this file is the single source of truth, projecting the signature registry, the C projection, the Rust repr(C) mirror and the card-level differential fixtures](../diagrams/port-projection.en.svg)
 
-This file is the only authority; the four layers below are **projections** of it, and where one disagrees, this file wins.
+The sections above define the semantics; the four layers below are **projections** of this file, and on
+conflict this file wins.
 Interactive version (language/theme toggle, click to inspect): [`diagrams/interactive.html`](../diagrams/interactive.html).

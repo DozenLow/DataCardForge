@@ -1,33 +1,33 @@
-# 决策：卡片数据结构 v2 —— 依赖升为信封一等公民，函数卡 = 单节点 K 输出
+# 决策：卡片数据结构 v2（依赖升为信封一等公民，函数卡 = 单节点 K 输出）
 
 - **日期**：2026-10-26
-- **状态**：✅ **已实施**（2026-10-27：后端节点 v2、签名注册表、前端 v2 迁移、三区 UI、
+- **状态**：✅ 已实施（2026-10-27：后端节点 v2、签名注册表、前端 v2 迁移、三区 UI、
   重指向确认、列数契约全部落地，卡片层夹具双边裁判已接进 ctest 与 vitest）
 - **标签**：`#架构 #卡片模型 #持久化 #函数卡`
 - **基线**：本决策实施前的回滚点为 `0d839c9`。
 - **配套文档**：[端口语义规格 v1](../architecture/port-semantics-v1.md)、
-  [函数卡的三个契约](./2026-10-27-card-contracts.md)（实施期定死的列数/参数/单列端口规则）。本决策定义“卡片长什么样”，
-  那份定义“端口是什么意思”。未来插件 C 头只是这两份文件的投影，**本次不冻结**。
+  [函数卡的三个契约](./2026-10-27-card-contracts.md)（实施期定死的列数/参数/单列端口规则）。
+  本决策定义“卡片长什么样”，那份定义“端口是什么意思”。未来插件 C 头只是这两份文件的投影，本次不冻结。
 
 ## 核心表述
 
-> **卡片接口数据结构自 v2 起锁定。** 依赖（`inputs[]`）从各卡种载荷散落的状态升为
-> `CardBase` 信封上的一等公民，成为**唯一**的依赖表示；函数卡从“每列一个节点”改为
-> “一个节点、K 个输出”；数据引用指向**显式矩阵**而非“卡片 + 隐式 activeSource”。
+> 卡片接口数据结构自 v2 起锁定：依赖（`inputs[]`）从各卡种载荷里升为 `CardBase` 信封上的
+> 一等公民，成为唯一的依赖表示；函数卡从“每列一个节点”改为“一个节点、K 个输出”；
+> 数据引用指向显式矩阵而非“卡片 + 隐式 activeSource”。
 > 插件 C ABI 只锁语义内核（端口身份、缺失语义、K 由签名固定、单一入口），字节布局延后。
 
 ## 背景
 
-十轮插件 ABI 推演（.so/.dll + Eigen 矩阵接口）的最终结论：**每个 ABI 问题都是卡片模型的投影，
-而卡片模型本身有三处结构缺陷**，且每一处都已经挡着一个发生过的产品缺陷或计划中的功能。
+十轮插件 ABI 推演（.so/.dll + Eigen 矩阵接口）的最终结论：每个 ABI 问题都是卡片模型的投影，
+而卡片模型本身有三处结构缺陷，每一处都已挡着一个发生过的产品缺陷或计划中的功能。
 
 | # | 缺陷 | 实证 | 后果 |
 |---|---|---|---|
-| 1 | 依赖不在信封上，每种卡各自表述 | `web/src/ui/types.ts:27-34`（`CardBase` 无 inputs）；`formula.sourceCardId`（:107）、`chart.config.sources[]`、`matrix.sources[]` 各一套 | 依赖重建只能逐 kind 手写 → **公式卡依赖重载后静默丢失**（[max-headroom-principle.md:87](2026-10-15-max-headroom-principle.md)、history.md:189）的根因 |
-| 2 | 引用指向“卡片”而非“矩阵” | `sourceCardId: number` 单值；数据实际挂在 `sources[activeSource]` 上 | 多端口不可表达（函数卡 N-in 的路障）；切换数据卡内文件会**静默改掉**公式的输入 |
+| 1 | 依赖不在信封上，每种卡各自表述 | `web/src/ui/types.ts:27-34`（`CardBase` 无 inputs）；`formula.sourceCardId`（:107）、`chart.config.sources[]`、`matrix.sources[]` 各一套 | 依赖重建只能逐 kind 手写 → 公式卡依赖重载后静默丢失（[max-headroom-principle.md:87](2026-10-15-max-headroom-principle.md)、history.md:189）的根因 |
+| 2 | 引用指向“卡片”而非“矩阵” | `sourceCardId: number` 单值；数据实际挂在 `sources[activeSource]` 上 | 多端口不可表达（函数卡 N-in 的路障）；切换数据卡内文件会静默改掉公式的输入 |
 | 3 | 函数卡 = N 个节点（每输出列一个） | `types.ts:127` `nodes[]` 与 `formulas[]` 索引对齐；`backend/src/nodes.cpp:319` 每个结果包成单列 `"Pos.1"` | 只能表达同型列输出；K 个节点重复 gather 同一份输入 K 次；SVD 类异构 K 输出不可表达 |
 
-同时，端口的三份定义互不一致，且**没有任何跨层裁判**：
+同时，端口的三份定义互不一致，且没有任何跨层裁判：
 
 - 前端卡片模型：无端口概念；
 - 前端 DTO `web/src/backend/client.ts:75-80` `PortBindingDto`：`varName/mode/sourceMatrixId/sourceNodeId`；
@@ -38,14 +38,14 @@
 TS `xlayerFixtures.test.ts` 与 C++ `fixture_runner.cpp` 双边消费 + `DC_RUN_FUZZ` 随机对拍），
 而卡片模型一个夹具都没有——两侧各自演化的风险随函数卡开工只会放大。
 
-**持久化面**：工作区快照是**用户手里的文件**（下载/上传，`web/src/ui/fileActions.ts:170-183`，
+持久化面：工作区快照是用户手里的文件（下载/上传，`web/src/ui/fileActions.ts:170-183`，
 `version !== 1` 直接拒绝）。每多导出一份工作区，未来迁移面就扩大一分。这是“现在锁定”的直接理由。
 
 ## 选项
 
 | 选项 | 内容 | 判定 |
 |---|---|---|
-| A. 锁定 v2 结构（本决策） | inputs 升信封 + 显式矩阵引用 + 单节点 K 输出；C 头只锁语义 | ✅ **采纳** |
+| A. 锁定 v2 结构（本决策） | inputs 升信封 + 显式矩阵引用 + 单节点 K 输出；C 头只锁语义 | ✅ 采纳 |
 | B. 维持现状，逐 kind 修补 | 继续“每张卡各写各的依赖” | ❌ 否：静默丢依赖的根因原样保留 |
 | C. 同时冻结 `dc_plugin.h` 字节布局 | 现在把 C ABI 定死 | ❌ 否：`FunctionSignature` 尚不存在，C 头只是它的投影——先锁投影等于在没有单一事实源时锁死下游；且事实上排除 WASM 层用 Rust `repr(C)` 干净实现的可能 |
 
@@ -90,8 +90,8 @@ export interface FunctionCardModel extends CardBase {
 其余卡种的不变量：
 
 - **矩阵卡**：`inputs` 恒为 `[]`（它是数据源，不依赖任何卡）；`sources[]` 保留——那是“内容”不是“依赖”。
-- **图表卡**：`config.sources[]` 降级为**显示层视图**；权威依赖边 1:1 写入 `inputs[]`。
-  依赖重建从此**只读 inputs，不读任何载荷**。
+- **图表卡**：`config.sources[]` 降级为显示层视图；权威依赖边 1:1 写入 `inputs[]`。
+  依赖重建从此只读 inputs，不读任何载荷。
 
 ### 2. 后端同构体（`backend/src/nodes.h` 目标形态）
 
@@ -116,40 +116,40 @@ struct ComputeNode {
 
 ### 3. 持久化与迁移（`WorkspaceSnapshot.version: 2`）
 
-- `readWorkspace` 接受 `version: 1 | 2`；v1 经**纯函数、确定性**的 `migrateV1toV2` 升为 v2 后进入 store；
+- `readWorkspace` 接受 `version: 1 | 2`；v1 经纯函数、确定性的 `migrateV1toV2` 升为 v2 后进入 store；
   写出永远是 v2。
 - 迁移规则：
   - 矩阵卡：补 `inputs: []`；
   - 图表卡：由 `config.sources[]` 1:1 生成 `inputs[]`（portId 派生规则实现期定，必须确定性）；
   - 公式卡：
-    - `sourceCardId` + 列绑定 → `inputs[]`，其中 `matrixId` **在迁移时刻解析固化**为当时的
-      `sources[activeSource].matrixId`。⚠️ 这是**有意的行为变更**：v2 函数卡的输入是显式矩阵，
+    - `sourceCardId` + 列绑定 → `inputs[]`，其中 `matrixId` 在迁移时刻解析固化为当时的
+      `sources[activeSource].matrixId`。⚠️ 这是有意的行为变更：v2 函数卡的输入是显式矩阵，
       切换数据卡内文件不再静默改函数输入；重新指向是一次显式操作（重连线）。
     - `formulas[]` + `nodes[]` → 单节点：`signatureId = 'builtin:expression-columns'`，
       `params.formulas = formulas`，`outputs = [{ outputId: 'result', resultMatrixId: 卡级结果矩阵 }]`；
       `node` = 原 `nodes[]` 状态归并（任一 error → error；任一 computing → computing；
       全 done → done；存在 null → null）。
     - 删除 `nodes[]`、`sourceCardId`。
-- **无双字段过渡期**：`inputs[]` 与 `sourceCardId` 不并存，迁移一次性完成
+- 无双字段过渡期：`inputs[]` 与 `sourceCardId` 不并存，迁移一次性完成
   （并存会让“逐 kind 手写依赖”的根因换个形态复活）。
 - 迁移函数带夹具：输入 v1 快照 JSON → 期望 v2 快照 JSON，vitest 消费。
 
 ### 4. 跨层裁判（卡片层夹具）
 
 照抄 `xlayer` 模式，新建 `web/tests/fixtures/cards/`：同一份 JSON，TS 解析成 `CardModel`、
-C++ 解析成 `ComputeNode` + 边集，输出**规范化图**逐字段对拍。首批至少覆盖：
+C++ 解析成 `ComputeNode` + 边集，输出规范化图逐字段对拍。首批至少覆盖：
 三种 target 形态（matrix / cell / node 输出引用）+ 一个 v1→v2 迁移用例。
 （夹具格式细则属实现任务，本决策只立“必须有裁判”这条。）
 
 ## 原因
 
-**斟酌时间按“改起来多贵”分配，不按话题复杂度分配。**
+斟酌时间按“改起来多贵”分配，不按话题复杂度分配。
 
 | 层 | 被什么固化 | 改动成本 | 本决策处置 |
 |---|---|---|---|
-| 卡片 schema | 持久化文件（用户手里）+ 每卡种 UI 组件 + 协议（缓存/DCM1/事件流） | **最高，且随每份导出快照递增** | 🔒 现在锁定 |
+| 卡片 schema | 持久化文件（用户手里）+ 每卡种 UI 组件 + 协议（缓存/DCM1/事件流） | 最高，且随每份导出快照递增 | 🔒 现在锁定 |
 | 端口语义 | FunctionSignature 的单一事实源地位 | 中（下游全是投影） | 🔒 语义锁定（配套文档） |
-| 插件 C 字节布局 | 零依赖者，无人链接 | **最低，随时可推翻** | ⏸ 只记录，不冻结 |
+| 插件 C 字节布局 | 零依赖者，无人链接 | 最低，随时可推翻 | ⏸ 只记录，不冻结 |
 
 十轮 ABI 推演没有白做：它产出的全部约束（K 输出、端口身份、缺失语义、数据面分离、单一入口）
 的正确归宿是这份卡片模板和端口语义规格，而不是那个 `.h`。
@@ -160,7 +160,7 @@ C++ 解析成 `ComputeNode` + 边集，输出**规范化图**逐字段对拍。�
 
 | 层 | 提交 | 内容 |
 |---|---|---|
-| 后端 | `feat(backend): 节点 v2` | `PortBinding.portId` / `sourceOutputIndex`、`ComputeNode.resultMatrixIds[]`、`resultOwner_` 改为 (nodeId, outputIndex)；**求值不再持锁**（evaluateNode 分四段：发布 computing / 解析输入 / 无锁求值 / 加锁提交，gatherInputs 逐端口短锁） |
+| 后端 | `feat(backend): 节点 v2` | `PortBinding.portId` / `sourceOutputIndex`、`ComputeNode.resultMatrixIds[]`、`resultOwner_` 改为 (nodeId, outputIndex)；求值不再持锁（evaluateNode 分四段：发布 computing / 解析输入 / 无锁求值 / 加锁提交，gatherInputs 逐端口短锁） |
 | 后端 | `feat(backend): 函数签名注册表` | `signature.h/.cpp`（`FunctionSignature` 的 C++ 投影）、`createV2`、`updateParams`、`builtin:expression-columns`（一节点一宽表，取代 v1 每列一节点） |
 | 后端 | `feat(backend): 列数契约` | `params.columnContract` 在提交前校验，违约 ⇒ `columnContractViolation{expected,actual}` 且清空旧结果（下游继承 upstreamError ⇒ 断流） |
 | 后端 | `fix(backend): 单元格编辑级联` | `PATCH /api/matrices/{id}` 此前不发 `onMatrixChanged`，改单元格后函数卡仍显示旧数字 |
@@ -175,12 +175,12 @@ C++ 解析成 `ComputeNode` + 边集，输出**规范化图**逐字段对拍。�
 ### 实施中修正的两处设计
 
 1. **列头指纹 → 列数契约**。讨论中先想的「记录上游列头快照、出现差异就警告」被否决：
-   线性代数链路列数/列宽经常变化，指纹的误报率与其实现复杂度不成比例。落地的是
-   **显式契约**：用户第一次给输出列命名时锁住当时的列数（`params.columnContract`），
-   之后宽度漂移由后端结构化断流；自编辑（加/删表达式）走「扩展契约 / 解除锁定」的
-   一步确认，而不是静默改数。契约是参数（数据），不是形状猜测。
-2. **输出列名归属**。曾计划在 `outputs[].columnNames` 存一份重命名映射，与表达式名
-   并存——那是「同一个能力两个入口」。最终：**列名属于签名参数**（`params.formulas[].name`），
+   线性代数链路列数/列宽经常变化，指纹的误报率与其实现复杂度不成比例。落地的是显式契约：
+   用户第一次给输出列命名时锁住当时的列数（`params.columnContract`），之后宽度漂移由后端
+   结构化断流；自编辑（加/删表达式）走「扩展契约 / 解除锁定」的一步确认，而不是静默改数。
+   契约是参数（数据），不是形状猜测。
+2. **输出列名归属**。曾计划在 `outputs[].columnNames` 存一份重命名映射，与表达式名并存——
+   那是「同一个能力两个入口」。最终：列名属于签名参数（`params.formulas[].name`），
    输出区顶端的重命名只是它的另一个编辑面，单一事实源不变。
 
 ### 待办（不在本条内）

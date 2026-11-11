@@ -24,32 +24,32 @@
 
 ## 导航
 
-- 🧭 **项目演进史**（`history.md`）— 把决策/日志/踩坑/审计按因果链串成一条历史，含四个时代、四条螺旋线、教训清单与现状
+- 🧭 **项目演进史**（`history.md`）— 把决策/日志/踩坑/审计按因果链串成一条历史：四个时代、四条螺旋线、教训清单与现状
   - [项目演进史（DataCardForge）](history.md) · [EN](history.en.md) ← **先读这篇再进各分册**
 - 📌 **决策记录**（`decisions/`）— 已经拍板、影响后续的方向性结论
-  - [回归卡改名「关系枚举」：选列变成端口绑定，列头带上 X : Y](decisions/2026-10-31-relation-enum-card.md) ← **最新：卡片终于能选列，表格横向滚动对齐也修了**
-  - [数据卡可以换文件：换数据自动跟随，切文件仍显式重指向](decisions/2026-10-31-file-replacement.md) ← **保存的工作区终于能当模板复用**
-  - [结果预览：稠密矩阵的 DCM2 帧（24 字节头 + 整表形状）](decisions/2026-10-29-result-preview.md) ← 大结果不再整包下传
-  - [连线锚点落在端口中心，而非卡片边中点](decisions/2026-10-29-connection-center-anchors.md) ← 连线指向终于和数据流向一致
-  - [引擎层性能门禁：12 个用例、p50×3 预算、1.3× 回归护栏](decisions/2026-10-29-perf-gate.md) ← 把「变慢了」变成一个可执行的数字
-  - [函数卡输出绑定的三处真缺陷：本地 id · 上传竞态 · 结果表为空的连带入口消失](decisions/2026-10-28-function-card-output-binding.md) ← 「No result yet」的根因
+  - [回归卡改名「关系枚举」——选列变成端口绑定，列头带上 X : Y](decisions/2026-10-31-relation-enum-card.md) ← **最新：卡片能选列了，表格横向滚动对齐也修了**
+  - [数据卡可以换文件：换数据自动跟随，切文件仍显式重指向](decisions/2026-10-31-file-replacement.md) ← 保存的工作区可以当模板复用
+  - [结果默认只显示前 100 行；稠密帧携带整表形状](decisions/2026-10-29-result-preview.md) ← 大结果不再整包下传
+  - [连线端点落在卡片中心：单条三次贝塞尔 + 流动虚线](decisions/2026-10-29-connection-center-anchors.md) ← 连线指向与数据流向一致
+  - [引擎层性能门禁：12 个用例、p50×3 预算、1.3× 回归护栏](decisions/2026-10-29-perf-gate.md) ← 把「变慢了」变成可执行的数字
+  - [函数卡输出是可绑定的数据源：派生矩阵走「回退查询 + 补绑」](decisions/2026-10-28-function-card-output-binding.md) ← 「No result yet」的根因
   - [表达式列引用语法：名称可写、能带限定、全角可用](decisions/2026-10-28-expression-reference-syntax.md) ← 公式卡对带表头文件恢复可用
-  - [端口级连线：边带 portId、端点落端口](decisions/2026-10-28-port-level-connections.md) ← 连线恢复为完整的依赖可视化（同日）
-  - [摘要（`builtin:summary`）v1：统计量目录、惰性求值、数字归后端](decisions/2026-10-27-summary-builtin.md) ← 第一个惰性签名 + 目录即行序
-  - [函数卡的三个契约（列数 · 参数归属 · 单列端口）](decisions/2026-10-27-card-contracts.md) ← 函数卡实现期把三处含糊定死了
-  - [卡片数据结构 v2（依赖升信封，函数卡=单节点 K 输出）](decisions/2026-10-26-card-schema-v2.md) ← **已实施**，函数卡的地基
-  - [画布改为无边界平面（平移，不含缩放）](decisions/2026-10-21-infinite-canvas.md) ← **当前视图模型：工作流不再被一屏限制**
-  - [后端持有数据与计算](decisions/2026-10-17-backend-owns-compute.md) ← 当前分层裁定：浏览器纯交互，修订 T1 基线
+  - [连线是完整的依赖可视化：边带 portId，端点落端口](decisions/2026-10-28-port-level-connections.md) ← 同日
+  - [摘要（`builtin:summary`）v1——统计量目录、惰性求值、数字归后端](decisions/2026-10-27-summary-builtin.md) ← 第一个惰性签名；目录即行序
+  - [函数卡的三个契约：列数锁定、参数归签名、单列端口](decisions/2026-10-27-card-contracts.md) ← 函数卡实现期把三处含糊定死
+  - [卡片数据结构 v2（依赖升为信封一等公民，函数卡 = 单节点 K 输出）](decisions/2026-10-26-card-schema-v2.md) ← **已实施**，函数卡的地基
+  - [画布改为无边界平面（平移，不含缩放）](decisions/2026-10-21-infinite-canvas.md) ← **当前视图模型**：工作流不再被一屏限制
+  - [后端持有数据与计算，浏览器退化为纯交互界面](decisions/2026-10-17-backend-owns-compute.md) ← 当前分层裁定
   - [兜底原则（最大余量）](decisions/2026-10-15-max-headroom-principle.md) ← **核心架构原则**（分层表已被 10-17 决策修订，契约仍有效）
-  - [彻底移除 Qt 实现](decisions/2026-10-15-qt-implementation-removed.md) ← **当前仓库形态**
-  - [前端选型定为 Web](decisions/2026-10-14-frontend-web-chosen.md) ← **当前前端方案**
-  - [图表库保持 ECharts](decisions/2026-10-14-chart-library-audit.md) ← 统计图型与矢量导出审计
-  - [后端先行，前端搁置](decisions/2026-08-07-backend-first-frontend-paused.md)（其中"前端暂停"部分已被上面取代；"后端先行"部分被 10-17 决策复活并扩展）
+  - [彻底移除 Qt 实现（不再保留为参照）](decisions/2026-10-15-qt-implementation-removed.md) ← **当前仓库形态**
+  - [前端选型定为 Web（React + Vite + TypeScript）](decisions/2026-10-14-frontend-web-chosen.md) ← **当前前端方案**
+  - [图表库保持 ECharts，补齐统计图型](decisions/2026-10-14-chart-library-audit.md) ← 统计图型与矢量导出审计
+  - [后端先行，前端搁置](decisions/2026-08-07-backend-first-frontend-paused.md)（"前端搁置"已被上面取代；"后端先行"被 10-17 决策复活并扩展）
   - [连线从属原则](decisions/2026-08-07-connection-subordination.md)
-- 📐 **规范**（`architecture/`）— 已定稿、实现必须服从的契约（改它 = 改代码前先改这里）
-  - [后端协议 v1](architecture/backend-protocol-v1.md) · [EN](architecture/backend-protocol-v1.en.md) ← 后端计算的传输/资源/错误/夹具契约；阶段 1–2 已按此实现，端点与帧格式以本文为准
+- 📐 **规范**（`architecture/`）— 已定稿、实现必须服从的契约（改代码前先改这里）
+  - [后端协议 v1](architecture/backend-protocol-v1.md) · [EN](architecture/backend-protocol-v1.en.md) ← 后端计算的传输/资源/错误/夹具契约；端点与帧格式以本文为准
   - [端口语义 v1](architecture/port-semantics-v1.md) · [EN](architecture/port-semantics-v1.en.md) ← 端口的身份、绑定与跨层语义契约
-- ⚖️ **架构权衡**（`architecture/`）— 历史对比文档，结论多数已被决策追记取代；仅当想理解"为什么不选另一头"时阅读
+- ⚖️ **架构权衡**（`architecture/`）— 历史对比文档，结论多已被决策追记取代；想理解"为什么不选另一头"时再读
   - [前端选型：ImGui vs Web](architecture/frontend-imgui-vs-web.md) · [EN](architecture/frontend-imgui-vs-web.en.md)（✅ 已收敛 → 选 Web，见 10-14 决策；对比表仍可复用）
 - 📊 **审计**（`audits/`）— 一次性对抗式审查的完整记录，含缺陷编号与复验结论
   - [2026-10-15 UI/图表缺陷审计](audits/2026-10-15-ui-chart-defect-audit.md) ← 首轮 34 项 + 第二轮 11 项，含逐条复验
@@ -65,7 +65,7 @@
   - [2026-11-04](log/2026-11-04.md)（docs 重整：字符画改 SVG + 交互页 · 导航与事实回填 · docs-check 进 CI）
   - [2026-10-31](log/2026-10-31.md)（数据卡换文件落地：换数据自动跟随 · 409 顺序问题 · closeAllCards 释放后端）
   - [2026-10-28](log/2026-10-28.md)（用户报障两句 → 三个真缺陷：指针捕获吞 click · 带表头列没有可用的列名 · 公式区被结果表挤成 0）
-  - [2026-10-27](log/2026-10-27.md)（函数卡从规格到能跑：v2 落地 · 重指向确认 · 列数契约 · 结果可绘图/可链式 · 回归签名反证通用性）
+  - [2026-10-27](log/2026-10-27.md)（函数卡从规格到能跑：v2 落地 · 重指向确认 · 列数契约 · 结果可绘图/可链式）
   - [2026-10-21](log/2026-10-21.md)（阶段 3：公式卡计算权威切到后端 · 差分 fuzz 门禁 · 画布改为无边界平面）
   - [2026-10-17](log/2026-10-17.md)（后端持有计算拍板 + 工具链核实 + 阶段 0：决策/协议/跨层夹具）
   - [2026-10-15](log/2026-10-15.md)（仓库治理 + 移除 Qt + 修复 A/B/D/E/F）
@@ -82,13 +82,13 @@
 
 新增图请照做：
 
-1. **一律 SVG**，不再用 ASCII 字符画——它靠字符等宽对齐，换字体或窄屏就散架。
+1. **一律 SVG**，不用 ASCII 字符画——字符画靠等宽对齐，换字体或窄屏就散架。
 2. **中英成对**：`X.zh.svg` 是原版，`X.en.svg` 是译文；正文按语言各自引用。
 3. **自描述**：带 `viewBox`、`<title>`、`<desc>`；颜色走 CSS 变量（`var(--x, #fallback)`）并在
-   `@media (prefers-color-scheme: dark)` 里给深色值——这样 GitHub / Obsidian 用 `<img>` 引用也能自适应。
+   `@media (prefers-color-scheme: dark)` 里给深色值——GitHub / Obsidian 用 `<img>` 引用也能自适应。
 4. **纯 SVG**：不引外部字体与脚本，文字用 `<text>`（可选中、可检索），不用 `<foreignObject>`。
 5. **正文给图注与出处**：图只承载结构，论证仍在正文；图不能替代决策记录。
-6. **校验**：`python3 scripts/docs-check.py` 会检查导航覆盖、死链、字符画残留、图无孤儿、中英配对、SVG 合法性。
+6. **校验**：`python3 scripts/docs-check.py` 检查导航覆盖、死链、字符画残留、图无孤儿、中英配对、SVG 合法性。
 
 ## 重要约定
 
@@ -96,13 +96,15 @@
 2. **先用户视角，再技术方案**：任何架构讨论都先从"用户怎么想"出发，技术分析居后（[决策背景](decisions/2026-08-07-backend-first-frontend-paused.md)）。
 3. 所有决策记录应包含：背景 → 选项 → 结论 → 关联模块 → 未来影响。
 4. **只写可公开的内容**：设计记录面向读者。`private/` 是本机私有目录（被 `.gitignore` 排除），**不随仓库发布**，也不要从公开文档链接它。
-5. **行为规则的出处**：Qt 实现已于 2026-10-15 从工作区删除（见 [决策](decisions/2026-10-15-qt-implementation-removed.md)）。
-   此前"文档须指明对应 `src/widgets/` 文件"的约定随之废止——现在连线几何、红蓝灰配色、关闭保护等规则的
+5. **行为规则的出处**：Qt 实现已于 2026-10-15 从工作区删除（见[决策](decisions/2026-10-15-qt-implementation-removed.md)），
+   此前"文档须指明对应 `src/widgets/` 文件"的约定随之废止——连线几何、红蓝灰配色、关闭保护等规则的
    **唯一权威定义是 TypeScript 源码与其测试**。历史文档中残留的 C++ 文件名不再指向可打开的文件，
    只作为"这条规则从哪来"的出处标注保留。
 6. **历史不改写**：决策与日志记的是"当时怎么想"。要更新结论，就在原处加注并指向新文档，别把旧判断改成新判断。
-7. **代号就地可解**：正文里的编号与代号（A/B/C 方案、T1/T2/T3、P0/P2…）要么在本篇定义，要么就地加一句注解；已退役的代号不再复用。判断标准：一年后只看到这一句的人，能不能懂。
-8. **措辞中立**：陈述事实、机制、证据与代价，不写评价与自我叙述——不用「最贵 / 最关键 / 显然 / 其实 / 正是」这类词，不用第一人称（「我们当时以为」改为「当时的判断是」），不写「讽刺 / 绕了一圈」这类评论。引用用户原话时保留原文，不改写。
+7. **代号就地可解**：正文里的编号与代号（A/B/C 方案、T1/T2/T3、P0/P2…）要么在本篇定义，要么就地加一句注解；
+   已退役的代号不再复用。判断标准：一年后只看到这一句的人，能不能懂。
+8. **措辞中立**：陈述事实、机制、证据与代价，不写评价与自我叙述——不用「最贵 / 最关键 / 显然 / 其实 / 正是」这类词，
+   不用第一人称（「我们当时以为」改为「当时的判断是」），不写「讽刺 / 绕了一圈」这类评论。引用用户原话时保留原文，不改写。
 
 ## 语言策略
 

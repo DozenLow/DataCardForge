@@ -9,7 +9,7 @@
 ## Transport shape
 
 - **HTTP/1.1, a local service on `127.0.0.1`** (default port 37811, configurable).
-- Control messages = JSON (`application/json`); matrix payloads = binary frames (see below).
+- Control messages = JSON (`application/json`); matrix payloads = binary frames (see "Payload encoding").
 - Node-state push = long poll `GET /api/events?since=<seq>` (the server holds the request until a new event arrives or 25 s elapse).
   A WebSocket upgrade is deferred until lower latency is needed and **does not change message semantics**.
 - No authentication (single-user local tool). A token must be added before any cross-machine deployment; that is a known gap.
@@ -56,10 +56,10 @@ guarantees that `mode` is an explicit field and never a guess).
 - `POST /api/nodes` `{kind, inputs, formula}` → `{nodeId, resultMatrixId}`
   - Input bindings that form a cycle ⇒ `409 {code:"cycle", path:[...]}`, **the whole batch is rejected atomically** (N edges either all register or none).
 - `GET /api/nodes/{id}` → `{nodeId, state, resultMatrixId, code?, params?, reason?}`
-  - Added in stage 3: reads the authoritative state snapshot of one node. The event stream is bounded
-    and transient, so after a reconnect or a workspace restore the frontend rebuilds the four-state
-    lamps and error codes from here, without replaying history. When `state === "error"` it carries
-    structured `code` + `params`.
+  - Added in stage 3: reads the authoritative state snapshot of one node. The event stream is bounded and
+    transient, so after a reconnect or a workspace restore the frontend rebuilds the four-state lamps and
+    error codes from here, without replaying history. When `state === "error"` it carries structured
+    `code` + `params`.
   - When `state === "dirty"` it carries `reason` (2026-10-27, purely additive):
     `notRequested` (created but never asked to compute) / `upstreamChanged` (an upstream matrix or node
     changed) / `definitionChanged` (parameters or edges were edited). The four-state lamp is unchanged;
@@ -105,13 +105,13 @@ The frame length is always `24 + rows*cols*8 + namesLen`, little-endian. `rows`/
 the first 100 rows yet know the table has 165 000", which is what lets the frontend show "showing the
 first 100 rows · 165 000 total" without downloading everything.
 
-The old `DCM1` frame (magic `0x44434D31`, 16-byte header, no total fields) is still **accepted**:
-`POST /api/matrices/raw` recognises both magics, and a missing `total*` defaults to the window size.
-The server only ever emits DCM2.
-
 The request body of `POST /api/matrices/raw` is this frame exactly (no HTTP chunking); the server
 decodes it and stores it identically to the JSON endpoint. NaNs travel unchanged (IEEE 754); the
 existing convention of rendering them as `—` in the frontend is unchanged.
+
+The old `DCM1` frame (magic `0x44434D31`, 16-byte header, no total fields) is still **accepted**:
+`POST /api/matrices/raw` recognises both magics, and a missing `total*` defaults to the window size.
+The server only ever emits DCM2.
 
 **Response write-back**: the server sets `TCP_NODELAY` on every connection and merges header and body
 into a **single** `send`. Writing them separately lets Nagle sit on the second segment until the peer's

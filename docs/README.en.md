@@ -31,27 +31,27 @@ were considered and dropped. Three entrances, each answering one question:
   - [Project history (DataCardForge)](history.en.md) ← **read this one before the individual volumes**
 - 📌 **Decision records** (`decisions/`) — settled, direction-setting conclusions
   - [Regression card renamed to "relation enumeration": picking a column is a port binding, headers carry X : Y](decisions/2026-10-31-relation-enum-card.md) ← **latest: cards can finally pick columns; horizontal table-scroll alignment fixed too**
-  - [Data cards can replace their file: replacing follows automatically, switching still re-points explicitly](decisions/2026-10-31-file-replacement.md) ← **a saved workspace finally works as a template**
-  - [Result preview: DCM2 frames for dense matrices (24-byte header + full table shape)](decisions/2026-10-29-result-preview.md) ← large results are no longer shipped whole
-  - [Connection anchors land on port centres, not on card-edge midpoints](decisions/2026-10-29-connection-center-anchors.md) ← wires finally point where the data flows
+  - [Data cards can replace their file: replacing follows automatically, switching still re-points explicitly](decisions/2026-10-31-file-replacement.md) ← a saved workspace finally works as a template
+  - [Results show the first 100 rows by default; dense frames carry the full-table shape](decisions/2026-10-29-result-preview.md) ← large results are no longer shipped whole
+  - [Connection endpoints land on card centres: one cubic Bézier + flowing dashes](decisions/2026-10-29-connection-center-anchors.md) ← wires point where the data flows
   - [Engine-level performance gate: 12 cases, p50×3 budget, 1.3× regression guard](decisions/2026-10-29-perf-gate.md) ← turns "it got slower" into an executable number
-  - [Three real defects in function-card output binding: local id · upload race · entry points vanishing with an empty result table](decisions/2026-10-28-function-card-output-binding.md) ← the root cause of "No result yet"
+  - [Function-card output is a bindable data source: derived matrices use fallback lookup + re-binding](decisions/2026-10-28-function-card-output-binding.md) ← the root cause of "No result yet"
   - [Expression column-reference syntax: names, qualification, full-width punctuation](decisions/2026-10-28-expression-reference-syntax.md) ← formula cards work again on files with headers
-  - [Port-level connections: edges carry portId, endpoints land on ports](decisions/2026-10-28-port-level-connections.md) ← connections return to full dependency visualisation (same day)
-  - [Summary (`builtin:summary`) v1: statistic catalogue, lazy evaluation, numbers stay in the backend](decisions/2026-10-27-summary-builtin.md) ← the first lazy signature; the catalogue *is* the row order
-  - [The three contracts of a function card (column count · parameter ownership · single-column ports)](decisions/2026-10-27-card-contracts.md) ← pinned down three ambiguities during implementation
-  - [Card data structure v2 (dependencies promoted to the envelope, function card = one node, K outputs)](decisions/2026-10-26-card-schema-v2.md) ← **implemented**, the foundation of function cards
-  - [Canvas becomes an unbounded plane (pan, no zoom)](decisions/2026-10-21-infinite-canvas.md) ← **current view model: a workflow is no longer limited to one screen**
-  - [The backend owns data and compute](decisions/2026-10-17-backend-owns-compute.md) ← current layering ruling: the browser is pure interaction, revising the T1 baseline
+  - [Connections are the full dependency visualisation: edges carry portId, endpoints land on ports](decisions/2026-10-28-port-level-connections.md) ← same day
+  - [Summary (`builtin:summary`) v1 — statistic catalogue, lazy evaluation, numbers stay in the backend](decisions/2026-10-27-summary-builtin.md) ← the first lazy signature; the catalogue *is* the row order
+  - [The three contracts of a function card: column-count lock, parameters belong to the signature, single-column ports](decisions/2026-10-27-card-contracts.md) ← pinned down three ambiguities during implementation
+  - [Card data structure v2 (dependencies promoted to envelope first-class citizens, function card = one node, K outputs)](decisions/2026-10-26-card-schema-v2.md) ← **implemented**, the foundation of function cards
+  - [Canvas becomes an unbounded plane (pan, no zoom)](decisions/2026-10-21-infinite-canvas.md) ← **current view model**: a workflow is no longer limited to one screen
+  - [The backend owns data and compute; the browser becomes a pure interaction surface](decisions/2026-10-17-backend-owns-compute.md) ← current layering ruling
   - [Headroom principle (maximum headroom)](decisions/2026-10-15-max-headroom-principle.md) ← **core architecture principle** (the tier table was revised by the 10-17 decision; the contracts still hold)
-  - [Qt implementation removed entirely](decisions/2026-10-15-qt-implementation-removed.md) ← **current repository shape**
-  - [Frontend choice settled on Web](decisions/2026-10-14-frontend-web-chosen.md) ← **current frontend plan**
-  - [Chart library stays ECharts](decisions/2026-10-14-chart-library-audit.md) ← audit of statistical chart types and vector export
+  - [Qt implementation removed entirely (no longer kept as a reference)](decisions/2026-10-15-qt-implementation-removed.md) ← **current repository shape**
+  - [Frontend choice settled on Web (React + Vite + TypeScript)](decisions/2026-10-14-frontend-web-chosen.md) ← **current frontend plan**
+  - [Chart library stays ECharts, statistical chart types filled in](decisions/2026-10-14-chart-library-audit.md) ← audit of statistical chart types and vector export
   - [Backend first, frontend paused](decisions/2026-08-07-backend-first-frontend-paused.md) (the "frontend paused" part was superseded above; "backend first" was revived and extended by the 10-17 decision)
   - [Connection subordination principle](decisions/2026-08-07-connection-subordination.md)
 - 📐 **Specifications** (`architecture/`) — finalised contracts the implementation must obey
   (changing one = change this file before the code)
-  - [Backend protocol v1](architecture/backend-protocol-v1.en.md) · [中文](architecture/backend-protocol-v1.md) ← transport / resource / error / fixture contract for backend compute; stages 1–2 were implemented against it, and this document is authoritative for endpoints and frame formats
+  - [Backend protocol v1](architecture/backend-protocol-v1.en.md) · [中文](architecture/backend-protocol-v1.md) ← transport / resource / error / fixture contract for backend compute; this document is authoritative for endpoints and frame formats
   - [Port semantics v1](architecture/port-semantics-v1.en.md) · [中文](architecture/port-semantics-v1.md) ← contract for port identity, binding and cross-tier semantics
 - ⚖️ **Architecture trade-offs** (`architecture/`) — historical comparison documents; most conclusions
   have since been superseded by decision records. Read only to understand "why not the other side"
@@ -73,7 +73,7 @@ were considered and dropped. Three entrances, each answering one question:
   - [2026-11-04](log/2026-11-04.md) (docs rework: ASCII diagrams replaced with SVG + interactive page · navigation and facts · docs-check in CI)
   - [2026-10-31](log/2026-10-31.md) (data cards can replace files: replace follows · the 409 ordering problem · closeAllCards releases backend resources)
   - [2026-10-28](log/2026-10-28.md) (two user complaints → three real defects: pointer capture swallowing click · no usable column name on files with headers · the formula area squeezed to 0 by the result table)
-  - [2026-10-27](log/2026-10-27.md) (function cards from spec to working: v2 landed · re-point confirmation · column-count contract · results plottable/chainable · the regression signature disproves generality)
+  - [2026-10-27](log/2026-10-27.md) (function cards from spec to working: v2 landed · re-point confirmation · column-count contract · results plottable/chainable)
   - [2026-10-21](log/2026-10-21.md) (stage 3: formula-card compute authority moves to the backend · differential fuzz gate · canvas becomes an unbounded plane)
   - [2026-10-17](log/2026-10-17.md) (backend-owned compute decided + toolchain verified + stage 0: decisions/protocol/cross-tier fixtures)
   - [2026-10-15](log/2026-10-15.md) (repository governance + Qt removed + fixes A/B/D/E/F)
@@ -91,7 +91,7 @@ were considered and dropped. Three entrances, each answering one question:
 
 When adding a diagram:
 
-1. **SVG only** — no more ASCII art: it depends on monospace alignment and falls apart with another font
+1. **SVG only** — no ASCII art: it depends on monospace alignment and falls apart with another font
    or a narrow screen.
 2. **Chinese/English pairs**: `X.zh.svg` is the original, `X.en.svg` the translation; each document links its own language.
 3. **Self-describing**: `viewBox`, `<title>`, `<desc>`; colours go through CSS variables

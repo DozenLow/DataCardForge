@@ -3,23 +3,24 @@
 [中文](history.md) | English
 
 - **Nature**: the decisions, logs, lessons and audits chained into one causal history. This document
-  **creates no new decisions**; every conclusion cites its source, and the source is authoritative.
-- **As of**: 2026-11-04. This document explains *why the project ended up here*; **where we are now** is the
-  repository-root `STATE.md`.
+  creates no new decisions; every conclusion cites its source, and the source is authoritative.
+- **As of**: 2026-11-04. This document explains *why the project ended up here*; where it stands now is
+  in the repository-root `STATE.md`.
 - **Tags**: `#history #navigation #evolution #decision`
 
-> How to read: for the quick version, §1 and the flow diagram in §2; to understand why the direction changed four times, the four spirals in §5 and the lessons in §6.
+> How to read: §1 + §2 are the summary; §4 covers why the direction was overturned four times and at
+> what cost, §5 the questions that recurred, §6 the reusable checklist items.
 
 ---
 
 ## 1. In one sentence
 
-An industrial / scientific **data-matrix batch workbench** whose main direction was overturned four
-times in 71 days:
+An industrial / scientific data-matrix batch workbench whose main direction was overturned four times
+in 71 days:
 **Qt/C++ frontend → freeze the frontend, do the backend first → pure Web/TS → the backend owns compute
 again**.
-None of those reversals added a feature; each was a **deeper understanding of the same core demand:
-there must be no wall in the worst case**.
+None of those reversals added a feature; each was a deeper understanding of the same core demand:
+there must be no wall in the worst case.
 
 ---
 
@@ -40,30 +41,30 @@ there must be no wall in the worst case**.
 | 2026-08-07 | "Connection subordination principle" established: connections live in the background layer and never constrain card layout | decision | [decisions/2026-08-07-connection-subordination](decisions/2026-08-07-connection-subordination.md) |
 | 2026-08-07 | `imguitest/` ImGui+ImPlot demo finished (connections / table / line chart all working) | implementation | [log/2026-08-07](log/2026-08-07.md) |
 | 2026-08-07 | Two lessons recorded: the ImPlot v1.1 API overhaul, the ImGui Docking PushStyleColor crash | lesson | [lessons/implot-v1.1-api](lessons/implot-v1.1-api.md) · [lessons/imgui-docking-pushstylecolor](lessons/imgui-docking-pushstylecolor.md) |
-| 2026-10-14 | Frontend choice restarted, **settled on Web** (React 19 + Vite 8 + TS 7 + ECharts 6 SVG + zustand) | decision | [decisions/2026-10-14-frontend-web-chosen](decisions/2026-10-14-frontend-web-chosen.md) |
+| 2026-10-14 | Frontend choice restarted, settled on Web (React 19 + Vite 8 + TS 7 + ECharts 6 SVG + zustand) | decision | [decisions/2026-10-14-frontend-web-chosen](decisions/2026-10-14-frontend-web-chosen.md) |
 | 2026-10-14 | `web/` implemented in full: each algorithm ported to TS along the C++ module boundaries (core/loaders/ui) | implementation | [log/2026-10-14](log/2026-10-14.md) |
-| 2026-10-14 | Chart-library audit: **keep ECharts**, fill in error bars / violin via a `custom` series | decision | [decisions/2026-10-14-chart-library-audit](decisions/2026-10-14-chart-library-audit.md) |
+| 2026-10-14 | Chart-library audit: keep ECharts, fill in error bars / violin via a `custom` series | decision | [decisions/2026-10-14-chart-library-audit](decisions/2026-10-14-chart-library-audit.md) |
 | 2026-10-14 | Nine statistical chart types + the SVG/PNG/PDF export pipeline delivered | implementation | same as above |
 | 2026-10-14 | Five porting defects fixed (including "switch file → charts follow", which never worked in the Qt version) | fix | [log/2026-10-14](log/2026-10-14.md) |
-| 2026-10-15 | **Repository governance**: `web/` into version control → then remove the Qt/C++ tree (215 MB) | decision | [decisions/2026-10-15-qt-implementation-removed](decisions/2026-10-15-qt-implementation-removed.md) |
+| 2026-10-15 | Repository governance: `web/` into version control → then remove the Qt/C++ tree (215 MB) | decision | [decisions/2026-10-15-qt-implementation-removed](decisions/2026-10-15-qt-implementation-removed.md) |
 | 2026-10-15 | CRLF pollution cleaned up: workspace diff dropped from 23 775 lines to 231 | governance | [log/2026-10-15](log/2026-10-15.md) |
-| 2026-10-15 | Defect family A/B/D/E/F fixed (dead anchors, same-name file reusing old data, cycle detection…) | fix | same as above |
-| 2026-10-15 | **Headroom principle** established: three tiers T1/T2/T3 + three contracts | decision | [decisions/2026-10-15-max-headroom-principle](decisions/2026-10-15-max-headroom-principle.md) |
+| 2026-10-15 | Defect family A/B/D/E/F fixed (A/B/D/E/F are the audit's defect groups; dead anchors, same-name file reusing old data, cycle detection…) | fix | same as above |
+| 2026-10-15 | Headroom principle established: three tiers T1/T2/T3 (per the decision doc: T1 browser JS / T2 WASM SIMD worker / T3 native backend) + three contracts | decision | [decisions/2026-10-15-max-headroom-principle](decisions/2026-10-15-max-headroom-principle.md) |
 | 2026-10-15 | Adversarial UI/chart review: 34 defects + 11 in a second pass | audit | [audits/2026-10-15-ui-chart-defect-audit](audits/2026-10-15-ui-chart-defect-audit.md) |
 | 2026-10-16 | v1.0.0 released, establishing the rollback baseline (tag `v1.0.0`, commit `d077fce`) | release | commit `d077fce` |
-| 2026-10-17 | **Backend-owned compute decided**: the backend holds data and compute, the browser degrades to a pure interaction surface | decision | [decisions/2026-10-17-backend-owns-compute](decisions/2026-10-17-backend-owns-compute.md) |
+| 2026-10-17 | Backend-owned compute decided: the backend holds data and compute, the browser degrades to a pure interaction surface | decision | [decisions/2026-10-17-backend-owns-compute](decisions/2026-10-17-backend-owns-compute.md) |
 | 2026-10-17 | Backend protocol v1 draft (transport / resources / endpoints / binary frame / errors / differential fixtures) | architecture | [architecture/backend-protocol-v1](architecture/backend-protocol-v1.md) |
-| 2026-10-17 | Toolchain verified: g++ 15.2 / cmake 4.2 / ninja 1.13 / Eigen 3.4 **already installed** | environment | [decisions/2026-10-17-backend-owns-compute](decisions/2026-10-17-backend-owns-compute.md) |
+| 2026-10-17 | Toolchain verified: g++ 15.2 / cmake 4.2 / ninja 1.13 / Eigen 3.4 already installed | environment | [decisions/2026-10-17-backend-owns-compute](decisions/2026-10-17-backend-owns-compute.md) |
 | 2026-10-21 | Stage 3: formula-card compute authority moves to the backend · differential fuzz gate · canvas becomes an unbounded plane | decision/implementation | [decisions/2026-10-21-infinite-canvas](decisions/2026-10-21-infinite-canvas.md) · [log/2026-10-21](log/2026-10-21.md) |
 | 2026-10-26 | Card data structure v2: dependencies promoted to the envelope, function card = one node with K outputs | decision | [decisions/2026-10-26-card-schema-v2](decisions/2026-10-26-card-schema-v2.md) |
 | 2026-10-27 | The three contracts of a function card: column count · parameter ownership · single-column ports | decision | [decisions/2026-10-27-card-contracts](decisions/2026-10-27-card-contracts.md) |
 | 2026-10-27 | Summary (`builtin:summary`) v1: statistic catalogue, lazy evaluation, numbers stay in the backend | decision | [decisions/2026-10-27-summary-builtin](decisions/2026-10-27-summary-builtin.md) |
 | 2026-10-28 | Port-level connections: dependency edges carry portId, endpoints land on ports, direction arrows | fix | [decisions/2026-10-28-port-level-connections](decisions/2026-10-28-port-level-connections.md) · [log/2026-10-28](log/2026-10-28.md) |
-| 2026-10-28 | **Expression column-reference syntax**: `Pos.N` / annotation name / `[column name]` / port qualification + full-width punctuation; formula cards work again on files with headers | decision | [decisions/2026-10-28-expression-reference-syntax](decisions/2026-10-28-expression-reference-syntax.md) |
+| 2026-10-28 | Expression column-reference syntax: `Pos.N` / annotation name / `[column name]` / port qualification + full-width punctuation; formula cards work again on files with headers | decision | [decisions/2026-10-28-expression-reference-syntax](decisions/2026-10-28-expression-reference-syntax.md) |
 | 2026-10-28 | Empty-state "Open data files" button restored: the canvas `setPointerCapture` swallowed the click | fix | [log/2026-10-28](log/2026-10-28.md) |
 | 2026-10-28 | Formula-card help entry points (Help menu + `?` + a 1 s hover tooltip at the pointer + clickable column chips) | implementation | [log/2026-10-28](log/2026-10-28.md) |
 | 2026-10-28 | Three real defects in function-card output binding: local id / upload race / the entry points vanishing with an empty result table | decision | [decisions/2026-10-28-function-card-output-binding](decisions/2026-10-28-function-card-output-binding.md) |
-| 2026-10-29 | Result preview and dense frames: the **DCM2** header is 24 bytes and carries the full table shape | decision | [decisions/2026-10-29-result-preview](decisions/2026-10-29-result-preview.md) |
+| 2026-10-29 | Result preview and dense frames: the DCM2 (binary data-frame format) header is 24 bytes and carries the full table shape | decision | [decisions/2026-10-29-result-preview](decisions/2026-10-29-result-preview.md) |
 | 2026-10-29 | Connection anchors move to port centres (no longer the midpoint of a card edge) | decision | [decisions/2026-10-29-connection-center-anchors](decisions/2026-10-29-connection-center-anchors.md) |
 | 2026-10-29 | Engine-level performance gate: 12 cases, p50×3 budget, 1.3× regression guard | decision | [decisions/2026-10-29-perf-gate](decisions/2026-10-29-perf-gate.md) |
 | 2026-10-31 | Regression card renamed "relation enumeration": picking a column becomes a port binding, headers carry `X : Y` | decision | [decisions/2026-10-31-relation-enum-card](decisions/2026-10-31-relation-enum-card.md) |
@@ -79,57 +80,51 @@ there must be no wall in the worst case**.
 
 ### 4.1 Era one · Qt/C++ monolith (≤ 2026-08-07)
 
-**Shape**: a C++/Qt Widgets desktop app, `core/` as the data layer, `widgets/` as the UI.
-**The belief at the time**: what the backend can compute decides what the frontend can show → build the
-backend (Eigen linear algebra, per-element formulas) solidly first.
+**What was set**: a C++/Qt Widgets desktop app, `core/` as the data layer, `widgets/` as the UI; the
+belief was "what the backend can compute decides what the frontend can show", so the backend (Eigen
+linear algebra, per-element formulas) had to be built solidly first.
 
-**The backend of that era did not exist**:
-> the README listed **Eigen as "Next priority"**, but `third_party/eigen` was only a **bare gitlink with
-> no `.gitmodules`**, so a clone necessarily yields an empty directory; `CMakeLists.txt` and `src/` had
-> **zero Eigen references**.
-> That is, "Eigen is already ready in the backend" **never held**.
-
-**Why it went unnoticed**: it did not affect compilation (nothing linked it), only **judgement** — the
-whole of August's prioritisation rested on an asset that did not exist.
+**That premise was later disproved: the backend of that era did not exist.** The README listed Eigen
+as "Next priority", but `third_party/eigen` was only a bare gitlink with no `.gitmodules`, so a clone
+necessarily yields an empty directory; `CMakeLists.txt` and `src/` had zero Eigen references —
+"Eigen is already ready in the backend" never held. It did not affect compilation (nothing linked
+it), only judgement: the whole of August's prioritisation rested on an asset that did not exist.
 
 ### 4.2 Era two · frontend frozen (2026-08-07 → 10-14)
 
-**Decision**: pause the frontend choice (ImGui / Web); muddle along with Qt for the view layer.
-**Reason**: avoid investing twice in "technology that might be replaced later".
+**What was set**: pause the frontend choice (ImGui / Web); muddle along with Qt for the view layer.
+The reason was to avoid investing twice in "technology that might be replaced later".
 
-**A premise later judged wrong** (written in that decision's postscript):
-> "vector export is a **possible** requirement" — it was in fact the **end-goal requirement**.
-> Lesson: **distinguish "what the user ultimately delivers" from "what the intermediate process
-> needs"; the former cannot be deferred.**
+**The postscript of that decision judged its premise wrong**: "vector export is a possible
+requirement" — it was in fact the end-goal requirement. Distinguish "what the user ultimately
+delivers" from "what the intermediate process needs"; the former cannot be deferred (cost: §6.4
+item 13).
 
 ### 4.3 Era three · pure Web / TypeScript (2026-10-14 → 10-17)
 
-**Decision**: frontend settled on Web, main implementation in `web/`, **algorithms rewritten in TS**.
-**Weights re-estimated**: vector export free (ECharts SVG native, ImPlot has none), Chinese IME free,
-the whole "embed ImGui in a WebView" complexity gone (the browser is the host). The performance worry
+**What was set**: frontend settled on Web, main implementation in `web/`, algorithms rewritten in TS.
+The re-estimated weights: vector export free (ECharts SVG native, ImPlot has none), Chinese IME free,
+the whole "embed ImGui in a WebView" complexity gone (the browser is the host); the performance worry
 was disproved by measurement (10 000 rows need only 23 DOM row nodes).
 
-**The side effect: doing maths in TS was never proposed on its own.**
-> It hid in the **"price"** section of the
-> 10-14 decision — "the algorithms in `core/` are rewritten in TypeScript under `web/src/core/`, with
-> semantic alignment enforced by tests rather than a shared binary". The same day's log left the door
-> open: *"the Web side must evaluate WASM versus a TS implementation"*.
+**The side effect: doing maths in TS was never proposed on its own.** It hid in the "price" section
+of the 10-14 decision — "the algorithms in `core/` are rewritten in TypeScript under
+`web/src/core/`, with semantic alignment enforced by tests rather than a shared binary"; the same
+day's log left the door open: "the Web side must evaluate WASM versus a TS implementation".
 
-**A day later it was retroactively named "the baseline"**: on 10-15 the headroom principle set T1 as
-in-browser TS, cast as "the always-available fallback tier". But the principle document itself exposed
-the earlier mistake:
-> the earlier argument had been framed as a **performance crossover point** ("if TS is fast enough, skip
-> the backend"); once the user re-anchored the core demand, that whole framing was void — the backend
-> exists not to be "faster" but to **remove the ceiling** (algorithm coverage, memory limits, worst-case
-> compute).
+**A day later it was retroactively named the baseline**: on 10-15 the headroom principle set T1
+(in-browser) as TS, cast as "the always-available fallback tier". But the principle document itself
+exposed the earlier mistake: the argument had been framed as a performance crossover point ("if TS is
+fast enough, skip the backend"), and that whole framing became void once the user re-anchored the
+core demand — the backend exists not to be "faster" but to remove the ceiling (algorithm coverage,
+memory limits, worst-case compute).
 
 ### 4.4 Era four · backend owns compute (2026-10-17 → )
 
-**Decision (made by the user)**: all numeric / statistical / matrix computation belongs to the server;
-the browser only renders and interacts.
-**The same ruling also drew the boundary**:
-> "If dynamic needs really appear, send the formula to the backend to parse or even compile — but do
-> not compute in the frontend."
+**What was set (decided by the user)**: all numeric / statistical / matrix computation belongs to the
+server; the browser only renders and interacts. The same ruling drew the boundary: "If dynamic needs
+really appear, send the formula to the backend to parse or even compile — but do not compute in the
+frontend."
 
 **What triggered it was a measurement** (the function-card design review exposed the layering hole):
 
@@ -139,72 +134,71 @@ the browser only renders and interacts.
 | 10×10 | 1.9 KB | 0.039 ms | **1.11 ms** | 0.0099 ms |
 | 100×100 | 193 KB | 3.19 ms | **2.32 ms** | 4.68 ms |
 
-> For small matrices the crossing cost ≈ **fixed latency × number of crossings**, independent of byte
-> count.
-> A 10-node small-matrix chain crossing the process boundary per edge ≈ 8.3 ms; the whole chain in one
-> process ≈ 0.075 ms (**≈ 110×**).
-> Conclusion: **a mixed layering (this card on T1, that one on T3) necessarily degrades to paying per
-> edge in small-matrix workflows** → only "the whole graph stays on one side" works, and of the two
-> the extreme chosen was **the whole graph in the backend**.
+For small matrices the crossing cost ≈ fixed latency × number of crossings, independent of byte
+count: a 10-node small-matrix chain crossing the process boundary per edge ≈ 8.3 ms, the whole chain
+in one process ≈ 0.075 ms — about 110× apart. A mixed layering (this card on T1, that one on T3)
+necessarily degrades to paying per edge in small-matrix workflows — only "the whole graph stays on one
+side" works, and of the two extremes the chosen one was the whole graph in the backend.
 
-**Revision of the previous generation of decisions**: T1 is no longer the baseline and leaves the
-production compute path; `expression.ts` / `stats.ts` / `Smoothing.ts` are **frozen as the differential
-reference baseline and retired step by step**.
+**This revised the previous generation of decisions**: T1 is no longer the baseline and leaves the
+production compute path; `expression.ts` / `stats.ts` / `Smoothing.ts` are frozen as the differential
+reference baseline and retired step by step.
 
 **Landing order** (stages 0–3, all done; dates in §3): cross-tier shared fixtures → the `backend/`
 skeleton and protocol handshake → porting `expression.ts` semantics to C++ → formula-card compute
 authority moved to the backend. `stats.ts` / `Smoothing.ts` follow the function cards.
 
-**The error contract fixed on the same day**: the server sends only `code + params` and **never a
-user-facing sentence**; the copy is rendered by frontend i18n
+**The error contract fixed the same day**: the server sends only `code + params` and never a
+user-facing sentence; the copy is rendered by frontend i18n
 (→ [protocol v1](architecture/backend-protocol-v1.en.md)).
 
 ---
 
 ## 5. Four "spirals" (the same question met again and again)
 
-Four questions recur in this history; each went round at least twice:
+The value of this history lies not in the dates but in which questions recurred. Each of the four
+went round at least twice:
 
 ### Spiral one · where compute lives: frontend → backend → frontend (TS) → backend
 
-Each migration swapped the set of arguments: **insufficient capability** (Aug) → **user requirement
-weight** (10-14) → **worst-case fallback** (10-15) → **round-trip economics** (10-17).
-What finally stabilised is not "where it lives" but the criterion itself: **"will the operator hit a
-wall?"**
+Each migration swapped the set of arguments: insufficient capability (Aug) → user requirement weight
+(10-14) → worst-case fallback (10-15) → round-trip economics (10-17). What finally stabilised is not
+"where it lives" but the criterion itself: **will the operator hit a wall?**
 
 ### Spiral two · what guarantees semantic parity
 
-`shared binary` (C++ used directly) → `tests and assertions` (TS rewrite, 154 cases) → **cross-tier
-shared fixtures + differential testing** (TS and C++ run the same JSON fixtures).
-The third form is the strictest, and it was required to **land before the engine** (fixtures first).
-On 2026-10-27 this spiral reached the **card layer**: `web/tests/fixtures/cards/*.json` runs on both
-sides — TS (port-binding derivation and fixture self-consistency) and C++ (the matrices and structured
-errors produced by the real `NodeRegistry`). Before that, the card→port mapping had **three mutually
-different definitions** (frontend model / frontend DTO / backend PortBinding) and nothing could point
-out that they disagreed.
+Three forms replaced each other in turn: shared binary (C++ used directly) → tests and assertions
+(TS rewrite, 154 cases) → cross-tier shared fixtures + differential testing (TS and C++ run the same
+JSON fixtures). The third form is the strictest, and it was required to land before the engine
+(fixtures first). On 2026-10-27 this spiral reached the card layer: `web/tests/fixtures/cards/*.json`
+runs on both sides — TS (port-binding derivation and fixture self-consistency) and C++ (the matrices
+and structured errors produced by the real `NodeRegistry`). Before that, the card→port mapping had
+three mutually different definitions (frontend model / frontend DTO / backend PortBinding) and nothing
+could point out that they disagreed.
+
 > Sources: [backend-protocol-v1 §differential-testing contract](architecture/backend-protocol-v1.md),
 > [card schema v2 §implementation results](decisions/2026-10-26-card-schema-v2.md)
 
 ### Spiral three · repository shape: one implementation vs two
 
-The C++/Qt tree was kept as a "behavioural reference" → it **cost 215 MB and left the main
-implementation `web/` outside version control** → deleted entirely.
-> The method distilled from it: **first bring what stays under version control, then delete what goes** —
-> nominally irreversible, but reversible in practice.
+The C++/Qt tree was kept as a "behavioural reference", then deleted entirely — it cost 215 MB and left
+the main implementation `web/` outside version control (process: the 2026-10-15 entries in §3). The
+method distilled from it: **first bring what stays under version control, then delete what goes** —
+nominally irreversible, but reversible in practice.
 
 ### Spiral four · how we verify: assertions → real artefacts → pixels/geometry
 
 `smoke.mjs` grew from 31 → 58 → 61 checks, yet at 61 green it still had defects like "the context menu
-opens outside the viewport" that made a core feature completely unusable — because the tests clicked by
-selector and never verified **position, reachability or visual correctness**.
-> Lesson: **an end-to-end test passing ≠ the UI works**; assertion counts cannot validate visualisation
-> either — **the picture has to be looked at** (hence fixed screenshot artefacts).
->
-> On 2026-10-27 another variant of the same family was caught: a function card fetched only one
-> `count=5000` result window, so a 10 000-row source table showed only its first half inside the card —
-> **every number correct, the picture lying**. No differential fixture (which judges "is the maths
-> right") could catch it, because it was not a computation error but **incomplete transport**. The
-> countermeasure was to add an integration gate against the real backend.
+opens outside the viewport" that made a core feature completely unusable — the tests clicked by
+selector and never verified position, reachability or visual correctness. An end-to-end test passing
+does not mean the UI works; assertion counts cannot validate visualisation either — the picture has
+to be looked at (hence fixed screenshot artefacts).
+
+On 2026-10-27 another variant of the same family was caught: a function card fetched only one
+`count=5000` result window, so a 10 000-row source table showed only its first half inside the card —
+every number correct, the picture lying. No differential fixture (which judges "is the maths right")
+could catch it, because it was not a computation error but incomplete transport. The countermeasure
+was to add an integration gate against the real backend.
 
 ---
 
@@ -213,10 +207,9 @@ selector and never verified **position, reachability or visual correctness**.
 ### 6.1 About "do not trust assets the docs claim"
 
 1. **"Already ready" only counts if it compiles and runs.** The Eigen gitlink lesson: a submodule
-   without `.gitmodules` = an empty directory.
-   Re-checked during this pass (2026-10-17): in the backup repository `repo.git`, the only path
-   containing eigen is the single gitlink `third_party/eigen`, and neither `CMakeLists.txt` nor `src/`
-   references it — **the false premise is confirmed**.
+   without `.gitmodules` = an empty directory. Re-checked during this pass (2026-10-17): in the backup
+   repository `repo.git`, the only path containing eigen is the single gitlink `third_party/eigen`,
+   and neither `CMakeLists.txt` nor `src/` references it — the false premise is confirmed.
 2. **"I can reproduce it" ≠ "someone else can reproduce it"**; private hacks must be turned into
    in-repo scripts to count as a regression defence.
 3. **"The docs say so" ≠ "the code has it"**: `setEditable` / `setCell()` were claimed in the README
@@ -225,20 +218,21 @@ selector and never verified **position, reachability or visual correctness**.
 ### 6.2 About verification
 
 4. **Test order hides bugs** (scroll first, then build the chart — precisely masking dead anchors).
-5. **Self-tests passing ≠ the graphic is right** (the violin plot was wrong twice).
-6. **Compiling ≠ being checked** (`Extract<SeriesOption, {type:'custom'}>` silently degraded to `any`).
-7. **When you remove a masking bug, verify the dependency array at the same time** ("recompute on every
-   render" was also the fig leaf of another bug).
+5. **Self-tests passing does not mean the graphic is right** (the violin plot was wrong twice).
+6. **Compiling does not mean being checked** (`Extract<SeriesOption, {type:'custom'}>` silently
+   degraded to `any`).
+7. **When you remove a masking bug, verify the dependency array at the same time** ("recompute on
+   every render" was also the fig leaf of another bug).
 
 ### 6.3 About silent failure (what the headroom principle names explicitly)
 
-8. The parse cache was keyed by **file name** → today's curve wearing yesterday's label.
+8. The parse cache was keyed by file name → today's curve wearing yesterday's label.
 9. The heatmap drew "undefined correlation" as `0` → the meaning changed from "cannot be defined" to
-   "uncorrelated" (**actively misleading**).
+   "uncorrelated", actively misleading.
 10. `&&` appeared in the precedence table but the lexer never produced it → multi-condition filtering
     silently unusable.
 11. Workspace snapshots rebuilt dependencies only from chart cards → formula-card dependencies were
-    **silently lost** after reload.
+    silently lost after reload.
 12. An explicit X axis was a frozen snapshot → after switching files the curve was drawn against the
     old file's independent variable.
 
@@ -248,36 +242,37 @@ selector and never verified **position, reachability or visual correctness**.
 
 ### 6.4 About the decision process
 
-13. **Distinguish "end-goal requirements" from "intermediate-process requirements"** — vector export was
-    misjudged as "possible", and the price was eight weeks of a frozen frontend.
+13. **Distinguish "end-goal requirements" from "intermediate-process requirements"** — vector export
+    was misjudged as "possible" (the premise in §4.2), and the price was eight weeks of a frozen
+    frontend.
 14. **Resolve philosophical conflicts by asking about the worst case, not by finding a performance
-    crossover point**.
-15. **Decision authority is concentrated**: every commit's author is `DozenLow`, key decision documents
-    are marked "decided by the user", and the split is described in the
-    [README acknowledgements](../README.zh-CN.md#致谢) — **AI as the means, goals/architecture decided
-    by the author**.
+    crossover point** (the voided framing in §4.3 is this lesson).
+15. **Decision authority is concentrated**: every commit's author is `DozenLow`, key decision
+    documents are marked "decided by the user", and the split is described in the
+    [README acknowledgements](../README.zh-CN.md#致谢) — AI as the means, goals/architecture decided
+    by the author.
 
 ---
 
 ## 7. Current state
 
-In one sentence: **compute in the backend, the interface in the browser, formulas and statistics never
-back in the frontend**; the product ships as a "binary + `web/`" archive.
-Numbers move — this document keeps conclusions only, and the repository-root `STATE.md` is the authority.
+In one sentence: compute in the backend, the interface in the browser, formulas and statistics never
+back in the frontend; the product ships as a "binary + `web/`" archive. Numbers move — this document
+keeps conclusions only, and the repository-root `STATE.md` is the authority.
 
 | Dimension | Current state | Source |
 |---|---|---|
 | Version / release | 0.1.3 (untagged); three asset tiers `standard` / `perf` / `debug`; Windows statically linked | [CHANGELOG](../CHANGELOG.md) |
 | Backend | C++17/Eigen on `127.0.0.1:37811`, serving the `web/` UI from the same process | `STATE.md` |
-| Transport | protocol v1: JSON control plane + **DCM2** frames (24-byte header, carries the full table shape) + long-poll events; `DCM1` accepted only as legacy input | [protocol v1](architecture/backend-protocol-v1.en.md) |
+| Transport | protocol v1: JSON control plane + DCM2 frames (24-byte header, carries the full table shape) + long-poll events; `DCM1` accepted only as legacy input | [protocol v1](architecture/backend-protocol-v1.en.md) |
 | Frontend | React 19 / Vite / TS / ECharts 6 (SVG rendering); a Web Worker parses ten-thousand-row files | [README.md](../README.md) |
 | Tests | vitest **594** passed / 14 skipped; ctest **14** (4 opt-in) | measured locally |
 | Precision | `dd_oracle` reference + `matrix_invariants` invariants; the table prints the shortest round-trip form; `/accuracy` is ready, the front-end hint is not | `STATE.md` |
 
 **Design constraints (unchanged since 10-17)**
 
-- backend unreachable ⇒ no compute at all — a single-point dependency, answered with a **visible banner
-  and a retry button**, never silence
+- backend unreachable ⇒ no compute at all — a single-point dependency, answered with a visible banner
+  and a retry button, never silence
 - fixed local latency ≈ 1.1 ms per round trip — which is why small matrices must stay entirely on one
   side (§4.4's arithmetic)
 - large results never travel whole: dense matrices go as windows plus the full shape in the DCM2 header
@@ -286,17 +281,17 @@ Numbers move — this document keeps conclusions only, and the repository-root `
 
 **Known gaps** (the same top 5 as `STATE.md`, plus why each is still open)
 
-- function cards: the parameter form is not rendered from the signature, and K>1 has no output selector
-  — the signature is settled, the interaction is not
-- `web/src/core/stats.ts` still computes statistics — the last leftover that conflicts with "the backend
-  owns compute"
+- function cards: the parameter form is not rendered from the signature, and K>1 has no output
+  selector — the signature is settled, the interaction is not
+- `web/src/core/stats.ts` still computes statistics — the last leftover that conflicts with "the
+  backend owns compute"
 - the performance gate covers the engine only; HTTP, cache hits and cold start are uncovered
-- multi-file cards can replace a file but not add or remove one; no undo stack; connection hover and wire
-  re-editing are missing
-- the Windows launch chain stops at "cross-compile + assertions"; the double-click was never re-tested on
-  real hardware
+- multi-file cards can replace a file but not add or remove one; no undo stack; connection hover and
+  wire re-editing are missing
+- the Windows launch chain stops at "cross-compile + assertions"; the double-click was never re-tested
+  on real hardware
 
-> Maintenance: this section holds **pointers and reasons**. Numbers and gaps live in `STATE.md`; when it
+> Maintenance: this section holds pointers and reasons. Numbers and gaps live in `STATE.md`; when it
 > moves, only the named conclusions change here.
 
 ---

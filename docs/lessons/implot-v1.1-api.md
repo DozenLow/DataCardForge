@@ -21,9 +21,9 @@ ImPlot 2025 年交接维护者（Evan Pezent → Breno Cunha Queiroz），v1.1 �
 
 ## 规避 / 建议
 
-- **锁一个已知稳定的 commit**，避免 master 持续漂移影响代码
-- 遇到"不是成员 / 无此枚举"先查 `implot.h`，v1.1 用 `ImPlotSpec` 结构体做样式
-- 样式枚举也变了（如 `ImPlotCol_Line` 不存在，改用 `ImPlotProp_LineColor` 或 `ImPlotSpec` 字段）
+- **锁一个已知稳定的 commit**，避免 master 持续漂移影响代码。
+- 遇到"不是成员 / 无此枚举"先查 `implot.h`：v1.1 用 `ImPlotSpec` 结构体做样式。
+- 样式枚举也变了（如 `ImPlotCol_Line` 不存在，改用 `ImPlotProp_LineColor` 或 `ImPlotSpec` 字段）。
 
 ## 关联
 

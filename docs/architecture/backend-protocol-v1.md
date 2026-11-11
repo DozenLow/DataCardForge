@@ -9,7 +9,7 @@
 ## 传输形态
 
 - **HTTP/1.1，`127.0.0.1` 上的本地服务**（默认端口 37811，可配置）。
-- 控制消息 = JSON（`application/json`）；矩阵载荷 = 二进制帧（见下）。
+- 控制消息 = JSON（`application/json`）；矩阵载荷 = 二进制帧（见下「载荷编码」）。
 - 节点状态推送 = 长轮询 `GET /api/events?since=<seq>`（服务端挂起至有新事件或超时 25 s）。
   WebSocket 升级留待需要更低延迟时再做，**不改变消息语义**。
 - 无鉴权（本机单用户工具）。跨机部署前必须先补 token，属已知缺口。
@@ -54,8 +54,8 @@ GET /api/hello
 - `POST /api/nodes` `{kind, inputs, formula}` → `{nodeId, resultMatrixId}`
   - 输入绑定成环 ⇒ `409 {code:"cycle", path:[...]}`，**整批原子拒绝**（N 条边要么全加要么全不加）。
 - `GET /api/nodes/{id}` → `{nodeId, state, resultMatrixId, code?, params?, reason?}`
-  - 阶段 3 新增：读单个节点的权威状态快照。事件流是有界且瞬时的，重连或恢复工作区后前端靠它
-    重建四态指示灯与错误码，无需回放历史事件。`state === "error"` 时附带结构化 `code`+`params`。
+  - 阶段 3 新增：读单个节点的权威状态快照。事件流有界且瞬时，重连或恢复工作区后前端靠它重建
+    四态指示灯与错误码，无需回放历史事件。`state === "error"` 时附带结构化 `code`+`params`。
   - `state === "dirty"` 时附带 `reason`（2026-10-27，纯增量）：
     `notRequested`（建了还没要求计算）/ `upstreamChanged`（上游矩阵或节点变了）/
     `definitionChanged`（参数或连线被改过）。四态灯不变；`reason` 让两种"灰"可区分。
@@ -95,15 +95,15 @@ names      namesLen 字节的 JSON 数组（UTF-8），元素是 "Pos.1 annotati
 `totalRows`/`totalCols` 描述**整张矩阵**——这是「只取前 100 行却知道表有 165 000 行」的唯一来源，
 前端因此可以在不下载全表的前提下显示「显示前 100 行 · 共 165 000 行」。
 
-旧帧 `DCM1`（magic `0x44434D31`、16 字节头、无 total 字段）仍然**被接收**：
-`POST /api/matrices/raw` 两个 magic 都认，`total*` 缺省等于窗口大小。服务端只发 DCM2。
-
 `POST /api/matrices/raw` 的请求体就是这一帧（不带 HTTP 分块），服务端解码后与 JSON 端点等价入库。
 NaN 原样传输（IEEE 754），前端渲染为 `—` 的既有约定不变。
 
+旧帧 `DCM1`（magic `0x44434D31`、16 字节头、无 total 字段）仍然**被接收**：
+`POST /api/matrices/raw` 两个 magic 都认，`total*` 缺省等于窗口大小。服务端只发 DCM2。
+
 **响应写回**：服务端对每个连接开 `TCP_NODELAY`，且头与体合并为**一次** `send`。
 分两次写会让 Nagle 把第二段压到对端的延迟 ACK 之后——探针实测每个请求固定多出 40 ms，
-而函数卡结果是要按窗口分页拉的，这个停顿会乘以页数（见
+而函数卡结果要按窗口分页拉，这个停顿会乘以页数（见
 [结果预览决策](../decisions/2026-10-29-result-preview.md)）。
 
 ## v2 增量（卡片 schema v2 / 函数签名）
@@ -128,8 +128,8 @@ NaN 原样传输（IEEE 754），前端渲染为 `—` 的既有约定不变。
 - `builtin:expression-columns`：一节点、一宽表输出，每表达式一列（列名作 annotation）；
   取代 v1 的「每公式列一个节点」。列数随表达式个数变化属于**数据**，K 仍为 1。
 - **端口绑定 `mode`**：`"matrix"` 绑整张表；`"cell"` + `columnIndex` 只绑该列（越界 ⇒
-  `unknownColumn`）。v1 里 `mode` 是装饰字段——标了 `cell` 仍绑整表，双输入签名需要的
-  需要的是「端口=一列」，所以它现在有语义。
+  `unknownColumn`）。v1 里 `mode` 是装饰字段——标了 `cell` 仍绑整表；双输入签名需要的是
+  「端口=一列」，所以它现在有语义。
 - `builtin:linear-regression`：端口 `x` / `y`（各一列），无参数，输出 `fit` 为签名固定的
   1 行 × 5 列（slope/intercept/r/r2/n）。它不是表达式形状——存在的意义是证明签名模型通用。
 - `builtin:summary`（2026-10-27）：端口 `src`（**矩阵**），输出 `result`。形状
