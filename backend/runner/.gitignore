@@ -1,0 +1,3 @@
+# Python bytecode from importing dcm2/runner in tests.
+__pycache__/
+*.pyc

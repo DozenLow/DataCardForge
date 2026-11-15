@@ -1,0 +1,4 @@
+# Python bytecode and the test-owned scratch directory (created and removed by test_runner.py).
+__pycache__/
+*.pyc
+tmp/
