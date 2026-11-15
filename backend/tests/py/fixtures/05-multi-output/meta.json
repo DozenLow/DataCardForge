@@ -1,0 +1,8 @@
+{
+  "script": "import numpy as np\nsums = A.sum(axis=0, keepdims=True)\ndoubled = A * 2.0\n",
+  "outputs": [
+    "sums",
+    "doubled"
+  ],
+  "timeout_ms": 10000
+}

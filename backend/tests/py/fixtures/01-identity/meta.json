@@ -1,0 +1,7 @@
+{
+  "script": "out = A\n",
+  "outputs": [
+    "out"
+  ],
+  "timeout_ms": 10000
+}

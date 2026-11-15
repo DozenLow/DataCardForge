@@ -1,0 +1,7 @@
+{
+  "script": "import numpy as np\ncol = A[:, 0]\nout = A[~np.isnan(col), :]\n",
+  "outputs": [
+    "out"
+  ],
+  "timeout_ms": 10000
+}

@@ -1,0 +1,7 @@
+{
+  "script": "import numpy as np\nout = np.arange(6, dtype=np.int64).reshape(2, 3)\n",
+  "outputs": [
+    "out"
+  ],
+  "timeout_ms": 10000
+}

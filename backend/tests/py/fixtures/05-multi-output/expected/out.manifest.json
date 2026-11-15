@@ -1,0 +1,14 @@
+[
+  {
+    "name": "sums",
+    "frame": "out.dcm2",
+    "rows": 1,
+    "cols": 2
+  },
+  {
+    "name": "doubled",
+    "frame": "out.1.dcm2",
+    "rows": 2,
+    "cols": 2
+  }
+]
