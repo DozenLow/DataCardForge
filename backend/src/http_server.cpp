@@ -25,6 +25,7 @@
 #endif
 
 #include <algorithm>
+#include <cctype>
 #include <charconv>
 #include <cmath>
 #include <cstring>
@@ -117,12 +118,115 @@ HttpResponse jsonError(int status, const std::string& code, Json params = Json::
 
 HttpResponse jsonOk(Json value) { return HttpResponse{200, "application/json", value.dump(), nullptr}; }
 
+// ── Origin gate ────────────────────────────────────────────────────────
+// Binding to 127.0.0.1 makes the server reachable, it does not authorise the caller: any
+// page the user has open can still POST here, and the wildcard
+// `Access-Control-Allow-Origin: *` used to hand the response to whatever origin asked.
+// Only the two origins that can be the server's own front end may read a response.
+//
+// The decision comes from the request's Origin header and nothing else:
+//   no header     → not a browser request (curl, scripts) → unchanged response, no CORS
+//   loopback host → echo the value verbatim + advertise the allow-list
+//   anything else → 403, no CORS headers; unparseable values land here too, because the
+//                   safe default for a header this code cannot prove is same-machine
+
+enum class OriginGate { None, Allowed, Forbidden };
+
+struct OriginHeader {
+  bool present = false;
+  std::string value;
+};
+
+struct OriginDecision {
+  OriginGate gate = OriginGate::None;
+  std::string echo;  // the Origin value, verbatim; only filled when gate == Allowed
+};
+
+bool asciiEqualsNoCase(std::string_view a, std::string_view b) {
+  if (a.size() != b.size()) return false;
+  for (size_t i = 0; i < a.size(); ++i) {
+    const auto ca = static_cast<unsigned char>(a[i]);
+    const auto cb = static_cast<unsigned char>(b[i]);
+    if (std::tolower(ca) != std::tolower(cb)) return false;
+  }
+  return true;
+}
+
+// Header names are case-insensitive. The value comes back with only the surrounding
+// spaces/tabs trimmed: a browser's exact bytes are what gets echoed into the response.
+bool findRequestHeader(const std::string& head, std::string_view name, std::string* value) {
+  size_t pos = head.find("\r\n");  // skip the request line
+  if (pos == std::string::npos) return false;  // no header lines at all
+  pos += 2;
+  while (pos < head.size()) {
+    size_t end = head.find("\r\n", pos);
+    if (end == std::string::npos) end = head.size();
+    const std::string_view line(head.data() + pos, end - pos);
+    const size_t colon = line.find(':');
+    if (colon != std::string_view::npos && asciiEqualsNoCase(line.substr(0, colon), name)) {
+      std::string_view text = line.substr(colon + 1);
+      while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.remove_prefix(1);
+      while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) text.remove_suffix(1);
+      *value = std::string(text);
+      return true;
+    }
+    pos = end + 2;
+  }
+  return false;
+}
+
+// "scheme://host[:port]" with a loopback host and an http(s) scheme, any port. Everything
+// else is refused: "null", a path or query suffix, userinfo, an IPv6 literal, the
+// 127.0.0.1.example.com look-alike. A browser never sends those, so refusing costs nothing.
+bool isLoopbackOrigin(const std::string& origin) {
+  if (origin.empty() || origin.size() > 512) return false;
+  for (const char c : origin) {  // the echoed value must not carry CR/LF or other controls
+    const auto u = static_cast<unsigned char>(c);
+    if (u < 0x20 || u == 0x7f) return false;
+  }
+  const size_t schemeEnd = origin.find("://");
+  if (schemeEnd == std::string::npos || schemeEnd == 0) return false;
+  const std::string_view scheme(origin.data(), schemeEnd);
+  if (!asciiEqualsNoCase(scheme, "http") && !asciiEqualsNoCase(scheme, "https")) return false;
+
+  const std::string_view authority(origin.data() + schemeEnd + 3, origin.size() - schemeEnd - 3);
+  if (authority.empty()) return false;
+  if (authority.find_first_of(" \t/?#@[\\]") != std::string_view::npos) return false;
+
+  std::string_view host = authority;
+  const size_t colon = authority.rfind(':');
+  if (colon != std::string_view::npos) {
+    const std::string_view port = authority.substr(colon + 1);
+    if (port.empty()) return false;
+    unsigned int number = 0;
+    for (const char c : port) {
+      if (c < '0' || c > '9') return false;
+      number = number * 10 + static_cast<unsigned int>(c - '0');
+      if (number > 65535) return false;
+    }
+    host = authority.substr(0, colon);
+  }
+  return asciiEqualsNoCase(host, "127.0.0.1") || asciiEqualsNoCase(host, "localhost");
+}
+
+OriginDecision decideOrigin(const OriginHeader& header) {
+  OriginDecision out;
+  if (!header.present) return out;  // non-browser client: byte-for-byte the old behaviour
+  if (isLoopbackOrigin(header.value)) {
+    out.gate = OriginGate::Allowed;
+    out.echo = header.value;
+  } else {
+    out.gate = OriginGate::Forbidden;
+  }
+  return out;
+}
+
 enum class ReadStatus { Ok, Closed, BadRequest, TooLarge };
 
 // Reads exactly one HTTP/1.1 request. Never throws: every numeric field goes through
 // from_chars and the whole routine is additionally guarded by a catch-all, because this
 // runs on a detached per-connection thread where an escaping exception kills the process.
-ReadStatus readRequestImpl(socket_t fd, HttpRequest* req) {
+ReadStatus readRequestImpl(socket_t fd, HttpRequest* req, OriginHeader* origin) {
   std::string buf;
   char tmp[8192];
   size_t headerEnd = std::string::npos;
@@ -134,6 +238,12 @@ ReadStatus readRequestImpl(socket_t fd, HttpRequest* req) {
     if (headerEnd == std::string::npos && buf.size() > kMaxHeaderBytes) return ReadStatus::BadRequest;
   }
   const std::string head = buf.substr(0, headerEnd);
+
+  // Read on every request, not just the ones the router will answer: the CORS decision is
+  // made before routing and must not inherit a previous request's value on a keep-alive
+  // connection.
+  origin->present = findRequestHeader(head, "Origin", &origin->value);
+  if (!origin->present) origin->value.clear();
 
   size_t contentLength = 0;
   bool haveContentLength = false;
@@ -221,9 +331,9 @@ ReadStatus readRequestImpl(socket_t fd, HttpRequest* req) {
   return ReadStatus::Ok;
 }
 
-ReadStatus readRequest(socket_t fd, HttpRequest* req) {
+ReadStatus readRequest(socket_t fd, HttpRequest* req, OriginHeader* origin) {
   try {
-    return readRequestImpl(fd, req);
+    return readRequestImpl(fd, req, origin);
   } catch (...) {
     // Allocation failure or any other unexpected throw: refuse the request, keep serving.
     return ReadStatus::BadRequest;
@@ -239,7 +349,7 @@ void writeAll(socket_t fd, const char* data, size_t len) {
   }
 }
 
-void sendResponse(socket_t fd, HttpResponse& res, bool headersOnly) {
+void sendResponse(socket_t fd, HttpResponse& res, bool headersOnly, const std::string& allowOrigin) {
   std::string payload;
   if (res.binary) {
     payload = *res.binary;
@@ -249,11 +359,19 @@ void sendResponse(socket_t fd, HttpResponse& res, bool headersOnly) {
     payload = res.body;
   }
   std::string headers = "HTTP/1.1 " + std::to_string(res.status) + " " +
-                        (res.status == 200 ? "OK" : "Error") + "\r\n";
+                        (res.status == 200 ? "OK" : res.status == 204 ? "No Content" : "Error") + "\r\n";
   headers += "Content-Type: " + res.contentType + "\r\n";
   headers += "Content-Length: " + std::to_string(payload.size()) + "\r\n";
   headers += "Connection: keep-alive\r\n";
-  headers += "Access-Control-Allow-Origin: *\r\n";
+  if (!allowOrigin.empty()) {
+    // Echoing the exact origin (never "*") is what turns the CORS answer into a function of
+    // the request; Vary: Origin keeps a cache from handing it to a different origin.
+    // Content-Type is the only header the front end sets, so that is the whole allow-list.
+    headers += "Access-Control-Allow-Origin: " + allowOrigin + "\r\n";
+    headers += "Vary: Origin\r\n";
+    headers += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    headers += "Access-Control-Allow-Headers: Content-Type\r\n";
+  }
   headers += "\r\n";
   // ONE write for headers + body. Two send() calls on a Nagle socket stall the second
   // segment until the peer's delayed ACK (40 ms measured with the window endpoint): the
@@ -871,15 +989,36 @@ bool HttpServer::serve() {
 
 void HttpServer::handleConnection(socket_t fd) {
   HttpRequest req;
+  OriginHeader origin;
   for (;;) {
-    const ReadStatus status = readRequest(fd, &req);
+    const ReadStatus status = readRequest(fd, &req, &origin);
     if (status == ReadStatus::Closed) break;
     if (status == ReadStatus::BadRequest || status == ReadStatus::TooLarge) {
-      // Framing is unusable; answer once and drop the connection instead of looping.
+      // Framing is unusable; answer once and drop the connection instead of looping. The
+      // Origin may be the part that failed to parse, so this one carries no CORS headers.
       HttpResponse res = status == ReadStatus::TooLarge ? jsonError(413, "payloadTooLarge")
                                                         : jsonError(400, "unexpectedToken");
-      sendResponse(fd, res, false);
+      sendResponse(fd, res, false, std::string());
       break;
+    }
+    const OriginDecision gate = decideOrigin(origin);
+    if (gate.gate == OriginGate::Forbidden) {
+      // A page from another origin asked for the answer: refuse the request outright. It
+      // cannot read this either (no CORS headers), so nothing leaks — and the refusal does
+      // not say whether the path, method or body would otherwise have been valid.
+      HttpResponse res = jsonError(403, "forbiddenOrigin");
+      sendResponse(fd, res, false, std::string());
+      continue;
+    }
+    if (req.method == "OPTIONS") {
+      // Preflight: answer before routing, for any path, because the browser is asking who
+      // may call what — the real request still has to pass route() afterwards. An OPTIONS
+      // without Origin keeps the non-browser shape: 204 and no CORS headers.
+      HttpResponse res;
+      res.status = 204;
+      res.contentType = "text/plain";
+      sendResponse(fd, res, false, gate.echo);
+      continue;
     }
     HttpResponse res;
     try {
@@ -890,7 +1029,7 @@ void HttpServer::handleConnection(socket_t fd) {
       res = jsonError(500, "internalError");
     }
     const bool headersOnly = req.method == "HEAD";
-    sendResponse(fd, res, headersOnly);
+    sendResponse(fd, res, headersOnly, gate.echo);
     if (headersOnly) break;
   }
   dc_close_socket(fd);

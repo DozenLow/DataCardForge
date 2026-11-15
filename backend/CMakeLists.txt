@@ -130,6 +130,20 @@ add_executable(dc_static_test tests/static_path_test.cpp)
 target_link_libraries(dc_static_test PRIVATE dc_static)
 add_test(NAME static_paths COMMAND dc_static_test)
 
+# HTTP Origin gate (tests/origin_gate_test.cpp): the wildcard Access-Control-Allow-Origin
+# let any page the user had open read responses from 127.0.0.1. The rule now is: no Origin →
+# response unchanged (curl and scripts), loopback Origin → echoed, anything else → 403. The
+# test runs the real server on an ephemeral port; src/http_server.cpp is compiled into it
+# directly because the decision lives in the connection loop, not in a header worth faking.
+add_executable(dc_origin_gate_test tests/origin_gate_test.cpp src/http_server.cpp ${DC_SHA_HEADER})
+target_include_directories(dc_origin_gate_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
+add_dependencies(dc_origin_gate_test dc_build_sha)
+target_link_libraries(dc_origin_gate_test PRIVATE dc_core dc_static Threads::Threads)
+if(WIN32)
+  target_link_libraries(dc_origin_gate_test PRIVATE ws2_32)
+endif()
+add_test(NAME origin_gate COMMAND dc_origin_gate_test)
+
 # The console/browser launch rule (ui_launch.h). Header-only decision, so no platform code is
 # involved: this is the half of "double-click opens nothing" that a Linux CI can actually judge.
 # What it protects: the old rule required `isatty(stdout)`, and a launcher-started process has
