@@ -382,78 +382,11 @@ void sendResponse(socket_t fd, HttpResponse& res, bool headersOnly, const std::s
   writeAll(fd, headers.data(), headers.size());
 }
 
-uint32_t readU32LE(const unsigned char* p) {
-  return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
-         (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
-}
-
-double readF64LE(const unsigned char* p) {
-  uint64_t bits = 0;
-  for (int i = 7; i >= 0; --i) bits = (bits << 8) | p[i];
-  double value = 0;
-  std::memcpy(&value, &bits, sizeof value);
-  return value;
-}
-
-// Decode a DCM1 frame body into columns (POST /api/matrices/raw).
+// Decode a DCM1/DCM2 frame body into columns (POST /api/matrices/raw). The codec itself
+// lives in dc_core now (nodes.cpp) so the script card's data channel and the upload path
+// share ONE implementation — docs/decisions/2026-11-15-python-script-card.md §五.
 bool decodeMatrixFrame(const std::string& frame, std::vector<Column>* columns, std::string* err) {
-  if (frame.size() < 16) {
-    *err = "frame shorter than the 16-byte header";
-    return false;
-  }
-  const auto* bytes = reinterpret_cast<const unsigned char*>(frame.data());
-  const uint32_t magic = readU32LE(bytes);
-  // DCM1 is the 16-byte header (no matrix shape); DCM2 adds totalRows/totalCols (24 bytes).
-  // Uploads keep accepting both so an old client keeps working after the format grew.
-  const bool isV2 = magic == 0x44434D32u;
-  if (magic != 0x44434D31u && !isV2) {
-    *err = "bad magic (expected DCM1 or DCM2)";
-    return false;
-  }
-  const size_t headerLen = isV2 ? 24u : 16u;
-  if (frame.size() < headerLen) {
-    *err = "frame shorter than the header";
-    return false;
-  }
-  const uint32_t rows = readU32LE(bytes + 4);
-  const uint32_t cols = readU32LE(bytes + 8);
-  const uint32_t namesLen = readU32LE(bytes + 12);
-  // Bound the shape BEFORE multiplying: rows*cols*8 can wrap uint64 for hostile headers,
-  // which would make the truncation check pass and the copy run off the buffer.
-  if (cols > kMaxBodyBytes / 8u || namesLen > kMaxBodyBytes ||
-      (rows > 0 && cols > kMaxBodyBytes / 8u / rows)) {
-    *err = "frame shape too large";
-    return false;
-  }
-  const uint64_t dataLen = static_cast<uint64_t>(rows) * cols * 8u;
-  const uint64_t needed = static_cast<uint64_t>(headerLen) + dataLen + namesLen;
-  if (frame.size() < needed) {
-    *err = "truncated frame";
-    return false;
-  }
-  Json names;
-  if (namesLen > 0) {
-    std::string namesJson(frame.data() + headerLen + dataLen, namesLen);
-    std::string jerr;
-    if (!Json::parse(namesJson, &names, &jerr) || !names.isArray()) {
-      *err = "bad names payload: " + jerr;
-      return false;
-    }
-  }
-  columns->clear();
-  columns->reserve(cols);
-  for (uint32_t c = 0; c < cols; ++c) {
-    Column col;
-    if (names.isArray() && c < names.items().size() && names.items()[c].isString())
-      Matrix::labelParsed(names.items()[c].asString(), &col.posName, &col.annotation);
-    else
-      col.posName = "Pos." + std::to_string(c + 1);
-    col.data.resize(rows);
-    const unsigned char* base = bytes + headerLen + static_cast<size_t>(c) * rows * 8u;
-    for (uint32_t r = 0; r < rows; ++r) col.data[r] = readF64LE(base + static_cast<size_t>(r) * 8u);
-    columns->push_back(std::move(col));
-  }
-  return true;
+  return decodeDcm2Frame(frame, columns, err, kMaxBodyBytes);
 }
 
 double cellValue(const Json& v, bool* ok) {
@@ -485,30 +418,9 @@ bool splitMatrixPath(const std::string& path, int64_t* id, std::string* suffix) 
 std::string encodeMatrixFrame(const std::vector<std::vector<double>>& columns,
                               const std::vector<std::string>& names, size_t rows,
                               size_t totalRows, size_t totalCols) {
-  Json nameArr = Json::array();
-  for (const auto& n : names) nameArr.push(Json(n));
-  std::string namesJson = nameArr.dump();
-  uint32_t magic = 0x44434D32;  // "DCM2"
-  uint32_t cols = static_cast<uint32_t>(columns.size());
-  uint32_t rowsU = static_cast<uint32_t>(rows);
-  uint32_t namesLen = static_cast<uint32_t>(namesJson.size());
-  uint32_t totalRowsU = static_cast<uint32_t>(totalRows);
-  uint32_t totalColsU = static_cast<uint32_t>(totalCols);
-  std::string out;
-  out.reserve(24 + cols * rows * 8 + namesLen);
-  out.append(reinterpret_cast<char*>(&magic), 4);
-  out.append(reinterpret_cast<char*>(&rowsU), 4);
-  out.append(reinterpret_cast<char*>(&cols), 4);
-  out.append(reinterpret_cast<char*>(&namesLen), 4);
-  out.append(reinterpret_cast<char*>(&totalRowsU), 4);
-  out.append(reinterpret_cast<char*>(&totalColsU), 4);
-  for (const auto& col : columns) {
-    std::vector<double> padded = col;
-    padded.resize(rows, NAN);
-    out.append(reinterpret_cast<const char*>(padded.data()), rows * 8);
-  }
-  out.append(namesJson);
-  return out;
+  // One implementation, in dc_core (nodes.cpp): the script card writes its input frames with
+  // the same bytes this endpoint serves. docs/decisions/2026-11-15-python-script-card.md §五.
+  return encodeDcm2Frame(columns, names, rows, totalRows, totalCols);
 }
 
 // ── routing ────────────────────────────────────────────────────────────
@@ -776,6 +688,11 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
       Json out = Json::object({{"nodeId", Json(existing->id)},
                                {"state", Json(std::string(nodeName(existing->state)))},
                                {"resultMatrixId", Json(existing->resultMatrixId())}});
+      // Declared outputs beyond output 0 (builtin:python): their stored matrices, so a
+      // client can read them without a second kind of node. Empty for every other
+      // signature, which is why nothing outside the script card sees a new field.
+      if (!existing->extraOutputs.items().empty())
+        out.set("extraOutputs", existing->extraOutputs);
       if (existing->state == NodeState::Dirty)
         out.set("reason", Json(std::string(dirtyReasonName(existing->dirtyReason))));
       if (existing->state == NodeState::Error) {
@@ -841,6 +758,7 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
       Json out = Json::object({{"nodeId", Json(static_cast<int64_t>(id))},
                                {"state", Json(std::string(nodeName(node->state)))},
                                {"resultMatrixIds", std::move(ids)}});
+      if (!node->extraOutputs.items().empty()) out.set("extraOutputs", node->extraOutputs);
       if (node->state == NodeState::Error) {
         out.set("code", Json(node->errorCode));
         out.set("params", node->errorParams);
@@ -865,9 +783,14 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
     }
 
     if (suffix == "/cancel" && req.method == "POST") {
-      // v1 evaluation is synchronous and short; cancel exists so the client contract
-      // never changes when long jobs arrive (stage 6). Report not-running explicitly.
-      return jsonError(409, "notImplemented", Json::object({{"detail", Json("no running job to cancel")}}));
+      // A script-card run is a real child process (builtin:python), so cancel is real: it
+      // kills the process group through the same path the timeout uses. With nothing
+      // running the v1 answer is unchanged, so no client contract moved.
+      if (!nodes_->cancelRun(id))
+        return jsonError(409, "notImplemented",
+                         Json::object({{"detail", Json("no running job to cancel")}}));
+      return jsonOk(Json::object({{"nodeId", Json(static_cast<int64_t>(id))},
+                                  {"cancelled", Json(true)}}));
     }
 
     if (suffix == "/result") {

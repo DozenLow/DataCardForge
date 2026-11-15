@@ -125,6 +125,20 @@ add_executable(dc_nodes_test tests/nodes_test.cpp)
 target_link_libraries(dc_nodes_test PRIVATE dc_core)
 add_test(NAME node_registry COMMAND dc_nodes_test)
 
+# Script card (builtin:python): signature + params validation + process dispatch, end to end
+# through the vendored interpreter. The binary SKIPs (exit 0) when third_party/pyruntime is
+# not provisioned — see the header of tests/python_node_test.cpp. Threads because the /cancel
+# case signals a running evaluation from another thread.
+add_executable(dc_python_node_test tests/python_node_test.cpp)
+target_link_libraries(dc_python_node_test PRIVATE dc_core Threads::Threads)
+add_test(NAME python_node COMMAND dc_python_node_test)
+
+# The runner's own 37-case suite (backend/tests/py/test_runner.py), registered so CI runs the
+# Python half of the data channel too — it is the only oracle for the frame codec on that
+# side. Same SKIP rule as above: no runtime, no run, no failure.
+add_test(NAME py_runner
+  COMMAND bash -c "cd '${CMAKE_SOURCE_DIR}/..' && if [ -x third_party/pyruntime/bin/python3 ]; then PYTHONPATH=\"$PWD/third_party/pylib:$PWD/backend/runner\" third_party/pyruntime/bin/python3 backend/tests/py/test_runner.py; else echo 'SKIP: py_runner (no third_party/pyruntime; run scripts/fetch-python-runtime.sh)'; fi")
+
 # Path rules for the packaged UI: traversal, allow-listed extensions, SPA fallback.
 add_executable(dc_static_test tests/static_path_test.cpp)
 target_link_libraries(dc_static_test PRIVATE dc_static)

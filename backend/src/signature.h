@@ -34,6 +34,18 @@ struct FunctionSignature {
   std::string displayName;
   std::vector<SignaturePort> inputs;
   std::vector<SignatureOutput> outputs;
+  // Ports and outputs are declared by `params` instead of by this table. Only
+  // `builtin:python` sets it: a script card's ports and outputs cannot be known before the
+  // user declares them, so inputs/outputs above are an EMPTY TEMPLATE and
+  // params.portNames / params.outputs are the declaration. This is the explicit correction
+  // to "K is fixed by the signature" → "K is fixed by the declaration", never by data —
+  // docs/decisions/2026-11-15-python-script-card.md §三.
+  //
+  // Consequence for callers: port validation for such a signature is params validation
+  // (signature.cpp's declaration is not a shape), and the node still gets exactly ONE
+  // result matrix: output 0 is the display matrix, the remaining declared outputs live in
+  // ComputeNode::extraOutputs (v1 output selector plan, decision §三).
+  bool portsFromParams = false;
   // Whether a node evaluates at creation (the v2 behaviour every existing signature
   // keeps) or only when the client explicitly asks, via POST /api/nodes/{id}/compute.
   // "When does it run" is a property of the capability, not of one card: the client
@@ -50,6 +62,7 @@ std::vector<const FunctionSignature*> allSignatures();
 extern const char* const kSigExpressionColumns;
 extern const char* const kSigLinearRegression;
 extern const char* const kSigSummary;
+extern const char* const kSigPython;
 
 // The summary statistic catalog. Its ORDER is the output row order of `builtin:summary`,
 // and its ids are stable identities — never renamed, never reused, the same rule as

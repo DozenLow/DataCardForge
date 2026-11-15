@@ -7,6 +7,7 @@ namespace dc {
 const char* const kSigExpressionColumns = "builtin:expression-columns";
 const char* const kSigLinearRegression = "builtin:linear-regression";
 const char* const kSigSummary = "builtin:summary";
+const char* const kSigPython = "builtin:python";
 
 // The statistic catalog. Order == output row order. Ids are stable identities: renaming
 // one would silently re-label every stored summary card, so they are frozen here exactly
@@ -85,15 +86,41 @@ const FunctionSignature& summary() {
   return kSig;
 }
 
+// `builtin:python` — the script card. One signature carries any user algorithm; the card's
+// ports are the variables the script reads and its outputs are the names it assigns, so
+// neither can be enumerated here. inputs/outputs are an EMPTY TEMPLATE and `portsFromParams`
+// says the real shape comes from `params.portNames` / `params.outputs`; the contract
+// correction ("K fixed by the declaration, still never by data") is written down in
+// docs/decisions/2026-11-15-python-script-card.md §三.
+//
+// explicitCompute for the same reason `builtin:summary` has it — and more so: evaluating it
+// spawns an interpreter, so "creating a card" must not run anyone's code. The client gets
+// numbers only from POST /api/nodes/{id}/compute.
+const FunctionSignature& pythonScript() {
+  static const FunctionSignature kSig = [] {
+    FunctionSignature s;
+    s.id = kSigPython;
+    s.version = 1;
+    s.displayName = "python script";
+    s.inputs = {};   // declared by params.portNames (empty template, see header)
+    s.outputs = {};  // declared by params.outputs  (empty template, see header)
+    s.explicitCompute = true;
+    s.portsFromParams = true;
+    return s;
+  }();
+  return kSig;
+}
+
 const FunctionSignature* findSignature(const std::string& id) {
   if (id == kSigExpressionColumns) return &expressionColumns();
   if (id == kSigLinearRegression) return &linearRegression();
   if (id == kSigSummary) return &summary();
+  if (id == kSigPython) return &pythonScript();
   return nullptr;
 }
 
 std::vector<const FunctionSignature*> allSignatures() {
-  return {&expressionColumns(), &linearRegression(), &summary()};
+  return {&expressionColumns(), &linearRegression(), &summary(), &pythonScript()};
 }
 
 }  // namespace dc

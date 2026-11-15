@@ -4,10 +4,12 @@
 // edge would close a loop, no edge is registered (docs/decisions/2026-10-17-backend-owns-compute.md).
 #pragma once
 
+#include <atomic>
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
 #include <map>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <set>
@@ -19,6 +21,35 @@
 #include "matrix_store.h"
 
 namespace dc {
+
+// ── DCM2 frame codec (the ONLY implementation in the process) ─────────────────
+// These used to live inside http_server.cpp. They moved here because the script card's data
+// channel is part of compute, not of HTTP: the dispatch writes one frame per input port and
+// reads the runner's output frame, and dc_core must not depend on the HTTP layer (the node
+// tests link dc_core WITHOUT http_server.cpp, so calling back into it would not even link).
+// docs/decisions/2026-11-15-python-script-card.md §五: "runner 与 C++ 侧共用同一实现，不写
+// 第二份帧编码". http_server.cpp keeps its public encodeMatrixFrame() as a forwarding
+// wrapper, so the wire path and its bytes are unchanged.
+//
+// Frame layout (little-endian): magic "DCM2" u32, rows u32, cols u32, namesLen u32,
+// totalRows u32, totalCols u32 (24-byte header), data f64[rows*cols] column-major, names
+// JSON array of UTF-8 labels. A window frame carries its own rows/cols plus the full matrix
+// shape in totalRows/totalCols; a full matrix passes the same value twice.
+std::string encodeDcm2Frame(const std::vector<std::vector<double>>& columns,
+                            const std::vector<std::string>& names, size_t rows,
+                            size_t totalRows, size_t totalCols);
+// Decodes a frame body. `maxBytes` bounds the declared shape (uploads keep the 32 MiB HTTP
+// limit; a script output passes the real file size, because a legitimate result table has no
+// business being silently capped at the request-body limit).
+bool decodeDcm2Frame(const std::string& frame, std::vector<Column>* columns, std::string* err,
+                     size_t maxBytes = 32u * 1024u * 1024u);
+// Reads and decodes a frame file (script-card output frames).
+bool readDcm2FrameFile(const std::string& path, std::vector<Column>* columns, std::string* err);
+
+// Repository root discovery for the script card: the nearest ancestor of the working
+// directory (then of the executable) that holds backend/runner/runner.py. Empty when the
+// binary is not running out of a source checkout.
+std::string findRepoRoot();
 
 enum class NodeState { Dirty, Computing, Done, Error };
 
@@ -61,6 +92,13 @@ struct ComputeNode {
   std::vector<int64_t> resultMatrixIds;
   // Output 0, which is also what the legacy protocol field `resultMatrixId` reports.
   int64_t resultMatrixId() const { return resultMatrixIds.empty() ? -1 : resultMatrixIds[0]; }
+  // Declared outputs beyond output 0 (script cards only). A JSON array of
+  // {"name": "<declared output name>", "matrixId": <stored matrix>, "rows": <n>, "cols": <n>},
+  // one entry per `params.outputs[1..]`, allocated when the card is created so the ids are
+  // stable (K is fixed by the declaration: the run fills them, it never adds or drops one).
+  // Every other signature leaves this empty, which is why output semantics elsewhere do not
+  // change — the decision doc's v1 output-selector plan (§三).
+  Json extraOutputs = Json::array();
   NodeState state = NodeState::Dirty;
   // Meaningful while state == Dirty. Never overwrites a user-facing cause (see
   // markStaleLocked): "not requested yet" stays true until the client asks to compute.
@@ -146,6 +184,12 @@ class NodeRegistry {
   // nodes reading it, transitively.
   void onMatrixChanged(int64_t matrixId);
 
+  // Kill the process group of a running script-card evaluation (POST /api/nodes/{id}/cancel,
+  // the same kill path the timeout uses — decision §五). Returns false when nothing of this
+  // node is running, so the caller can keep answering "no running job to cancel". The
+  // evaluation thread then reaps the child and puts the node back to "not computed yet".
+  bool cancelRun(int64_t nodeId);
+
   std::vector<int64_t> allNodeIds() const;
 
   // Graph keys are namespaced: node ids are positive; matrix sources are -(matrixId+1).
@@ -173,6 +217,15 @@ class NodeRegistry {
   // REQUIRES mu_: mark the node dirty with a reason and drop its previous result, so
   // "dirty" always means "the numbers stored here do not describe the current inputs".
   void markStaleLocked(int64_t nodeId, DirtyReason reason);
+  // REQUIRES mu_: fill/reconcile the script card's extra output matrices with one run
+  // (builtin:python only — every other signature has no extra outputs to touch).
+  void syncExtraOutputsLocked(
+      ComputeNode& node,
+      const std::vector<std::pair<std::string, std::vector<Column>>>& extras);
+  // REQUIRES mu_: blank the numbers behind a script card's extra outputs, so a node that
+  // went dirty/error never keeps serving a previous run's tables (same rule as the result
+  // matrices).
+  void clearExtraOutputsLocked(ComputeNode& node);
   // Transition to Error, clear the stale result, publish the error event.
   // REQUIRES mu_ to be held by the caller.
   void failNodeLocked(int64_t nodeId, const std::string& code, Json params);
@@ -182,6 +235,28 @@ class NodeRegistry {
   struct PortSlice {
     size_t firstColumn = 0;
     size_t columnCount = 0;
+  };
+
+  // One script-card evaluation (`builtin:python`). Filled OUTSIDE mu_ (the interpreter runs
+  // for as long as the card's timeout allows) — see runScriptCard in nodes.cpp.
+  struct ScriptCardOutcome {
+    std::string errorCode;  // empty ⇒ success; else an Error-state code
+    Json errorParams = Json::object();
+    std::vector<Column> primary;  // declared output 0 → the node's display matrix
+    // Declared outputs 1..K-1 as (name from manifest, columns).
+    std::vector<std::pair<std::string, std::vector<Column>>> extras;
+  };
+  ScriptCardOutcome runScriptCard(int64_t nodeId, const Json& params,
+                                  const std::vector<PortBinding>& bindings,
+                                  const std::vector<PortSlice>& slices,
+                                  const std::vector<std::string>& names,
+                                  const std::vector<std::vector<double>>& data);
+
+  // Handle of one script-card run in flight, shared between the evaluation thread and
+  // /cancel: the process group to signal, and the flag the waiter polls.
+  struct PythonRun {
+    std::atomic<bool> cancelRequested{false};
+    std::atomic<int64_t> pgid{0};
   };
 
   // Resolve every binding to its current columns. The registry lock is taken per binding
@@ -207,6 +282,9 @@ class NodeRegistry {
   // are invisible to both cascade BFS and cycle detection (found by unit test).
   // v2: K outputs per node, so the owner is (nodeId, outputIndex).
   std::map<int64_t, std::pair<int64_t, int32_t>> resultOwner_;  // matrixKey(result) -> owner
+  // Script-card runs in flight, by node id. Guarded by mu_; the pid is published here so
+  // /cancel can signal it while the evaluation thread keeps waiting outside the lock.
+  std::map<int64_t, std::shared_ptr<PythonRun>> runningPython_;
 
   // Cycle check over the *dependency* direction, mirroring findDownstreamPath().
   bool wouldCycle(int64_t dependentId, int64_t dependsOnId, std::vector<int64_t>* pathOut) const;

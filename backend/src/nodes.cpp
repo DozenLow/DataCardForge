@@ -1,9 +1,34 @@
 #include "nodes.h"
 
 #include <algorithm>
+#include <chrono>
+#include <cmath>
 #include <condition_variable>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <ctime>
+#include <filesystem>
+#include <fstream>
 #include <queue>
 #include <set>
+
+#ifdef _WIN32
+#  ifndef WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
+#  endif
+#  ifndef NOMINMAX
+#    define NOMINMAX
+#  endif
+#  include <windows.h>
+#else
+#  include <fcntl.h>
+#  include <signal.h>
+#  include <sys/stat.h>
+#  include <sys/types.h>
+#  include <sys/wait.h>
+#  include <unistd.h>
+#endif
 
 #include "expression.h"
 #include "matrix_value.h"  // ShapeError (matrix-mode failures)
@@ -30,6 +55,258 @@ const char* dirtyReasonName(DirtyReason r) {
     case DirtyReason::DefinitionChanged: return "definitionChanged";
   }
   return "none";
+}
+
+// ── DCM2 frame codec ───────────────────────────────────────────────────
+// Moved here from http_server.cpp (see nodes.h for why). Behaviour is unchanged: the upload
+// path still gets the same bounds and the same error strings, and the serializer still pads
+// short columns with NaN so a frame is always rectangular.
+
+namespace {
+
+uint32_t frameReadU32LE(const unsigned char* p) {
+  return static_cast<uint32_t>(p[0]) | (static_cast<uint32_t>(p[1]) << 8) |
+         (static_cast<uint32_t>(p[2]) << 16) | (static_cast<uint32_t>(p[3]) << 24);
+}
+
+double frameReadF64LE(const unsigned char* p) {
+  uint64_t bits = 0;
+  for (int i = 7; i >= 0; --i) bits = (bits << 8) | p[i];
+  double value = 0;
+  std::memcpy(&value, &bits, sizeof value);
+  return value;
+}
+
+}  // namespace
+
+std::string encodeDcm2Frame(const std::vector<std::vector<double>>& columns,
+                            const std::vector<std::string>& names, size_t rows,
+                            size_t totalRows, size_t totalCols) {
+  Json nameArr = Json::array();
+  for (const auto& n : names) nameArr.push(Json(n));
+  std::string namesJson = nameArr.dump();
+  uint32_t magic = 0x44434D32;  // "DCM2"
+  uint32_t cols = static_cast<uint32_t>(columns.size());
+  uint32_t rowsU = static_cast<uint32_t>(rows);
+  uint32_t namesLen = static_cast<uint32_t>(namesJson.size());
+  uint32_t totalRowsU = static_cast<uint32_t>(totalRows);
+  uint32_t totalColsU = static_cast<uint32_t>(totalCols);
+  std::string out;
+  out.reserve(24 + columns.size() * rows * 8 + namesLen);
+  out.append(reinterpret_cast<char*>(&magic), 4);
+  out.append(reinterpret_cast<char*>(&rowsU), 4);
+  out.append(reinterpret_cast<char*>(&cols), 4);
+  out.append(reinterpret_cast<char*>(&namesLen), 4);
+  out.append(reinterpret_cast<char*>(&totalRowsU), 4);
+  out.append(reinterpret_cast<char*>(&totalColsU), 4);
+  for (const auto& col : columns) {
+    std::vector<double> padded = col;
+    padded.resize(rows, NAN);
+    out.append(reinterpret_cast<const char*>(padded.data()), rows * 8);
+  }
+  out.append(namesJson);
+  return out;
+}
+
+bool decodeDcm2Frame(const std::string& frame, std::vector<Column>* columns, std::string* err,
+                     size_t maxBytes) {
+  if (frame.size() < 16) {
+    *err = "frame shorter than the 16-byte header";
+    return false;
+  }
+  const auto* bytes = reinterpret_cast<const unsigned char*>(frame.data());
+  const uint32_t magic = frameReadU32LE(bytes);
+  // DCM1 is the 16-byte header (no matrix shape); DCM2 adds totalRows/totalCols (24 bytes).
+  // Uploads keep accepting both so an old client keeps working after the format grew.
+  const bool isV2 = magic == 0x44434D32u;
+  if (magic != 0x44434D31u && !isV2) {
+    *err = "bad magic (expected DCM1 or DCM2)";
+    return false;
+  }
+  const size_t headerLen = isV2 ? 24u : 16u;
+  if (frame.size() < headerLen) {
+    *err = "frame shorter than the header";
+    return false;
+  }
+  const uint32_t rows = frameReadU32LE(bytes + 4);
+  const uint32_t cols = frameReadU32LE(bytes + 8);
+  const uint32_t namesLen = frameReadU32LE(bytes + 12);
+  // Bound the shape BEFORE multiplying: rows*cols*8 can wrap uint64 for hostile headers,
+  // which would make the truncation check pass and the copy run off the buffer.
+  const uint64_t bound = static_cast<uint64_t>(maxBytes);
+  if (bound == 0 || cols > bound / 8u || namesLen > bound ||
+      (rows > 0 && cols > bound / 8u / rows)) {
+    *err = "frame shape too large";
+    return false;
+  }
+  const uint64_t dataLen = static_cast<uint64_t>(rows) * cols * 8u;
+  const uint64_t needed = static_cast<uint64_t>(headerLen) + dataLen + namesLen;
+  if (frame.size() < needed) {
+    *err = "truncated frame";
+    return false;
+  }
+  Json names;
+  if (namesLen > 0) {
+    std::string namesJson(frame.data() + headerLen + dataLen, namesLen);
+    std::string jerr;
+    if (!Json::parse(namesJson, &names, &jerr) || !names.isArray()) {
+      *err = "bad names payload: " + jerr;
+      return false;
+    }
+  }
+  columns->clear();
+  columns->reserve(cols);
+  for (uint32_t c = 0; c < cols; ++c) {
+    Column col;
+    if (names.isArray() && c < names.items().size() && names.items()[c].isString())
+      Matrix::labelParsed(names.items()[c].asString(), &col.posName, &col.annotation);
+    else
+      col.posName = "Pos." + std::to_string(c + 1);
+    col.data.resize(rows);
+    const unsigned char* base = bytes + headerLen + static_cast<size_t>(c) * rows * 8u;
+    for (uint32_t r = 0; r < rows; ++r)
+      col.data[r] = frameReadF64LE(base + static_cast<size_t>(r) * 8u);
+    columns->push_back(std::move(col));
+  }
+  return true;
+}
+
+bool readDcm2FrameFile(const std::string& path, std::vector<Column>* columns, std::string* err) {
+  std::error_code ec;
+  const std::uintmax_t size = std::filesystem::file_size(path, ec);
+  if (ec) {
+    *err = "cannot stat " + path;
+    return false;
+  }
+  std::ifstream in(path, std::ios::binary);
+  if (!in) {
+    *err = "cannot open " + path;
+    return false;
+  }
+  std::string bytes(static_cast<size_t>(size), '\0');
+  if (size > 0) in.read(bytes.data(), static_cast<std::streamsize>(size));
+  if (in.gcount() != static_cast<std::streamsize>(size)) {
+    *err = "short read on " + path;
+    return false;
+  }
+  // The file is the child's whole output, so its own size is the only honest bound — an
+  // output table has no business being capped at the HTTP request-body limit.
+  return decodeDcm2Frame(bytes, columns, err, static_cast<size_t>(size));
+}
+
+// ── repository root ────────────────────────────────────────────────────
+
+namespace {
+
+bool isRepoRoot(const std::filesystem::path& dir) {
+  std::error_code ec;
+  return std::filesystem::is_regular_file(dir / "backend" / "runner" / "runner.py", ec);
+}
+
+// Nearest ancestor of `start` that looks like this checkout. The deployment runs from the
+// repo by design (systemd WorkingDirectory=<repo>/backend) and ctest runs from
+// <repo>/backend/build, and main.cpp's findWebRoot starts from the working directory for the
+// same reason — the project has no build-time asset path and this feature does not invent
+// one.
+std::string nearestRepoRoot(const std::filesystem::path& start) {
+  if (start.empty()) return {};
+  std::filesystem::path dir = start;
+  for (int depth = 0; depth < 8; ++depth) {
+    if (isRepoRoot(dir)) return dir.string();
+    const std::filesystem::path parent = dir.parent_path();
+    if (parent.empty() || parent == dir) break;
+    dir = parent;
+  }
+  return {};
+}
+
+// The running binary's own directory, so a backend started from elsewhere by absolute path
+// still finds the checkout. POSIX has /proc/self/exe; Windows has GetModuleFileNameW.
+std::filesystem::path executablePath() {
+#ifdef _WIN32
+  std::wstring buffer(MAX_PATH * 4, L'\0');
+  const DWORD n = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
+  if (n == 0 || static_cast<size_t>(n) >= buffer.size()) return {};
+  buffer.resize(static_cast<size_t>(n));
+  return std::filesystem::path(buffer);
+#else
+  std::vector<char> buffer(4096, '\0');
+  for (;;) {
+    const ssize_t n = ::readlink("/proc/self/exe", buffer.data(), buffer.size() - 1);
+    if (n < 0) return {};
+    if (static_cast<size_t>(n) < buffer.size() - 1) {
+      buffer[static_cast<size_t>(n)] = '\0';
+      return std::filesystem::path(buffer.data());
+    }
+    buffer.resize(buffer.size() * 2, '\0');
+  }
+#endif
+}
+
+constexpr int64_t kDefaultScriptTimeoutMs = 10000;
+// The upper bound is about arithmetic, not a product decision: the value becomes a chrono
+// deadline and a signed millisecond budget in the runner's meta.
+constexpr int64_t kMaxScriptTimeoutMs = 2147483647;
+
+bool isPythonIdentifier(const std::string& name) {
+  // ASCII letter / underscore first, then letters, digits, underscore. Python's
+  // str.isidentifier() is wider, but a port name is a UI label AND a script variable; the
+  // subset both ends agree on is what this contract fixes.
+  if (name.empty()) return false;
+  const auto alpha = [](char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); };
+  const auto digit = [](char c) { return c >= '0' && c <= '9'; };
+  if (!alpha(name[0]) && name[0] != '_') return false;
+  for (size_t i = 1; i < name.size(); ++i) {
+    const char c = name[i];
+    if (!alpha(c) && !digit(c) && c != '_') return false;
+  }
+  return true;
+}
+
+// Returns the offending parameter name, or an empty string when the declaration is usable.
+// Runs at creation (→ 400 invalidParams) and again before every evaluation, because PATCH
+// /api/nodes/{id} can replace params without passing through creation — and the runner
+// answers a malformed declaration with exit 64, which would blame the script for a card bug.
+std::string validatePythonParams(const Json& params, size_t boundPorts) {
+  if (!params.isObject()) return "params";
+  const Json* script = params.find("script");
+  if (script == nullptr || !script->isString()) return "script";
+  // The declaration has to cover the bound ports exactly: zero ports is legal (a generator
+  // card prints no input), a mismatch means the card would inject a different set of names
+  // than its ports promise.
+  const Json* portNames = params.find("portNames");
+  if (portNames == nullptr || !portNames->isArray()) return "portNames";
+  if (portNames->items().size() != boundPorts) return "portNames";
+  std::set<std::string> seenPorts;
+  for (const Json& item : portNames->items()) {
+    if (!item.isString() || !isPythonIdentifier(item.asString())) return "portNames";
+    if (!seenPorts.insert(item.asString()).second) return "portNames";
+  }
+  const Json* outputs = params.find("outputs");
+  if (outputs == nullptr || !outputs->isArray() || outputs->items().empty()) return "outputs";
+  std::set<std::string> seenOutputs;
+  for (const Json& item : outputs->items()) {
+    if (!item.isString() || item.asString().empty()) return "outputs";
+    if (!seenOutputs.insert(item.asString()).second) return "outputs";
+  }
+  if (const Json* timeout = params.find("timeout_ms")) {
+    if (!timeout->isNumber() || !std::isfinite(timeout->asNumber())) return "timeout_ms";
+    const double value = timeout->asNumber();
+    if (value != std::floor(value) || value < 1 ||
+        value > static_cast<double>(kMaxScriptTimeoutMs))
+      return "timeout_ms";
+  }
+  return "";
+}
+
+}  // namespace
+
+std::string findRepoRoot() {
+  std::error_code ec;
+  const std::string fromCwd = nearestRepoRoot(std::filesystem::current_path(ec));
+  if (!fromCwd.empty()) return fromCwd;
+  const std::filesystem::path exe = executablePath();
+  return exe.empty() ? std::string() : nearestRepoRoot(exe.parent_path());
 }
 
 void EventBus::publish(Json event) {
@@ -185,7 +462,23 @@ NodeRegistry::CreateResult NodeRegistry::createV2(const std::string& signatureId
   // missing REQUIRED ports here (rather than failing later inside evaluation) keeps the
   // contract where the spec puts it: the signature is the shape of the card.
   // See docs/architecture/port-semantics-v1.md §inputs.
-  {
+  //
+  // `portsFromParams` (builtin:python) is the documented exception: the signature is an
+  // empty template, so there are no declared ports to match — the DECLARATION in params is
+  // validated instead, and its port count must match the bindings exactly
+  // (docs/decisions/2026-11-15-python-script-card.md §三).
+  size_t nOutputs = sig->outputs.size();
+  if (sig->portsFromParams) {
+    const std::string badParam = validatePythonParams(params, inputs.size());
+    if (!badParam.empty()) {
+      CreateResult refused;
+      refused.errorCode = "invalidParams";
+      return refused;
+    }
+    // Output 0 is always the display matrix; the remaining declared outputs are allocated
+    // below as `extraOutputs`.
+    nOutputs = 1;
+  } else {
     std::set<std::string> bound;
     for (const auto& b : inputs) bound.insert(b.portId.empty() ? b.varName : b.portId);
     for (const auto& binding : bound) {
@@ -226,14 +519,34 @@ NodeRegistry::CreateResult NodeRegistry::createV2(const std::string& signatureId
   int64_t nodeId = nextNodeId_++;
   CreateResult created = createLocked(&nodes_, &dependents_, &dependencies_, &resultOwner_,
                                       store_, nodeId, signatureId, inputs, "", params,
-                                      sig->outputs.size());
-  // `explicitCompute` signatures are born "not requested": the result matrices exist (K is
-  // fixed by the signature) but hold no numbers until the client asks. Saying so here —
-  // rather than in the HTTP layer — keeps the status honest for every caller, fixtures
-  // included.
+                                      nOutputs);
   if (sig->explicitCompute && created.nodeId >= 0) {
     auto it = nodes_.find(created.nodeId);
-    if (it != nodes_.end()) it->second.dirtyReason = DirtyReason::NotRequested;
+    if (it != nodes_.end()) {
+      // `explicitCompute` signatures are born "not requested": the result matrices exist (K
+      // is fixed by the signature) but hold no numbers until the client asks. Saying so here
+      // — rather than in the HTTP layer — keeps the status honest for every caller, fixtures
+      // included.
+      it->second.dirtyReason = DirtyReason::NotRequested;
+      // A portsFromParams card declares its outputs, so their matrices are allocated NOW
+      // (K is fixed by the declaration, not by the run): the ids stay stable for the life of
+      // the card and a run only fills them.
+      if (sig->portsFromParams) {
+        const Json* declaredOutputs = params.find("outputs");
+        Json extras = Json::array();
+        if (declaredOutputs != nullptr && declaredOutputs->isArray()) {
+          for (size_t i = 1; i < declaredOutputs->items().size(); ++i) {
+            const int64_t matrixId = store_->insert(Matrix{});
+            resultOwner_[matrixKey(matrixId)] = {created.nodeId, static_cast<int32_t>(i)};
+            extras.push(Json::object({{"name", Json(declaredOutputs->items()[i].asString())},
+                                      {"matrixId", Json(matrixId)},
+                                      {"rows", Json(static_cast<int64_t>(0))},
+                                      {"cols", Json(static_cast<int64_t>(0))}}));
+          }
+        }
+        it->second.extraOutputs = std::move(extras);
+      }
+    }
   }
   return created;
 }
@@ -308,6 +621,11 @@ bool NodeRegistry::remove(int64_t nodeId, bool* hadDependents) {
   dependents_.erase(nodeId);
   // K outputs: release every result matrix this node owns.
   std::vector<int64_t> results = it->second.resultMatrixIds;
+  // Script-card extra outputs are node results as well.
+  for (const Json& extra : it->second.extraOutputs.items()) {
+    if (extra["matrixId"].isNumber())
+      results.push_back(static_cast<int64_t>(extra["matrixId"].asNumber()));
+  }
   for (int64_t resultId : results) resultOwner_.erase(matrixKey(resultId));
   nodes_.erase(it);
   for (int64_t resultId : results) store_->remove(resultId);
@@ -459,6 +777,683 @@ bool NodeRegistry::gatherInputs(const std::vector<PortBinding>& bindings,
   return true;
 }
 
+// ── script cards (builtin:python) ──────────────────────────────────────
+//
+// A script card is a function: its ports arrive as name bindings, its outputs are collected
+// by name, and data crosses the process boundary ONLY as DCM2 frames in files — stdout is
+// never a data channel (docs/decisions/2026-11-15-python-script-card.md §五). The
+// interpreter runs in a clean-room child: cleared environment, cwd = a unique temporary
+// directory, killed as a process GROUP on timeout or /cancel. The runner is not a sandbox;
+// the boundary is process isolation plus a pinned supply chain, not code review.
+
+namespace {
+
+constexpr int kRunnerExitScriptError = 2;     // the script raised
+constexpr int kRunnerExitOutput = 3;          // a declared output is missing or not float64
+constexpr int kRunnerExitRuntimeMissing = 5;  // numpy / dcm2.py could not be imported
+constexpr int kRunnerExitSyntax = 6;          // the script does not compile
+constexpr size_t kScriptStderrTailBytes = 4096;
+
+bool writeFileBytes(const std::filesystem::path& path, const std::string& bytes) {
+  std::error_code ec;
+  std::filesystem::create_directories(path.parent_path(), ec);
+  std::ofstream out(path, std::ios::binary | std::ios::trunc);
+  if (!out) return false;
+  out.write(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+  return out.good();
+}
+
+bool readFileBytes(const std::filesystem::path& path, std::string* bytes) {
+  std::error_code ec;
+  const std::uintmax_t size = std::filesystem::file_size(path, ec);
+  if (ec) return false;
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return false;
+  bytes->assign(static_cast<size_t>(size), '\0');
+  if (size > 0) in.read(bytes->data(), static_cast<std::streamsize>(size));
+  return in.gcount() == static_cast<std::streamsize>(size);
+}
+
+// Last `maxBytes` bytes of a file. A failure's explanation sits at the END of a traceback,
+// and a script that prints in a loop must not make us allocate its whole log.
+std::string readFileTail(const std::filesystem::path& path, size_t maxBytes) {
+  std::error_code ec;
+  const std::uintmax_t size = std::filesystem::file_size(path, ec);
+  if (ec || size == 0) return {};
+  const size_t want = static_cast<size_t>(std::min<std::uintmax_t>(size, maxBytes));
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return {};
+  in.seekg(static_cast<std::streamoff>(size - want));
+  std::string out(want, '\0');
+  in.read(out.data(), static_cast<std::streamsize>(want));
+  out.resize(static_cast<size_t>(in.gcount()));
+  return out;
+}
+
+// The runner writes one JSON line first ({"error":"invalidOutput","output":...}) and a human
+// sentence after it. Lifting the fields keeps the client on code+params instead of parsing
+// prose (protocol v1: the UI localises from the code and its params).
+Json firstStderrJson(const std::string& stderrText) {
+  const size_t eol = stderrText.find('\n');
+  const std::string line =
+      stderrText.substr(0, eol == std::string::npos ? stderrText.size() : eol);
+  if (line.empty() || line.front() != '{') return Json();
+  Json parsed;
+  std::string parseError;
+  if (!Json::parse(line, &parsed, &parseError) || !parsed.isObject()) return Json();
+  return parsed;
+}
+
+void sleepMillis(int millis) {
+#ifdef _WIN32
+  ::Sleep(static_cast<DWORD>(millis));
+#else
+  struct timespec ts;
+  ts.tv_sec = millis / 1000;
+  ts.tv_nsec = static_cast<long>(millis % 1000) * 1000000L;
+  ::nanosleep(&ts, nullptr);
+#endif
+}
+
+// Unique scratch directory for one run: ports.json, the frames and the child's cwd all live
+// here, so two cards can never see each other's files.
+bool makeTempDir(std::filesystem::path* out) {
+  std::error_code ec;
+  const std::filesystem::path parent = std::filesystem::temp_directory_path(ec);
+  if (ec) return false;
+#ifdef _WIN32
+  for (int attempt = 0; attempt < 64; ++attempt) {
+    const std::filesystem::path candidate =
+        parent / ("dcpy-" + std::to_string(::GetCurrentProcessId()) + "-" +
+                  std::to_string(::GetTickCount64()) + "-" + std::to_string(attempt));
+    if (std::filesystem::create_directory(candidate, ec)) {
+      *out = candidate;
+      return true;
+    }
+    ec.clear();
+  }
+  return false;
+#else
+  std::string pattern = (parent / "dcpy-XXXXXX").string();
+  std::vector<char> buffer(pattern.begin(), pattern.end());
+  buffer.push_back('\0');
+  if (::mkdtemp(buffer.data()) == nullptr) return false;
+  *out = std::filesystem::path(buffer.data());
+  return true;
+#endif
+}
+
+// Removes the run's scratch directory on every exit path (success, error, timeout, cancel).
+struct TempDirGuard {
+  std::filesystem::path dir;
+  ~TempDirGuard() {
+    if (dir.empty()) return;
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+  }
+};
+
+// The vendored interpreter: DC_PYRUNTIME wins outright — a broken override is reported, never
+// silently replaced by the checkout's copy — else <repo>/third_party/pyruntime.
+struct PythonRuntime {
+  std::filesystem::path dir;
+  std::filesystem::path python;  // <dir>/bin/python3 (python.exe on Windows)
+};
+
+PythonRuntime resolvePythonRuntime(std::string* howMissing) {
+  PythonRuntime runtime;
+  const char* override = std::getenv("DC_PYRUNTIME");
+  if (override != nullptr && override[0] != '\0') {
+    runtime.dir = std::filesystem::path(override);
+  } else {
+    const std::string repo = findRepoRoot();
+    if (repo.empty()) {
+      *howMissing =
+          "not running out of a source checkout (no backend/runner/runner.py above the "
+          "working directory) and DC_PYRUNTIME is unset";
+      return runtime;
+    }
+    runtime.dir = std::filesystem::path(repo) / "third_party" / "pyruntime";
+  }
+  std::error_code ec;
+  // The path is used after the child chdir()ed into the scratch directory, so a relative
+  // DC_PYRUNTIME must be resolved against the caller's cwd now, not there.
+  runtime.dir = std::filesystem::absolute(runtime.dir, ec);
+  if (ec) {
+    *howMissing = "cannot resolve the runtime path " + runtime.dir.string();
+    runtime.python.clear();
+    return runtime;
+  }
+#ifdef _WIN32
+  const char* kPythonExecutable = "python.exe";
+#else
+  const char* kPythonExecutable = "python3";
+#endif
+  runtime.python = runtime.dir / "bin" / kPythonExecutable;
+  if (!std::filesystem::is_regular_file(runtime.python, ec)) {
+    *howMissing = "no interpreter at " + runtime.python.string();
+    runtime.python.clear();
+  }
+  return runtime;
+}
+
+struct ScriptPaths {
+  std::filesystem::path tmp;     // scratch directory = the child's cwd
+  std::filesystem::path in;      // tmp/in: ports.json + one frame per port
+  std::filesystem::path out;     // tmp/out.dcm2 (declared output 0)
+  std::filesystem::path meta;    // tmp/meta.json (carries the script text)
+  std::filesystem::path runner;  // <repo>/backend/runner/runner.py
+  std::filesystem::path python;  // <runtime>/bin/python3
+  std::filesystem::path pylib;   // <repo>/third_party/pylib
+};
+
+struct ProcessOutcome {
+  bool launched = false;
+  bool timedOut = false;
+  bool cancelled = false;
+  int exitCode = -1;
+  std::string launchError;
+};
+
+#ifndef _WIN32
+
+// fork + execve. Everything the child needs is prepared BEFORE the fork: between fork and
+// exec only async-signal-safe calls are allowed (no allocation, no C++ objects), because the
+// other server threads keep running and the child inherits their locks.
+ProcessOutcome runPythonChild(const ScriptPaths& paths, int64_t timeoutMs,
+                              std::atomic<bool>* cancelRequested,
+                              std::atomic<int64_t>* pgidSlot) {
+  ProcessOutcome outcome;
+  std::vector<std::string> argvStorage = {paths.python.string(),
+                                          paths.runner.string(),
+                                          "--in",
+                                          paths.in.string(),
+                                          "--out",
+                                          paths.out.string(),
+                                          "--meta",
+                                          paths.meta.string()};
+  std::vector<char*> argv;
+  argv.reserve(argvStorage.size() + 1);
+  for (std::string& arg : argvStorage) argv.push_back(const_cast<char*>(arg.c_str()));
+  argv.push_back(nullptr);
+  // Cleared environment: PATH and PYTHONPATH are the only things a card run inherits
+  // (decision §五). numpy arrives through PYTHONPATH, so the child needs no site-packages.
+  std::vector<std::string> envStorage = {
+      "PATH=/usr/bin:/bin",
+      "PYTHONPATH=" + paths.pylib.string(),
+  };
+  std::vector<char*> envp;
+  envp.reserve(envStorage.size() + 1);
+  for (std::string& kv : envStorage) envp.push_back(const_cast<char*>(kv.c_str()));
+  envp.push_back(nullptr);
+  const std::string stdoutPath = (paths.tmp / "stdout.log").string();
+  const std::string stderrPath = (paths.tmp / "stderr.log").string();
+  const std::string cwd = paths.tmp.string();
+  char* const program = argv[0];
+
+  if (cancelRequested->load()) {
+    outcome.cancelled = true;
+    return outcome;
+  }
+  const pid_t pid = ::fork();
+  if (pid < 0) {
+    outcome.launchError = "fork failed (errno " + std::to_string(errno) + ")";
+    return outcome;
+  }
+  if (pid == 0) {
+    // Child. async-signal-safe calls only from here on.
+    ::setpgid(0, 0);  // own process group: a timeout kills the script AND anything it spawned
+    const int nullIn = ::open("/dev/null", O_RDONLY);
+    if (nullIn >= 0) {
+      ::dup2(nullIn, STDIN_FILENO);
+      ::close(nullIn);
+    }
+    const int outFd = ::open(stdoutPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (outFd >= 0) {
+      ::dup2(outFd, STDOUT_FILENO);
+      ::close(outFd);
+    }
+    const int errFd = ::open(stderrPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (errFd >= 0) {
+      ::dup2(errFd, STDERR_FILENO);
+      ::close(errFd);
+    }
+    if (::chdir(cwd.c_str()) != 0) ::_exit(126);
+    ::execve(program, argv.data(), envp.data());
+    ::_exit(127);
+  }
+  // Parent. Publish the group id before waiting, so /cancel has something to signal.
+  outcome.launched = true;
+  // Both sides call setpgid (the standard idiom): the child may still be between fork and
+  // its own setpgid(0, 0), and until one of them runs, the group pid does not exist — a
+  // timeout or /cancel racing into kill(-pid) would hit ESRCH and then block forever below.
+  ::setpgid(pid, 0);  // EACCES once the child has exec'd; harmless, the group is already there
+  pgidSlot->store(static_cast<int64_t>(pid));
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+  for (;;) {
+    int status = 0;
+    const pid_t reaped = ::waitpid(pid, &status, WNOHANG);
+    if (reaped == pid) {
+      pgidSlot->store(0);  // the group id is no longer ours to signal
+      outcome.exitCode = WIFEXITED(status)
+                             ? WEXITSTATUS(status)
+                             : 128 + (WIFSIGNALED(status) ? WTERMSIG(status) : 0);
+      // /cancel kills from the HTTP thread, so the kill can be what ended the child before
+      // this poll noticed the flag. A clean exit still wins (the run finished on its own);
+      // anything else is the cancel, not a script failure.
+      const bool cleanExit = WIFEXITED(status) && WEXITSTATUS(status) == 0;
+      outcome.cancelled = cancelRequested->load() && !cleanExit;
+      outcome.timedOut = false;
+      return outcome;
+    }
+    if (reaped < 0 && errno != EINTR) {
+      // ECHILD: someone else reaped our child. Never expected — report it, do not hang.
+      pgidSlot->store(0);
+      outcome.launchError = "waitpid failed (errno " + std::to_string(errno) + ")";
+      return outcome;
+    }
+    if (cancelRequested->load() || std::chrono::steady_clock::now() >= deadline) {
+      const bool cancelled = cancelRequested->load();
+      const int64_t pgid = pgidSlot->load();
+      if (pgid > 1) ::kill(static_cast<pid_t>(-pgid), SIGKILL);
+      while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+      }
+      pgidSlot->store(0);
+      outcome.cancelled = cancelled;
+      outcome.timedOut = !cancelled;
+      return outcome;
+    }
+    sleepMillis(5);
+  }
+}
+
+#else  // _WIN32
+
+// CreateProcessW. Correctness is verified on Linux only (the spec's stance); what matters
+// here is that the SAME contract holds — cleared environment, cwd = the scratch directory,
+// the child terminated on timeout/cancel — and that the branch compiles.
+ProcessOutcome runPythonChild(const ScriptPaths& paths, int64_t timeoutMs,
+                              std::atomic<bool>* cancelRequested,
+                              std::atomic<int64_t>* pgidSlot) {
+  ProcessOutcome outcome;
+  const auto quote = [](const std::filesystem::path& p) { return L"\"" + p.wstring() + L"\""; };
+  const std::wstring command = quote(paths.python) + L" " + quote(paths.runner) + L" --in " +
+                               quote(paths.in) + L" --out " + quote(paths.out) + L" --meta " +
+                               quote(paths.meta);
+  std::vector<wchar_t> commandLine(command.begin(), command.end());
+  commandLine.push_back(L'\0');
+
+  // Environment block: PATH + PYTHONPATH only, then the double NUL that ends it.
+  std::vector<wchar_t> environment;
+  const auto appendVar = [&environment](const std::wstring& kv) {
+    environment.insert(environment.end(), kv.begin(), kv.end());
+    environment.push_back(L'\0');
+  };
+  appendVar(L"PATH=" + paths.python.parent_path().wstring() + L";C:\\Windows\\System32");
+  appendVar(L"PYTHONPATH=" + paths.pylib.wstring());
+  environment.push_back(L'\0');
+
+  SECURITY_ATTRIBUTES inheritable{};
+  inheritable.nLength = sizeof inheritable;
+  inheritable.bInheritHandle = TRUE;
+  const std::wstring stdoutPath = (paths.tmp / "stdout.log").wstring();
+  const std::wstring stderrPath = (paths.tmp / "stderr.log").wstring();
+  HANDLE handleIn = ::CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                  &inheritable, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  HANDLE handleOut =
+      ::CreateFileW(stdoutPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    &inheritable, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  HANDLE handleErr =
+      ::CreateFileW(stderrPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    &inheritable, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  STARTUPINFOW startup{};
+  startup.cb = sizeof startup;
+  startup.dwFlags = STARTF_USESTDHANDLES;
+  startup.hStdInput = handleIn;
+  startup.hStdOutput = handleOut;
+  startup.hStdError = handleErr;
+  PROCESS_INFORMATION process{};
+  const std::wstring cwd = paths.tmp.wstring();
+  const BOOL started = ::CreateProcessW(
+      paths.python.wstring().c_str(), commandLine.data(), nullptr, nullptr, TRUE,
+      CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_UNICODE_ENVIRONMENT,
+      environment.data(), cwd.c_str(), &startup, &process);
+  if (handleIn != INVALID_HANDLE_VALUE) ::CloseHandle(handleIn);
+  if (handleOut != INVALID_HANDLE_VALUE) ::CloseHandle(handleOut);
+  if (handleErr != INVALID_HANDLE_VALUE) ::CloseHandle(handleErr);
+  if (!started) {
+    outcome.launchError = "CreateProcessW failed (error " +
+                          std::to_string(static_cast<long long>(::GetLastError())) + ")";
+    return outcome;
+  }
+  ::CloseHandle(process.hThread);
+  outcome.launched = true;
+  pgidSlot->store(static_cast<int64_t>(process.dwProcessId));
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+  for (;;) {
+    if (::WaitForSingleObject(process.hProcess, 5) == WAIT_OBJECT_0) break;
+    if (cancelRequested->load() || std::chrono::steady_clock::now() >= deadline) {
+      const bool cancelled = cancelRequested->load();
+      ::TerminateProcess(process.hProcess, 1);
+      ::WaitForSingleObject(process.hProcess, 5000);
+      outcome.cancelled = cancelled;
+      outcome.timedOut = !cancelled;
+      break;
+    }
+  }
+  DWORD exitCode = 1;
+  ::GetExitCodeProcess(process.hProcess, &exitCode);
+  outcome.exitCode = static_cast<int>(exitCode);
+  // Same attribution rule as POSIX: a non-zero exit after a cancel request IS the cancel.
+  if (!outcome.timedOut && !outcome.cancelled)
+    outcome.cancelled = cancelRequested->load() && outcome.exitCode != 0;
+  pgidSlot->store(0);
+  ::CloseHandle(process.hProcess);
+  return outcome;
+}
+
+#endif  // _WIN32
+
+// Exit code → node error code. The lead-verified spectrum is 0/1/2/3/5/6/64: 1 (output frame
+// write failure) and 64 (caller error) are the runner failing, never the user's script, so
+// they map to internalError and carry stderr as the detail.
+const char* scriptErrorCodeForExit(int exitCode) {
+  switch (exitCode) {
+    case kRunnerExitScriptError: return "scriptError";
+    case kRunnerExitOutput: return "invalidOutput";
+    case kRunnerExitRuntimeMissing: return "runtimeMissing";
+    case kRunnerExitSyntax: return "syntaxError";
+    default: return "internalError";
+  }
+}
+
+// Error detail shared by every failing exit: the code decides the sentence, the stderr tail
+// explains it ("stderr 一律进错误详情字段").
+Json scriptErrorParams(int exitCode, const std::string& stderrTail) {
+  Json params = Json::object();
+  params.set("exitCode", Json(static_cast<int64_t>(exitCode)));
+  if (!stderrTail.empty()) params.set("stderr", Json(stderrTail));
+  const Json structured = firstStderrJson(stderrTail);
+  if (structured.isObject()) {
+    // Protocol convention: the offending name travels as `name`.
+    if (const Json* output = structured.find("output");
+        output != nullptr && output->isString())
+      params.set("name", *output);
+    for (const char* key : {"reason", "line", "col", "msg", "error"}) {
+      const Json* value = structured.find(key);
+      if (value != nullptr && (value->isString() || value->isNumber())) params.set(key, *value);
+    }
+  }
+  return params;
+}
+
+}  // namespace
+
+NodeRegistry::ScriptCardOutcome NodeRegistry::runScriptCard(
+    int64_t nodeId, const Json& params, const std::vector<PortBinding>& bindings,
+    const std::vector<PortSlice>& slices, const std::vector<std::string>& names,
+    const std::vector<std::vector<double>>& data) {
+  ScriptCardOutcome outcome;
+  const std::string badParam = validatePythonParams(params, bindings.size());
+  if (!badParam.empty()) {
+    outcome.errorCode = "invalidParams";
+    outcome.errorParams = Json::object({{"name", Json(badParam)}});
+    return outcome;
+  }
+  const Json& script = *params.find("script");
+  const Json& portNames = *params.find("portNames");
+  const Json& outputs = *params.find("outputs");
+  int64_t timeoutMs = kDefaultScriptTimeoutMs;
+  if (const Json* timeout = params.find("timeout_ms"))
+    timeoutMs = static_cast<int64_t>(timeout->asNumber());
+
+  const std::string repo = findRepoRoot();
+  std::string runtimeNote;
+  const PythonRuntime runtime = resolvePythonRuntime(&runtimeNote);
+  if (runtime.python.empty() || repo.empty()) {
+    outcome.errorCode = "runtimeMissing";
+    outcome.errorParams = Json::object(
+        {{"detail", Json(runtime.python.empty()
+                             ? runtimeNote
+                             : std::string("no backend/runner/runner.py above the working "
+                                           "directory; not a source checkout"))}});
+    return outcome;
+  }
+  ScriptPaths paths;
+  paths.python = runtime.python;
+  paths.runner = std::filesystem::path(repo) / "backend" / "runner" / "runner.py";
+  paths.pylib = std::filesystem::path(repo) / "third_party" / "pylib";
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(paths.runner, ec)) {
+    outcome.errorCode = "runtimeMissing";
+    outcome.errorParams = Json::object({{"detail", Json("missing " + paths.runner.string())}});
+    return outcome;
+  }
+  if (!makeTempDir(&paths.tmp)) {
+    outcome.errorCode = "internalError";
+    outcome.errorParams = Json::object({{"detail", Json("cannot create a scratch directory")}});
+    return outcome;
+  }
+  TempDirGuard scratch{paths.tmp};
+  paths.in = paths.tmp / "in";
+  paths.out = paths.tmp / "out.dcm2";
+  paths.meta = paths.tmp / "meta.json";
+
+  // ── input frames: one DCM2 frame per bound port, written with the SHARED encoder ──
+  Json ports = Json::array();
+  for (size_t k = 0; k < bindings.size(); ++k) {
+    if (k >= slices.size() || k >= portNames.items().size()) {
+      outcome.errorCode = "internalError";
+      outcome.errorParams =
+          Json::object({{"detail", Json("input port bookkeeping mismatch")}});
+      return outcome;
+    }
+    const PortSlice& slice = slices[k];
+    std::vector<std::vector<double>> columns;
+    std::vector<std::string> labels;
+    size_t rows = 0;  // per port: two ports are two independent matrices
+    for (size_t j = 0; j < slice.columnCount; ++j) {
+      columns.push_back(data[slice.firstColumn + j]);
+      labels.push_back(names[slice.firstColumn + j]);
+      rows = std::max(rows, columns.back().size());
+    }
+    const std::string frameName = "port" + std::to_string(k) + ".dcm2";
+    if (!writeFileBytes(paths.in / frameName,
+                        encodeDcm2Frame(columns, labels, rows, rows, columns.size()))) {
+      outcome.errorCode = "internalError";
+      outcome.errorParams = Json::object({{"detail", Json("cannot write " + frameName)}});
+      return outcome;
+    }
+    ports.push(Json::object({{"port", Json(portNames.items()[k].asString())},
+                             {"frame", Json(frameName)}}));
+  }
+  if (!writeFileBytes(paths.in / "ports.json", ports.dump())) {
+    outcome.errorCode = "internalError";
+    outcome.errorParams = Json::object({{"detail", Json("cannot write ports.json")}});
+    return outcome;
+  }
+  // The script travels inside meta.json (the runner's interface); it is a file, not an argv
+  // element, so no quoting or length limit can corrupt it.
+  const Json meta = Json::object({{"script", script},
+                                  {"outputs", outputs},
+                                  {"timeout_ms", Json(timeoutMs)}});
+  if (!writeFileBytes(paths.meta, meta.dump())) {
+    outcome.errorCode = "internalError";
+    outcome.errorParams = Json::object({{"detail", Json("cannot write meta.json")}});
+    return outcome;
+  }
+
+  // ── run: registered while it executes so /cancel can signal the process group ──
+  auto run = std::make_shared<PythonRun>();
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    runningPython_[nodeId] = run;
+  }
+  const ProcessOutcome process =
+      runPythonChild(paths, timeoutMs, &run->cancelRequested, &run->pgid);
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = runningPython_.find(nodeId);
+    if (it != runningPython_.end() && it->second == run) runningPython_.erase(it);
+  }
+
+  if (!process.launched) {
+    outcome.errorCode = "internalError";
+    outcome.errorParams = Json::object(
+        {{"detail", Json(process.launchError.empty() ? std::string("the interpreter did not start")
+                                                     : process.launchError)}});
+    return outcome;
+  }
+  const std::string stderrTail = readFileTail(paths.tmp / "stderr.log", kScriptStderrTailBytes);
+  if (process.cancelled) {
+    // /cancel killed the group. The node goes back to "not computed yet" (see the commit
+    // phase): a user stopping a run is not a failed script.
+    outcome.errorCode = "runCancelled";
+    return outcome;
+  }
+  if (process.timedOut) {
+    outcome.errorCode = "scriptTimeout";
+    outcome.errorParams = Json::object({{"timeout_ms", Json(timeoutMs)}});
+    if (!stderrTail.empty()) outcome.errorParams.set("stderr", Json(stderrTail));
+    return outcome;
+  }
+  if (process.exitCode != 0) {
+    outcome.errorCode = scriptErrorCodeForExit(process.exitCode);
+    outcome.errorParams = scriptErrorParams(process.exitCode, stderrTail);
+    return outcome;
+  }
+
+  // ── success: output 0 is the display matrix, the rest are the declared extra outputs ──
+  std::string decodeError;
+  if (!readDcm2FrameFile(paths.out.string(), &outcome.primary, &decodeError)) {
+    outcome.errorCode = "internalError";
+    outcome.errorParams =
+        Json::object({{"detail", Json("cannot read out.dcm2: " + decodeError)}});
+    return outcome;
+  }
+  std::string manifestText;
+  if (!readFileBytes(paths.tmp / "out.manifest.json", &manifestText)) {
+    outcome.errorCode = "internalError";
+    outcome.errorParams = Json::object({{"detail", Json("the runner wrote no manifest")}});
+    return outcome;
+  }
+  Json manifest;
+  std::string manifestError;
+  if (!Json::parse(manifestText, &manifest, &manifestError) || !manifest.isArray()) {
+    outcome.errorCode = "internalError";
+    outcome.errorParams =
+        Json::object({{"detail", Json("bad manifest: " + manifestError)}});
+    return outcome;
+  }
+  // K is fixed by the declaration: a run fills the declared outputs, it never changes how
+  // many there are (decision §三).
+  if (manifest.items().size() != outputs.items().size()) {
+    outcome.errorCode = "internalError";
+    outcome.errorParams =
+        Json::object({{"expected", Json(static_cast<int64_t>(outputs.items().size()))},
+                      {"got", Json(static_cast<int64_t>(manifest.items().size()))}});
+    return outcome;
+  }
+  for (size_t i = 1; i < manifest.items().size(); ++i) {
+    const Json& entry = manifest.items()[i];
+    const std::string frameName = entry["frame"].isString() ? entry["frame"].asString() : "";
+    const std::string declaredName = entry["name"].isString() ? entry["name"].asString() : "";
+    if (frameName.empty() || declaredName.empty()) {
+      outcome.errorCode = "internalError";
+      outcome.errorParams =
+          Json::object({{"detail", Json("manifest entry without name/frame")}});
+      return outcome;
+    }
+    std::vector<Column> columns;
+    if (!readDcm2FrameFile((paths.tmp / frameName).string(), &columns, &decodeError)) {
+      outcome.errorCode = "internalError";
+      outcome.errorParams =
+          Json::object({{"detail", Json("cannot read " + frameName + ": " + decodeError)}});
+      return outcome;
+    }
+    outcome.extras.emplace_back(declaredName, std::move(columns));
+  }
+  return outcome;
+}
+
+bool NodeRegistry::cancelRun(int64_t nodeId) {
+  std::shared_ptr<PythonRun> run;
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    auto it = runningPython_.find(nodeId);
+    if (it == runningPython_.end()) return false;
+    run = it->second;
+  }
+  // The waiter polls the same flag, so a kill that loses this race still ends the run; the
+  // direct signal is what makes /cancel immediate instead of "within one poll interval".
+  run->cancelRequested.store(true);
+  const int64_t pgid = run->pgid.load();
+#ifndef _WIN32
+  if (pgid > 1) ::kill(static_cast<pid_t>(-pgid), SIGKILL);
+#endif
+  (void)pgid;
+  return true;
+}
+
+// Reconcile the card's extra output matrices with one successful run. REQUIRES mu_.
+// The ids are allocated at creation so they stay stable; this fills them and handles the one
+// case that can change the count — a params edit, which is still a declaration change and
+// never data.
+void NodeRegistry::syncExtraOutputsLocked(
+    ComputeNode& node,
+    const std::vector<std::pair<std::string, std::vector<Column>>>& extras) {
+  const std::vector<Json> existing = node.extraOutputs.items();
+  Json list = Json::array();
+  for (size_t i = 0; i < extras.size(); ++i) {
+    int64_t matrixId = -1;
+    if (i < existing.size() && existing[i]["matrixId"].isNumber())
+      matrixId = static_cast<int64_t>(existing[i]["matrixId"].asNumber());
+    bool reused = false;
+    if (matrixId >= 0) {
+      reused = store_->replace(matrixId, extras[i].second);
+      if (!reused) matrixId = -1;
+    }
+    if (matrixId < 0) {
+      matrixId = store_->insert(Matrix(extras[i].second));
+      resultOwner_[matrixKey(matrixId)] = {node.id, static_cast<int32_t>(i + 1)};
+    }
+    const size_t rows = extras[i].second.empty() ? 0 : extras[i].second.front().data.size();
+    list.push(Json::object({{"name", Json(extras[i].first)},
+                            {"matrixId", Json(matrixId)},
+                            {"rows", Json(static_cast<int64_t>(rows))},
+                            {"cols", Json(static_cast<int64_t>(extras[i].second.size()))}}));
+  }
+  // Surplus matrices (the declaration shrank): release them instead of leaking a result.
+  for (size_t i = extras.size(); i < existing.size(); ++i) {
+    if (!existing[i]["matrixId"].isNumber()) continue;
+    const int64_t matrixId = static_cast<int64_t>(existing[i]["matrixId"].asNumber());
+    resultOwner_.erase(matrixKey(matrixId));
+    store_->remove(matrixId);
+  }
+  node.extraOutputs = std::move(list);
+}
+
+void NodeRegistry::clearExtraOutputsLocked(ComputeNode& node) {
+  if (node.extraOutputs.items().empty()) return;
+  // Keep the declared names and matrix ids (the client may still point at them) but drop the
+  // numbers AND the recorded shape: a stale "rows: 3, cols: 2" next to an empty matrix is the
+  // same lie as a stale result.
+  Json blank = Json::array();
+  for (const Json& extra : node.extraOutputs.items()) {
+    const int64_t matrixId =
+        extra["matrixId"].isNumber() ? static_cast<int64_t>(extra["matrixId"].asNumber()) : -1;
+    if (matrixId >= 0) store_->replace(matrixId, {});
+    blank.push(Json::object(
+        {{"name", Json(extra["name"].isString() ? extra["name"].asString() : std::string())},
+         {"matrixId", Json(matrixId)},
+         {"rows", Json(static_cast<int64_t>(0))},
+         {"cols", Json(static_cast<int64_t>(0))}}));
+  }
+  node.extraOutputs = std::move(blank);
+}
+
 void NodeRegistry::failNodeLocked(int64_t nodeId, const std::string& code, Json params) {
   auto it = nodes_.find(nodeId);
   if (it == nodes_.end()) return;
@@ -469,8 +1464,9 @@ void NodeRegistry::failNodeLocked(int64_t nodeId, const std::string& code, Json 
   node.errorParams = std::move(params);
   // Drop the previous results: an erroring node must not keep serving the numbers from
   // its last successful run (audit finding: downstream cards read stale values and
-  // still displayed state "done").
+  // still displayed state "done"). Script-card extra outputs are results too.
   for (int64_t resultId : node.resultMatrixIds) store_->replace(resultId, {});
+  clearExtraOutputsLocked(node);
   bus_->publish(Json::object({{"nodeId", Json(static_cast<int64_t>(node.id))},
                               {"state", Json(std::string("error"))},
                               {"code", Json(node.errorCode)},
@@ -524,6 +1520,11 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
   int64_t errorArgMin = -1;
   int64_t errorArgMax = -1;
   int64_t errorArgGot = -1;
+  // Script cards (builtin:python) carry their own structured detail (stderr tail, exit code,
+  // parsed manifest fields) and their declared outputs beyond output 0.
+  Json scriptErrorDetail = Json::object();
+  std::vector<std::pair<std::string, std::vector<Column>>> scriptExtras;
+  bool cancelled = false;
 
   // Qualified column references for a multi-input card: `A.pos.1`, `B.温度`,
   // `A.[地面速度_μm/s]`. The letter follows the port declaration order (A, B, C …) and the
@@ -671,6 +1672,23 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
         } else {
           outputs.push_back(std::move(table.columns));
         }
+      } else if (signatureId == kSigPython) {
+        // builtin:python — the script card. The interpreter runs OUTSIDE the registry lock
+        // (runScriptCard registers itself so POST /api/nodes/{id}/cancel can kill its
+        // process group). Params are re-validated there: a PATCH can replace them without
+        // passing through creation.
+        ScriptCardOutcome script = runScriptCard(nodeId, params, bindings, slices, names, data);
+        if (script.errorCode.empty()) {
+          outputs.push_back(std::move(script.primary));
+          scriptExtras = std::move(script.extras);
+        } else if (script.errorCode == "runCancelled") {
+          // /cancel: the user stopped the run. Handled in the commit phase (back to
+          // "not computed yet" — stopping is not a script failure).
+          cancelled = true;
+        } else {
+          errorCode = script.errorCode;
+          scriptErrorDetail = std::move(script.errorParams);
+        }
       } else {
         errorCode = "unknownSignature";
         errorName = signatureId;
@@ -733,6 +1751,13 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
                                 {"state", Json(std::string("dirty"))}}));
     return;
   }
+  if (cancelled) {
+    // POST /api/nodes/{id}/cancel killed the process group. The card holds no numbers and
+    // none are expected: "not requested yet" is the honest state, and a red card would
+    // claim the script failed when the user simply stopped it.
+    markStaleLocked(nodeId, DirtyReason::NotRequested);
+    return;
+  }
   if (!errorCode.empty()) {
     Json params_out = Json::object();
     if (errorPosition >= 0) params_out.set("position", Json(errorPosition));
@@ -768,6 +1793,12 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
       params_out.set("expected", Json(contractExpected));
       params_out.set("actual", Json(contractActual));
     }
+    // Script-card detail (stderr tail, runner exit code, the manifest fields the runner
+    // named). It carries the sentence a user reads, so the client never has to invent one.
+    if (scriptErrorDetail.isObject()) {
+      for (const auto& member : scriptErrorDetail.members())
+        params_out.set(member.first, member.second);
+    }
     failNodeLocked(nodeId, errorCode, std::move(params_out));
     return;
   }
@@ -781,6 +1812,8 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
   }
   for (size_t i = 0; i < outputs.size(); ++i)
     store_->replace(node.resultMatrixIds[i], std::move(outputs[i]));
+  // The declared outputs beyond 0 (script cards only): same commit, separate store slot.
+  if (signatureId == kSigPython) syncExtraOutputsLocked(node, scriptExtras);
   node.state = NodeState::Done;
   node.dirtyReason = DirtyReason::None;
   node.errorCode.clear();
@@ -792,6 +1825,7 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
     for (int64_t id : node.resultMatrixIds) ids.push(Json(id));
     done.set("resultMatrixIds", std::move(ids));
   }
+  if (!node.extraOutputs.items().empty()) done.set("extraOutputs", node.extraOutputs);
   bus_->publish(std::move(done));
 }
 
@@ -816,6 +1850,14 @@ std::vector<int64_t> NodeRegistry::collectSubtree(int64_t nodeId, bool includeSe
     if (nit != nodes_.end()) {
       for (int64_t resultId : nit->second.resultMatrixIds) {
         auto rit = dependents_.find(matrixKey(resultId));
+        if (rit != dependents_.end())
+          for (int64_t d : rit->second) q.push(d);
+      }
+      // Script-card extra outputs are bindable matrices too, so their dependents are part
+      // of this node's subtree.
+      for (const Json& extra : nit->second.extraOutputs.items()) {
+        if (!extra["matrixId"].isNumber()) continue;
+        auto rit = dependents_.find(matrixKey(static_cast<int64_t>(extra["matrixId"].asNumber())));
         if (rit != dependents_.end())
           for (int64_t d : rit->second) q.push(d);
       }
@@ -848,6 +1890,7 @@ void NodeRegistry::markStaleLocked(int64_t nodeId, DirtyReason reason) {
     if (store_->snapshot(resultId, &existing) && existing.columnCount() > 0) hadNumbers = true;
     store_->replace(resultId, {});
   }
+  clearExtraOutputsLocked(node);
   if (!wasDirty || hadNumbers) {
     Json event = Json::object({{"nodeId", Json(nodeId)},
                                {"state", Json(std::string("dirty"))},
