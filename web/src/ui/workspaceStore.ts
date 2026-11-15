@@ -35,13 +35,17 @@ import { lineColor } from '../charts/palette.ts';
 // the browser any more. `core/expression.ts` is NOT imported here — parsing, compiling and
 // evaluating formulas are the backend's job; the frontend only ships formula *text*.
 import {
+  PINNED_WORKSPACE_ENV,
   PYTHON_SIGNATURE,
+  cloneWorkspaceEnv,
   identityKey,
   isChartCard,
   isFormulaCard,
   isMatrixCard,
   isScriptCard,
   scriptParams,
+  workspaceEnvIsPinned,
+  workspaceEnvPackageVersion,
   type CardModel,
   type ChartCardModel,
   type FunctionCardModel,
@@ -52,6 +56,7 @@ import {
   type NodeStatus,
   type OutputBinding,
   type PortConnection,
+  type WorkspaceEnv,
   type WorkspaceSnapshot,
 } from './types.ts';
 import {
@@ -323,12 +328,15 @@ export interface RepointOffer {
 /**
  * Environment stamp of the PINNED runtime.
  *
- * The backend exposes no version field, so v1 prints the pinned toolchain these numbers come
- * from (`scripts/fetch-python-runtime.sh`: cpython 3.13.18 + numpy 2.5.4) plus the measured
- * wall clock of the last run. When the environment lock becomes a wire field (T1-B2), this
- * constant becomes the fallback for "backend did not say" instead of the only answer.
+ * DERIVED from `PINNED_WORKSPACE_ENV` (types.ts) so the pinned toolchain exists exactly once
+ * in the repo — the numbers come from `scripts/fetch-python-runtime.sh`. It is the fallback
+ * for "this workspace carries no stamp of its own"; a loaded workspace's own block wins
+ * (`workspaceEnv` below), because it describes the machine the file was saved on.
  */
-export const PYTHON_RUNTIME_STAMP = { python: '3.13.18', numpy: '2.5.4' } as const;
+export const PYTHON_RUNTIME_STAMP = {
+  python: PINNED_WORKSPACE_ENV.python,
+  numpy: workspaceEnvPackageVersion(PINNED_WORKSPACE_ENV, 'numpy'),
+} as const;
 
 /** Rows of each output the panel shows without opening the table. */
 export const SCRIPT_PREVIEW_ROWS = 5;
@@ -987,6 +995,31 @@ interface WorkspaceState {
   blockNonce: number;
   toast: Toast | null;
   locale: Locale;
+  /**
+   * The environment stamp this workspace was saved against.
+   *
+   * Loaded verbatim from the file and written back unchanged: a workspace saved on another
+   * machine must keep saying so. `workspaceEnvIsPinned` is what turns the difference into
+   * the global banner — this field is never "fixed up" on load, because a mismatch is
+   * information, not a defect to hide.
+   */
+  workspaceEnv: WorkspaceEnv;
+  /**
+   * True once the user pressed 「以当前环境重算」 on the mismatch banner.
+   *
+   * Session state on purpose: it closes the banner for THIS load only. Neither value runs,
+   * rewrites the stamp, nor blocks a manual run — the scripts were never going to run by
+   * themselves.
+   */
+  envMismatchAcknowledged: boolean;
+  /**
+   * One-time notice after loading a workspace that contains user scripts.
+   *
+   * How many script cards the loaded file holds, or `null` when there are none / the notice
+   * was dismissed. Deliberately a COUNT for the whole workspace rather than a per-card flag:
+   * "N 段用户脚本，均未自动执行" is one sentence, once, and nothing is executed to produce it.
+   */
+  scriptNotice: number | null;
   nextCardId: number;
   nextMatrixId: number;
   /**
@@ -1262,6 +1295,16 @@ interface WorkspaceState {
   // ── persistence ─────────────────────────────────────────────────────
   toSnapshot: () => WorkspaceSnapshot;
   loadSnapshot: (snapshot: WorkspaceSnapshot) => void;
+  /**
+   * Close the environment-mismatch banner ("以当前环境重算").
+   *
+   * A notice, not an action: it neither rewrites `workspaceEnv` nor runs anything. Manual
+   * runs were always available; the button only acknowledges that the user has read why the
+   * stamp differs.
+   */
+  acknowledgeEnvMismatch: () => void;
+  /** Dismiss the one-time "this workspace contains N scripts" notice. */
+  dismissScriptNotice: () => void;
   /** Return the store to its initial state (used by tests and "close all"). */
   reset: () => void;
 }
@@ -2657,6 +2700,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     helpOpen: false,
     helpSection: null,
     locale: detectLocale(),
+    // A brand-new (never-saved) workspace carries the toolchain this build is pinned to;
+    // `loadSnapshot` replaces it with whatever the file says.
+    workspaceEnv: cloneWorkspaceEnv(PINNED_WORKSPACE_ENV),
+    envMismatchAcknowledged: false,
+    scriptNotice: null,
     nextCardId: 1,
     nextMatrixId: 1,
     view: { x: 0, y: 0, zoom: 1 },
@@ -3106,6 +3154,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         summaries: {},
         // Same for each script card's last run: the nodes are gone with the cards.
         scriptRuns: {},
+        // The sentence counted the scripts of the workspace that was just emptied; leaving
+        // it up would state a fact about cards that no longer exist.
+        scriptNotice: null,
       });
     },
 
@@ -4557,6 +4608,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       return {
         version: 2,
         savedAt: new Date().toISOString(),
+        // Written unconditionally — a workspace without scripts carries the block too, so
+        // the file shape never depends on which cards happen to be open, and opening one
+        // script card later needs no migration.
+        env: cloneWorkspaceEnv(state.workspaceEnv),
         cards: state.cards,
         matrices,
         nextCardId: state.nextCardId,
@@ -4587,6 +4642,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // skipped: a hand-edited save file must not corrupt close-protection.
       const restored = normalizeRestoredCards(snapshot.cards);
       const { dependencies, droppedEdges } = rebuildDependencies(restored);
+      // "本工作区包含 N 段用户脚本，均未自动执行": one sentence for the whole file, and the
+      // number is a count of CARDS — nothing is compiled, imported or run to produce it.
+      const scriptCount = restored.filter(isScriptCard).length;
 
       set({
         cards: restored,
@@ -4612,6 +4670,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // A restored script card has no run of its own: the traceback, duration and previews
         // belonged to a node that no longer exists.
         scriptRuns: {},
+        // The stamp travels with the file, verbatim: a legacy file (no block — `migrate`
+        // fills the pinned one) or a file from another machine both land here, and the
+        // difference from this build's constants is REPORTED by the banner, never repaired.
+        workspaceEnv: cloneWorkspaceEnv(snapshot.env ?? PINNED_WORKSPACE_ENV),
+        envMismatchAcknowledged: false,
+        scriptNotice: scriptCount > 0 ? scriptCount : null,
       });
 
       if (droppedEdges > 0) {
@@ -4690,12 +4754,27 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // A reset returns the app to its initial state, including "no modal open".
         helpOpen: false,
         helpSection: null,
+        // An empty workspace is the one this build is pinned to: there is no file whose
+        // stamp could disagree, and no scripts whose non-execution needs announcing.
+        workspaceEnv: cloneWorkspaceEnv(PINNED_WORKSPACE_ENV),
+        envMismatchAcknowledged: false,
+        scriptNotice: null,
         // The plane is empty again, so bring the view back to the origin — otherwise the
         // next workspace would open panned into the void left by the previous one.
         view: { x: 0, y: 0, zoom: 1 },
         nextCardId: 1,
         nextMatrixId: 1,
       });
+    },
+
+    acknowledgeEnvMismatch() {
+      // Only the banner closes. `workspaceEnv` keeps the file's values (they are a fact
+      // about where the workspace came from) and no script is started either way.
+      set({ envMismatchAcknowledged: true });
+    },
+
+    dismissScriptNotice() {
+      set({ scriptNotice: null });
     },
   };
 });
@@ -4713,6 +4792,19 @@ export function useTranslator() {
 
 export function useCard(id: number): CardModel | undefined {
   return useWorkspace((s) => s.cards.find((c) => c.id === id));
+}
+
+/**
+ * Should the environment-mismatch banner be on screen?
+ *
+ * True when the loaded workspace's stamp differs from this build's pinned constants AND the
+ * user has not yet acknowledged it. A boolean selector (not the raw stamp) keeps the banner
+ * from re-rendering on every unrelated store change.
+ */
+export function useEnvMismatch(): boolean {
+  const env = useWorkspace((s) => s.workspaceEnv);
+  const acknowledged = useWorkspace((s) => s.envMismatchAcknowledged);
+  return !acknowledged && !workspaceEnvIsPinned(env);
 }
 
 export function useMatrix(matrixId: number): MatrixData | undefined {

@@ -34,6 +34,14 @@ const dictionaries = {
     'backend.offline': '计算后端不可达 — 数值计算全部在后端进行，请启动后端后重试',
     'backend.mismatch': '计算后端版本不兼容（{detail}）— 请更新后端或前端',
     'backend.retry': '重试连接',
+    // Workspace environment lock (top-level `env` block of the save file). The banner states
+    // the disagreement; the button only closes it — nothing here runs a script.
+    'env.mismatch': '工作区环境戳与本机不一致（工作区 python {workspace} / 本机 python {local}）',
+    'env.mismatchHint':
+      '保存工作区时钉死的工具链与本机不同。点「以当前环境重算」只是关掉这条横幅、把运行交还给你；不会自动执行任何脚本。',
+    'env.recompute': '以当前环境重算',
+    'env.dismiss': '知道了',
+    'script.notice': '本工作区包含 {n} 段用户脚本，均未自动执行',
     'status.loaded': '已加载 {name}（{rows} 行 × {cols} 列）',
     'status.loadedMany': '已加载 {count} 个文件',
     'status.fileReplaced':
@@ -367,6 +375,14 @@ const dictionaries = {
     'backend.offline': 'Compute backend unreachable — all numeric computation runs server-side; start the backend and retry',
     'backend.mismatch': 'Compute backend version mismatch ({detail}) — update the backend or frontend',
     'backend.retry': 'Retry connection',
+    // Workspace environment lock — see the zh dictionary for the rule (a notice, never a run).
+    'env.mismatch':
+      'The workspace environment stamp does not match this machine (workspace python {workspace} / machine python {local})',
+    'env.mismatchHint':
+      'The toolchain this workspace was pinned to differs from the one installed here. “Recompute with this machine” only closes this banner and leaves the runs to you — no script is ever executed automatically.',
+    'env.recompute': 'Recompute with this machine',
+    'env.dismiss': 'Got it',
+    'script.notice': 'This workspace contains {n} user script(s); none of them were run automatically',
     'status.loaded': 'Loaded {name} ({rows} rows × {cols} cols)',
     'status.loadedMany': 'Loaded {count} files',
     'status.fileReplaced':

@@ -334,9 +334,102 @@ export interface MatrixSnapshot {
   columns: Array<{ posName: string; annotation: string; data: number[] }>;
 }
 
+// ── workspace environment lock ───────────────────────────────────────────────────────
+//
+// The workspace file records the toolchain its scripts were validated against, so reopening
+// it can say "saved with python 3.13.18" instead of silently running under whatever happens
+// to be installed. Two rules make the block useful rather than decorative:
+//
+//   - It is written UNCONDITIONALLY (`toSnapshot` always stamps it), scripts or no scripts:
+//     a saved file always has the block, so the schema does not depend on the card mix and
+//     a later script card needs no second migration.
+//   - It is never repaired on load. A block that differs from this machine's constants is a
+//     fact about the save file; the UI reports the mismatch and leaves the value alone.
+
+/** One pinned wheel: what it is, the build it was fetched for, and its byte identity. */
+export interface WorkspaceEnvPackage {
+  name: string;
+  version: string;
+  /** Wheel platform tag of the pinned build (informational, never matched at runtime). */
+  platform: string;
+  /** SHA-256 of the wheel itself — the identity, not the label. */
+  sha256: string;
+}
+
+/** The environment stamp stored at the top level of a workspace file. */
+export interface WorkspaceEnv {
+  python: string;
+  packages: readonly WorkspaceEnvPackage[];
+}
+
+/**
+ * The ONE pinned toolchain table in the repository.
+ *
+ * Same source as `scripts/fetch-python-runtime.sh`: `PY_VERSION="3.13.18+20261110"`,
+ * `NUMPY_VERSION="2.5.4"`, `NUMPY_SHA256="6ffa07…062c0"`, fetched as
+ * `numpy-2.5.4-cp313-cp313-manylinux_2_27_x86_64.manylinux_2_28_x86_64.whl`. Change one,
+ * change both — v1 accepts this as the only legal value of a workspace `env` block.
+ *
+ * `workspaceStore`'s `PYTHON_RUNTIME_STAMP` is derived from this object on purpose: the
+ * stamp the script card prints and the block the save file carries cannot drift apart.
+ */
+export const PINNED_WORKSPACE_ENV = {
+  python: '3.13.18',
+  packages: [
+    {
+      name: 'numpy',
+      version: '2.5.4',
+      platform: 'cp313-manylinux_2_27_x86_64',
+      sha256: '6ffa07666f8da0eef81d149934a626d0d95fbd6838432a33e66245423a9062c0',
+    },
+  ],
+} as const satisfies WorkspaceEnv;
+
+/** A copy the caller owns (the pinned table itself is never handed out for mutation). */
+export function cloneWorkspaceEnv(env: WorkspaceEnv): WorkspaceEnv {
+  return { python: env.python, packages: env.packages.map((pkg) => ({ ...pkg })) };
+}
+
+/** Version of one pinned package, or `''` when the stamp does not mention it. */
+export function workspaceEnvPackageVersion(env: WorkspaceEnv, name: string): string {
+  return env.packages.find((pkg) => pkg.name === name)?.version ?? '';
+}
+
+/**
+ * Order-independent identity of an environment stamp.
+ *
+ * Comparing the block verbatim would call two logically identical stamps different just
+ * because `packages[]` was reordered; the signature makes the mismatch flag mean "different
+ * toolchain", not "different serialisation".
+ */
+export function workspaceEnvSignature(env: WorkspaceEnv): string {
+  const packages = env.packages
+    .map((pkg) => `${pkg.name}@${pkg.version}:${pkg.platform}#${pkg.sha256}`)
+    .sort();
+  return `python ${env.python} | ${packages.join(', ')}`;
+}
+
+export function workspaceEnvEquals(a: WorkspaceEnv, b: WorkspaceEnv): boolean {
+  return workspaceEnvSignature(a) === workspaceEnvSignature(b);
+}
+
+/** Is this workspace's stamp the one this build is pinned to? */
+export function workspaceEnvIsPinned(env: WorkspaceEnv): boolean {
+  return workspaceEnvEquals(env, PINNED_WORKSPACE_ENV);
+}
+
 export interface WorkspaceSnapshot {
   version: 2;
   savedAt: string;
+  /**
+   * Environment stamp the workspace was saved against.
+   *
+   * Optional in the TYPE because snapshots written before the lock existed are still on
+   * users' disks: `migrateWorkspace` fills those in with the pinned constants, and
+   * `toSnapshot` — the writer — always emits the field. So "absent" only ever describes a
+   * legacy file being read, never a file this app produced.
+   */
+  env?: WorkspaceEnv;
   cards: CardSnapshot[];
   matrices: MatrixSnapshot[];
   nextCardId: number;

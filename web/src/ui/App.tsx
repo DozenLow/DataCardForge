@@ -23,6 +23,7 @@ import { CardCanvas } from './components/CardCanvas.tsx';
 import { HelpDialog } from './components/HelpDialog.tsx';
 import { MenuBar } from './components/MenuBar.tsx';
 import { StatusBar } from './components/StatusBar.tsx';
+import { WorkspaceEnvBanner } from './components/WorkspaceEnvBanner.tsx';
 
 const WORKSPACE_ACCEPT = '.json,application/json';
 
@@ -350,6 +351,9 @@ export default function App() {
           </button>
         </div>
       ) : null}
+      {/* The workspace's own notices (environment stamp mismatch, "N scripts, none run")
+          sit beside the backend banner: same surface, same place, both read-only. */}
+      <WorkspaceEnvBanner />
       <CardCanvas
         onNewTable={() => void onNewTable()}
         onFilesDropped={(files: File[]) => void ingestFiles(files)}

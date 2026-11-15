@@ -19,6 +19,7 @@
  * with a human-readable reason otherwise; `readWorkspace` surfaces that as a load failure.
  */
 import { SOURCE_PORT } from './bindings.ts';
+import { PINNED_WORKSPACE_ENV, cloneWorkspaceEnv } from './types.ts';
 import type {
   CardModel,
   ChartCardModel,
@@ -27,6 +28,7 @@ import type {
   MatrixSnapshot,
   OutputBinding,
   PortConnection,
+  WorkspaceEnv,
   WorkspaceSnapshot,
 } from './types.ts';
 
@@ -266,6 +268,53 @@ function migrateMatrices(raw: unknown): MatrixSnapshot[] {
 }
 
 /**
+ * Read a workspace's environment stamp WITHOUT repairing it.
+ *
+ * Two outcomes, both deliberate:
+ *
+ *   - **No block** (a file written before the lock existed): `null`, and the caller fills in
+ *     the pinned constants. That is the entire migration — the user is not asked, nothing
+ *     else in the file changes, and the next save carries the block.
+ *   - **A block is there**: its values are returned verbatim. Differing from this machine's
+ *     constants is a property of the save file, not corruption, so it is reported in the UI
+ *     (`env.mismatch`) instead of being silently rewritten behind the user's back.
+ *
+ * Shape-validated leniently: an entry without a name is dropped, a missing `version` /
+ * `platform` / `sha256` becomes `''` (and therefore still reads as a mismatch). A block with
+ * no usable `python` string cannot describe an environment at all, so it counts as absent.
+ */
+export function readWorkspaceEnv(raw: unknown): WorkspaceEnv | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const env = raw as { python?: unknown; packages?: unknown };
+  if (typeof env.python !== 'string' || env.python.length === 0) return null;
+  const packages: Array<{ name: string; version: string; platform: string; sha256: string }> = [];
+  if (Array.isArray(env.packages)) {
+    for (const entry of env.packages) {
+      if (typeof entry !== 'object' || entry === null) continue;
+      const pkg = entry as { name?: unknown; version?: unknown; platform?: unknown; sha256?: unknown };
+      if (typeof pkg.name !== 'string' || pkg.name.length === 0) continue;
+      packages.push({
+        name: pkg.name,
+        version: asString(pkg.version),
+        platform: asString(pkg.platform),
+        sha256: asString(pkg.sha256),
+      });
+    }
+  }
+  return { python: env.python, packages };
+}
+
+/**
+ * The environment block a loaded workspace reports.
+ *
+ * A legacy file gets the pinned stamp (silently — it was written before the lock, so there
+ * is nothing to compare); a file that carries one keeps its own values.
+ */
+function workspaceEnvOf(raw: unknown): WorkspaceEnv {
+  return readWorkspaceEnv((raw as { env?: unknown } | null)?.env) ?? cloneWorkspaceEnv(PINNED_WORKSPACE_ENV);
+}
+
+/**
  * Upgrade a parsed workspace file to schema v2. v2 input passes through unchanged (only
  * shape-validated); v1 input is migrated. Any other version is refused.
  */
@@ -281,6 +330,7 @@ export function migrateWorkspace(raw: unknown): WorkspaceSnapshot {
     return {
       version: 2,
       savedAt: asString((raw as { savedAt?: unknown }).savedAt, new Date().toISOString()),
+      env: workspaceEnvOf(raw),
       cards: snapshot.cards as CardModel[],
       matrices: migrateMatrices(snapshot.matrices),
       nextCardId: asNumber((raw as { nextCardId?: unknown }).nextCardId, 1),
@@ -298,6 +348,7 @@ export function migrateWorkspace(raw: unknown): WorkspaceSnapshot {
   return {
     version: 2,
     savedAt: asString((raw as { savedAt?: unknown }).savedAt, new Date().toISOString()),
+    env: workspaceEnvOf(raw),
     cards,
     matrices: migrateMatrices(snapshot.matrices),
     nextCardId: asNumber((raw as { nextCardId?: unknown }).nextCardId, 1),

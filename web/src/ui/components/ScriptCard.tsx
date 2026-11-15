@@ -33,7 +33,6 @@ import { EditorView, keymap } from '@codemirror/view';
 
 import type { Locale } from '../i18n.ts';
 import {
-  PYTHON_RUNTIME_STAMP,
   SCRIPT_PREVIEW_ROWS,
   checkScriptName,
   countScriptOccurrences,
@@ -46,7 +45,13 @@ import {
   type ScriptRunState,
 } from '../workspaceStore.ts';
 import { portVarName } from '../bindings.ts';
-import { isFormulaCard, isMatrixCard, scriptParams, type FunctionCardModel } from '../types.ts';
+import {
+  isFormulaCard,
+  isMatrixCard,
+  scriptParams,
+  workspaceEnvPackageVersion,
+  type FunctionCardModel,
+} from '../types.ts';
 import { CardShell } from './CardShell.tsx';
 
 /**
@@ -84,6 +89,9 @@ interface ScriptLabels {
   renameHint: string;
   running: string;
   envPending: string;
+  /** Red-state band: the backend could not find a Python runtime at all. */
+  runtimeMissingTitle: string;
+  runtimeMissingHint: string;
   warnings: Record<'caseTwin' | 'keyword', string>;
   errors: Record<string, string>;
   status: Record<ScriptNameProblem['code'], string>;
@@ -115,6 +123,9 @@ const LABELS: Record<Locale, ScriptLabels> = {
     renameHint: '回车确认，Esc 取消',
     running: '运行中…',
     envPending: '运行后显示耗时',
+    runtimeMissingTitle: '未检测到 Python 运行时',
+    runtimeMissingHint:
+      '后端找不到钉死的 Python 解释器或运行器。请先执行 scripts/fetch-python-runtime.sh 取回运行时，再回来手动运行本卡；卡片其余部分仍可编辑，本次不会自动重试。',
     warnings: {
       caseTwin: '与「{name}」只差大小写，读起来容易混（已放行）',
       keyword: '「{name}」是 Python 关键字，脚本里无法引用（已放行）',
@@ -173,6 +184,9 @@ const LABELS: Record<Locale, ScriptLabels> = {
     renameHint: 'Enter to apply, Esc to cancel',
     running: 'Running…',
     envPending: 'duration appears after a run',
+    runtimeMissingTitle: 'No Python runtime found',
+    runtimeMissingHint:
+      'The backend cannot locate the pinned Python interpreter or the runner. Run scripts/fetch-python-runtime.sh to fetch the runtime, then run this card by hand; the rest of the card stays editable and nothing is retried automatically.',
     warnings: {
       caseTwin: 'Differs from "{name}" only by case — easy to misread (allowed)',
       keyword: '"{name}" is a Python keyword and cannot be referenced (allowed)',
@@ -555,6 +569,13 @@ export function ScriptCard({
   const cards = useWorkspace((state) => state.cards);
   const matrices = useWorkspace((state) => state.matrices);
   const run = useWorkspace((state) => state.scriptRuns[card.id] ?? null);
+  /**
+   * The WORKSPACE's environment stamp, not this build's pinned constants.
+   *
+   * A workspace saved on another machine must keep printing the versions it was saved with;
+   * the global banner is what says the two disagree (and the store never rewrites the block).
+   */
+  const workspaceEnv = useWorkspace((state) => state.workspaceEnv);
 
   const setScriptText = useWorkspace((state) => state.setScriptText);
   const runScriptCard = useWorkspace((state) => state.runScriptCard);
@@ -718,10 +739,27 @@ export function ScriptCard({
   const displayRows = matrices.get(card.displayMatrixId)?.rowCount() ?? 0;
   const displayCols = matrices.get(card.displayMatrixId)?.columnCount() ?? 0;
   const badge = `${card.outputs.length} ${labels.outputs} · ${displayRows}×${displayCols}`;
+  /**
+   * The stamp: the workspace's python + pinned package versions, then this browser's last
+   * duration when there is one. Read from the workspace so a mismatched save file keeps its
+   * own numbers visible on every script card instead of quietly printing the local ones.
+   */
+  const numpyVersion = workspaceEnvPackageVersion(workspaceEnv, 'numpy');
+  const stamp =
+    numpyVersion === ''
+      ? `python ${workspaceEnv.python}`
+      : `python ${workspaceEnv.python} · numpy ${numpyVersion}`;
   const env =
     run?.elapsedMs !== null && run?.elapsedMs !== undefined
-      ? `python ${PYTHON_RUNTIME_STAMP.python} · numpy ${PYTHON_RUNTIME_STAMP.numpy} · ${run.elapsedMs} ms`
-      : `python ${PYTHON_RUNTIME_STAMP.python} · numpy ${PYTHON_RUNTIME_STAMP.numpy}`;
+      ? `${stamp} · ${run.elapsedMs} ms`
+      : stamp;
+  /**
+   * The backend reached the compute path and found no usable interpreter
+   * (`runtimeMissing`). This is a STATE OF THE MACHINE, not a defect of the script, so it
+   * gets a plain red explanation and nothing is hidden: the declaration panels and the
+   * editor stay exactly as usable as they were, and no retry is started behind the user.
+   */
+  const runtimeMissing = run?.status === 'error' && run?.code === 'runtimeMissing';
 
   return (
     <CardShell
@@ -773,6 +811,35 @@ export function ScriptCard({
             py
           </span>
         </div>
+
+        {/*
+          The red band sits between the run bar and the declaration panels: it must be
+          impossible to miss, and it must not displace anything. Everything below keeps
+          rendering (and stays editable) exactly as it did before the run — a missing
+          runtime is not a reason to take the card's content away from the user.
+        */}
+        {runtimeMissing ? (
+          <div
+            className="backend-banner script-card__runtime-missing"
+            role="alert"
+            data-script-runtime-missing={card.id}
+            // The band never shrinks: a card squeezed small must lose the debug panel (which
+            // is collapsible) rather than silently drop the reason the run failed.
+            style={{ flexShrink: 0 }}
+          >
+            {/* One flowing sentence: a title, then the one-line explanation that names the
+                script which fetches the runtime. */}
+            <span>
+              <strong className="script-card__runtime-missing-title">
+                {labels.runtimeMissingTitle}
+              </strong>
+              {' — '}
+              <span className="script-card__runtime-missing-hint">
+                {labels.runtimeMissingHint}
+              </span>
+            </span>
+          </div>
+        ) : null}
 
         <div className="script-card__panels">
           {/* ── left: what the script reads ── */}
