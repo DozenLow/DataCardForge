@@ -51,6 +51,31 @@ jobs:
           sudo apt-get update -o Acquire::Retries=3
           sudo apt-get install -y --no-install-recommends build-essential cmake ninja-build libeigen3-dev
 
+      # The script-card gates (py_runner / python_node / script_check / py_fixtures /
+      # xlayer_fixture_node) need the vendored interpreter, which is NOT in the repo
+      # (third_party/ is git-ignored). Cache the verified downloads and the extracted trees:
+      # the key pins both artifacts by the first 12 hex characters of their sha256 in
+      # scripts/fetch-python-runtime.sh (50c774f66747 = CPython 3.13.18+20261110,
+      # 6ffa07666f8d = numpy 2.5.4). Bumping a pin changes the key, so a stale extraction can
+      # never be silently reused.
+      - name: Cache vendored Python runtime
+        uses: actions/cache@v4
+        with:
+          path: |
+            third_party/.cache
+            third_party/pyruntime
+            third_party/pylib
+          key: python-runtime-${{ runner.os }}-50c774f66747-6ffa07666f8d
+
+      # continue-on-error: a GitHub release / PyPI outage must not fail the job. Without the
+      # runtime the script-card tests print SKIP and exit 0 by design (see the headers of
+      # backend/tests/python_node_test.cpp and backend/tests/xlayer_fixture_node_test.cpp), so
+      # the run still proves everything that does not need an interpreter — and the cache step
+      # above normally makes this a no-op.
+      - name: Fetch vendored Python runtime
+        continue-on-error: true
+        run: bash scripts/fetch-python-runtime.sh
+
       - name: Configure & build backend
         run: |
           cmake -S backend -B backend/build -G Ninja

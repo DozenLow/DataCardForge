@@ -149,11 +149,49 @@ if(WIN32)
 endif()
 add_test(NAME script_check COMMAND dc_script_check_test)
 
+# Golden fixtures, three layers. The same backend/tests/py/fixtures/ cases are replayed by
+# each layer over the part only it can see, and every output frame is compared byte for byte
+# (names segment compared semantically — see the header of xlayer_fixture_node_test.cpp for
+# the lead's ruling):
+#
+#   py_fixtures       (below) — runner.py alone, temp output vs expected/ cmp
+#   xlayer_fixture_node        — the real HTTP surface: upload → create → compute → result
+#   web/tests/xlayerGoldenFrames.test.ts — the front end's own frame decoder
+#
+# The node layer is its own binary rather than a shelled-out script because the seams it
+# judges (DCM2 framing on the upload route, params validation of a JSON request, the compute
+# trigger, the result/window encoders) only exist inside the server process.
+add_executable(dc_xlayer_fixture_node_test tests/xlayer_fixture_node_test.cpp src/http_server.cpp ${DC_SHA_HEADER})
+target_include_directories(dc_xlayer_fixture_node_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
+add_dependencies(dc_xlayer_fixture_node_test dc_build_sha)
+target_link_libraries(dc_xlayer_fixture_node_test PRIVATE dc_core dc_static Threads::Threads)
+if(WIN32)
+  target_link_libraries(dc_xlayer_fixture_node_test PRIVATE ws2_32)
+endif()
+add_test(NAME xlayer_fixture_node COMMAND dc_xlayer_fixture_node_test)
+
+# The runner layer of the same fixtures: no server, no registry — just the interpreter the
+# script card spawns, replaying each case's --in directory and comparing its output files
+# with expected/ byte for byte. Same SKIP rule as py_runner below: no runtime, no run.
+add_test(NAME py_fixtures
+  COMMAND bash -c "cd '${CMAKE_SOURCE_DIR}/..' && if [ -x third_party/pyruntime/bin/python3 ]; then PYTHONPATH=\"$PWD/third_party/pylib:$PWD/backend/runner\" third_party/pyruntime/bin/python3 backend/tests/py/test_fixtures.py; else echo 'SKIP: py_fixtures (no third_party/pyruntime; run scripts/fetch-python-runtime.sh)'; fi")
+
 # The runner's own 37-case suite (backend/tests/py/test_runner.py), registered so CI runs the
 # Python half of the data channel too — it is the only oracle for the frame codec on that
 # side. Same SKIP rule as above: no runtime, no run, no failure.
 add_test(NAME py_runner
   COMMAND bash -c "cd '${CMAKE_SOURCE_DIR}/..' && if [ -x third_party/pyruntime/bin/python3 ]; then PYTHONPATH=\"$PWD/third_party/pylib:$PWD/backend/runner\" third_party/pyruntime/bin/python3 backend/tests/py/test_runner.py; else echo 'SKIP: py_runner (no third_party/pyruntime; run scripts/fetch-python-runtime.sh)'; fi")
+
+# Zero-special-case gate (scripts/check-zero-special-case.sh): the script card is one
+# ordinary function card, so the generic web infrastructure (bindings, dependency graph,
+# migration, card metrics, connection geometry) must not know its kind. The gate greps the
+# four discriminating literals in that layer and allows them only inside workspaceStore.ts's
+# script-card sections (lead's whitelist is documented in the script header). Registered
+# here rather than in the web job because CI's test surface is ctest + vitest, and this is a
+# cross-file invariant, not a front-end unit test. The script also self-tests its scanner
+# against synthetic files first, so "clean" can be told apart from "the scanner broke".
+add_test(NAME zero_special_case
+  COMMAND bash ${CMAKE_SOURCE_DIR}/../scripts/check-zero-special-case.sh)
 
 # Path rules for the packaged UI: traversal, allow-listed extensions, SPA fallback.
 add_executable(dc_static_test tests/static_path_test.cpp)
