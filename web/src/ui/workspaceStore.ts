@@ -13,6 +13,10 @@
  *      data rather than disappearing.
  */
 import { create } from 'zustand';
+// The script card's rename rule is "rewrite IDENTIFIER nodes only" (strings and comments
+// keep their text), which is a syntax-tree question, not a regex one. Parsing with the very
+// grammar the editor highlights with is what keeps the preview and the edit in agreement.
+import { parser as pythonParser } from '@lezer/python';
 
 import {
   MAX_ZOOM,
@@ -31,10 +35,13 @@ import { lineColor } from '../charts/palette.ts';
 // the browser any more. `core/expression.ts` is NOT imported here — parsing, compiling and
 // evaluating formulas are the backend's job; the frontend only ships formula *text*.
 import {
+  PYTHON_SIGNATURE,
   identityKey,
   isChartCard,
   isFormulaCard,
   isMatrixCard,
+  isScriptCard,
+  scriptParams,
   type CardModel,
   type ChartCardModel,
   type FunctionCardModel,
@@ -43,6 +50,7 @@ import {
   type MatrixSnapshot,
   type FileIdentity,
   type NodeStatus,
+  type OutputBinding,
   type PortConnection,
   type WorkspaceSnapshot,
 } from './types.ts';
@@ -302,6 +310,661 @@ export interface RepointOffer {
   toName: string;
 }
 
+// ── script card (`builtin:python`) ────────────────────────────────────────────────────
+//
+// The script card is ONE ordinary `FunctionCardModel` with `signatureId === 'builtin:python'`
+// (docs/decisions/2026-11-15-python-script-card.md). Nothing below invents a second card
+// model or a second graph: the ports are `inputs[]`, the outputs are `outputs[]`, the node is
+// the card's one node. What is genuinely signature-specific — the DECLARATION (variable
+// names, output identities), the two run modes and the rename rules — lives here, and only
+// here, so the generic layer (DependencyGraph, rebuildDependencies, close protection,
+// bindings, migrate, cardMetrics, connectionGeometry) stays signature-blind (decision §十).
+
+/**
+ * Environment stamp of the PINNED runtime.
+ *
+ * The backend exposes no version field, so v1 prints the pinned toolchain these numbers come
+ * from (`scripts/fetch-python-runtime.sh`: cpython 3.13.18 + numpy 2.5.4) plus the measured
+ * wall clock of the last run. When the environment lock becomes a wire field (T1-B2), this
+ * constant becomes the fallback for "backend did not say" instead of the only answer.
+ */
+export const PYTHON_RUNTIME_STAMP = { python: '3.13.18', numpy: '2.5.4' } as const;
+
+/** Rows of each output the panel shows without opening the table. */
+export const SCRIPT_PREVIEW_ROWS = 5;
+
+/** One declared output's last read, keyed by `outputId` (never by position or name). */
+export interface ScriptPreview {
+  /** Rows the stored matrix holds; 0 while the node is dirty or errored (the id survives). */
+  rows: number;
+  cols: number;
+  /** Column labels of the stored matrix (the backend's annotations). */
+  columns: string[];
+  /** First `SCRIPT_PREVIEW_ROWS` rows, row-major. */
+  head: number[][];
+}
+
+/**
+ * Session state of one script card's last run.
+ *
+ * Deliberately NOT on the card model: the card is persisted, and a traceback, a duration and
+ * a set of previews are observations of one run on this machine — restoring them from a
+ * save file would present a stale run as the current one. Same rule as the 摘要 panel's entry.
+ */
+export interface ScriptRunState {
+  status: 'idle' | 'running' | 'done' | 'error';
+  /** Which button produced this state; `null` before the first run. */
+  mode: 'clean' | 'debug' | null;
+  previews: Record<string, ScriptPreview>;
+  /** Wall clock of the last run (the "耗时" half of the environment stamp). */
+  elapsedMs: number | null;
+  /** When the last run finished (local clock, like the 摘要 panel's `computedAt`). */
+  computedAt: number | null;
+  /** Structured error identity from the backend (i18n renders it; never server prose). */
+  code: string | null;
+  /** The backend's structured error params — `stderr` carries the traceback verbatim. */
+  params: Record<string, unknown> | null;
+}
+
+/** A fresh, never-run entry. */
+export function emptyScriptRun(): ScriptRunState {
+  return {
+    status: 'idle',
+    mode: null,
+    previews: {},
+    elapsedMs: null,
+    computedAt: null,
+    code: null,
+    params: null,
+  };
+}
+
+/** Which side of the card a variable name is declared on (they share one namespace). */
+export type ScriptNamePanel = 'port' | 'output';
+
+/** Outcome of a script rename: the card either changed, or said exactly why it did not. */
+export type ScriptRenameResult =
+  | { ok: true; warning: ScriptNameProblem | null; replaced: number }
+  | { ok: false; error: ScriptNameProblem };
+
+/**
+ * Outcome of removing a declared output.
+ *
+ * `bound` carries the reading card ids so the panel can name them — "下游卡片 3 正在读它" is
+ * actionable, "无法删除" is not. Both refusals are the store's existing protection
+ * vocabulary (`blockCard` blink included), not a second mechanism.
+ */
+export type ScriptOutputRemoval =
+  | { ok: true }
+  | { ok: false; code: 'bound'; readers: number[] }
+  | { ok: false; code: 'displayOutput' }
+  | { ok: false; code: 'notFound' };
+
+/**
+ * Why a proposed variable name cannot be used, or what is merely suspicious about it.
+ *
+ * `duplicate` carries the panel the clash is on so the sentence can name the conflict
+ * ("already the name of output `result`") instead of repeating itself.
+ */
+export type ScriptNameProblem =
+  | { code: 'empty' }
+  | { code: 'notIdentifier'; name: string }
+  | { code: 'reserved'; name: string }
+  | { code: 'duplicate'; panel: ScriptNamePanel; name: string }
+  | { code: 'caseTwin'; name: string }
+  | { code: 'keyword'; name: string }
+  /** The card or the declared port/output the caller named does not exist. */
+  | { code: 'notFound' };
+
+export interface ScriptNameCheck {
+  /** Blocking problem — the rename must not be applied. */
+  error: ScriptNameProblem | null;
+  /** Non-blocking finding: allowed, but the user is warned. */
+  warning: ScriptNameProblem | null;
+}
+
+/** ASCII identifier rule the runner injects under (backend `isPythonIdentifier`). */
+const PYTHON_IDENTIFIER = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/** Names the runner owns: `A` also brings `names_a` / `shape_a`, and `meta` is its own. */
+const RESERVED_NAME_PREFIXES = ['names_', 'shape_'] as const;
+const RESERVED_NAMES = new Set(['meta']);
+
+/**
+ * Python keywords. The backend does not reject them, but a script cannot reference a name it
+ * cannot spell (`result` is fine, `for` is not), so the UI warns instead of failing later.
+ */
+const PYTHON_KEYWORDS = new Set([
+  'False', 'None', 'True', 'and', 'as', 'assert', 'async', 'await', 'break', 'class',
+  'continue', 'def', 'del', 'elif', 'else', 'except', 'finally', 'for', 'from', 'global',
+  'if', 'import', 'in', 'is', 'lambda', 'nonlocal', 'not', 'or', 'pass', 'raise', 'return',
+  'try', 'while', 'with', 'yield',
+]);
+
+/** Is `name` reserved by the runner's injected namespace? */
+export function isReservedScriptName(name: string): boolean {
+  return RESERVED_NAMES.has(name) || RESERVED_NAME_PREFIXES.some((prefix) => name.startsWith(prefix));
+}
+
+/**
+ * Judge a proposed variable name against everything else the card declares.
+ *
+ * The rules are the decision's §二, in one place so the live preview, the store action and
+ * the pre-flight run check can never disagree:
+ *   - exact same name on the other panel → refuse (one namespace, two declarations);
+ *   - same panel duplicate → refuse;
+ *   - reserved (`names_*` / `shape_*` / `meta`) → refuse;
+ *   - not an ASCII Python identifier → refuse;
+ *   - `A` vs `a` and Python keywords → WARN, never refuse (they are legal, merely confusing).
+ *
+ * The caller passes the OTHER names of the card (the one being replaced excluded), so
+ * re-typing the current name — or only changing its case — cannot collide with itself.
+ */
+export function checkScriptName(input: {
+  name: string;
+  panel: ScriptNamePanel;
+  /** Every other port name on the card (this port excluded). */
+  portNames: readonly string[];
+  /** Every other output name on the card (this output excluded). */
+  outputNames: readonly string[];
+}): ScriptNameCheck {
+  const name = input.name;
+  if (name.length === 0) return { error: { code: 'empty' }, warning: null };
+  if (!PYTHON_IDENTIFIER.test(name)) return { error: { code: 'notIdentifier', name }, warning: null };
+  if (isReservedScriptName(name)) return { error: { code: 'reserved', name }, warning: null };
+
+  const samePanel = input.panel === 'port' ? input.portNames : input.outputNames;
+  const otherPanel = input.panel === 'port' ? input.outputNames : input.portNames;
+  const otherPanelName: ScriptNamePanel = input.panel === 'port' ? 'output' : 'port';
+  if (samePanel.includes(name)) return { error: { code: 'duplicate', panel: input.panel, name }, warning: null };
+  if (otherPanel.includes(name)) {
+    return { error: { code: 'duplicate', panel: otherPanelName, name }, warning: null };
+  }
+
+  // Legal but easy to misread. A warning, never a refusal: refusing `A` because `a` exists
+  // would make the tool arbitrate a naming taste it cannot prove wrong.
+  const twin = [...samePanel, ...otherPanel].find(
+    (other) => other.toLowerCase() === name.toLowerCase(),
+  );
+  if (twin !== undefined) return { error: null, warning: { code: 'caseTwin', name: twin } };
+  if (PYTHON_KEYWORDS.has(name)) return { error: null, warning: { code: 'keyword', name } };
+  return { error: null, warning: null };
+}
+
+/**
+ * Every IDENTIFIER occurrence of `name` in `script`.
+ *
+ * Only `VariableName` nodes count, which is exactly the rule the decision asks for: a
+ * comment, a string literal or an attribute (`df.A`) is not a reference to the injected
+ * variable, so renaming must leave all three alone. Positions come from the same grammar
+ * CodeMirror highlights with, so "将替换 N 处" and the edit cannot drift apart.
+ */
+export function scriptOccurrences(script: string, name: string): Array<{ from: number; to: number }> {
+  if (name.length === 0) return [];
+  const found: Array<{ from: number; to: number }> = [];
+  pythonParser.parse(script).iterate({
+    enter(node) {
+      if (node.name !== 'VariableName') return;
+      if (script.slice(node.from, node.to) !== name) return;
+      found.push({ from: node.from, to: node.to });
+    },
+  });
+  return found;
+}
+
+/** How many identifier occurrences a rename of `name` would rewrite (the live preview). */
+export function countScriptOccurrences(script: string, name: string): number {
+  return scriptOccurrences(script, name).length;
+}
+
+/** Rewrite the identifier occurrences of `from` into `to`, leaving every other byte alone. */
+export function renameInScript(script: string, from: string, to: string): string {
+  if (from === to || from.length === 0) return script;
+  const occurrences = scriptOccurrences(script, from);
+  if (occurrences.length === 0) return script;
+  let text = script;
+  // Right to left, so earlier offsets stay valid while the text grows or shrinks.
+  for (const occurrence of occurrences.reverse()) {
+    text = text.slice(0, occurrence.from) + to + text.slice(occurrence.to);
+  }
+  return text;
+}
+
+/** `A`, `B`, … `Z`, then `A1`, `B1`, … — a birth-binding name, not a user-facing limit. */
+export function scriptPortLetter(index: number): string {
+  const letter = String.fromCharCode(65 + (index % 26));
+  const round = Math.floor(index / 26);
+  return round === 0 ? letter : `${letter}${round}`;
+}
+
+/** The first birth-binding name that nothing declares yet. */
+export function nextScriptVarName(taken: readonly string[]): string {
+  for (let index = 0; index < 26 * 10; index += 1) {
+    const candidate = scriptPortLetter(index);
+    if (!taken.includes(candidate)) return candidate;
+  }
+  return `P${taken.length + 1}`;
+}
+
+/**
+ * The next free OUTPUT name: `result`, then `result2`, `result3`, …
+ *
+ * Outputs read as "results", so they get a word rather than a letter — a card whose ports are
+ * already `A`, `B` must not grow an output called `C`, which reads like a third input.
+ */
+export function nextScriptOutputName(taken: readonly string[]): string {
+  if (!taken.includes('result')) return 'result';
+  for (let index = 2; index < 1000; index += 1) {
+    const candidate = `result${index}`;
+    if (!taken.includes(candidate)) return candidate;
+  }
+  return `out${taken.length + 1}`;
+}
+
+/**
+ * Allocate one stable edge identity (`out:N` / `in:N`).
+ *
+ * Rules from the decision (fact A), in order of importance: an existing id is NEVER
+ * renumbered when a row is removed, and a new id never collides with a surviving one. Beyond
+ * that the id is `max(existing) + 1`, which may revisit the slot a removed row left behind —
+ * safe precisely because a row that a dependent reads cannot be removed at all (the removal
+ * guard refuses it), so no live edge can point at a name that is about to mean something
+ * else. Holes are never filled while a survivor with a higher id exists, which keeps the
+ * declaration's order readable.
+ */
+function nextOrdinalId(prefix: string, ids: readonly string[]): string {
+  const pattern = new RegExp(`^${prefix}:(\\d+)$`);
+  let max = -1;
+  for (const id of ids) {
+    const match = pattern.exec(id);
+    if (match) max = Math.max(max, Number(match[1]));
+  }
+  return `${prefix}:${max + 1}`;
+}
+
+/** Next output identity of a script card (`out:N`). */
+export function nextOutputId(outputs: readonly OutputBinding[]): string {
+  return nextOrdinalId('out', outputs.map((output) => output.outputId));
+}
+
+/** Next input port identity of a script card (`in:N`). */
+export function nextInputPortId(inputs: readonly PortConnection[]): string {
+  return nextOrdinalId('in', inputs.map((input) => input.portId));
+}
+
+/**
+ * Why the card's declaration cannot be sent to the backend, or `null` when it can.
+ *
+ * Mirrors `validatePythonParams` (backend/src/nodes.cpp) so a typo never becomes a red node
+ * carrying a server-side `invalidParams`: unfilled/short `portNames`, a non-identifier or
+ * duplicate port name, an empty or duplicated output declaration. The return value is the
+ * FIELD NAME the backend would blame, which is also what the panel points at.
+ */
+export function scriptDeclarationError(card: FunctionCardModel): string | null {
+  const { portNames, outputs } = scriptParams(card);
+  if (portNames.length !== card.inputs.length) return 'portNames';
+  const ports = new Set<string>();
+  for (const name of portNames) {
+    if (!PYTHON_IDENTIFIER.test(name)) return 'portNames';
+    if (ports.has(name)) return 'portNames';
+    ports.add(name);
+  }
+  if (outputs.length === 0) return 'outputs';
+  const declared = new Set<string>();
+  for (const name of outputs) {
+    if (name.length === 0) return 'outputs';
+    if (declared.has(name)) return 'outputs';
+    declared.add(name);
+  }
+  return null;
+}
+
+/**
+ * Script skeleton for a fresh card: a comment naming the ports, then one assignable output.
+ *
+ * It is a STARTING POINT that already satisfies the declaration (one output, assigned), so
+ * the first 净室运行 either proves the plumbing or fails for a reason the user caused.
+ */
+function scriptTemplate(portNames: readonly string[]): string {
+  const header = portNames.length === 0
+    ? '# no input ports: the output still has to be a float64 matrix\n'
+    : portNames
+        .map(
+          (name) =>
+            `# ${name}: float64 matrix (column names in names_${name.toLowerCase()}, shape in shape_${name.toLowerCase()})\n`,
+        )
+        .join('');
+  const expression = portNames.length === 0 ? 'np.zeros((1, 1))' : `${portNames[0]} * 1.0`;
+  return `import numpy as np\n${header}\nresult = ${expression}\n`;
+}
+
+/**
+ * The extra fields a `builtin:python` compute answer carries beyond the typed client.
+ *
+ * `extraOutputs` (declared outputs 1..K-1, each with its stored matrix id) and the error
+ * `params` (whose `stderr` is the traceback the panel renders) are already on the wire —
+ * `backend/src/http_server.cpp` sets both — but `BackendClient.computeNode`'s declared
+ * return type names neither. Reading them through this local narrowing keeps the transport
+ * module untouched; folding the two fields into `client.ts` is the follow-up, not a second
+ * source of truth.
+ */
+interface ScriptComputeAnswer {
+  extraOutputs?: Array<{ name: string; matrixId: number; rows: number; cols: number }>;
+  params?: Record<string, unknown>;
+}
+
+/** Cards with a run on the wire: a second click must not spawn a second interpreter. */
+const scriptRunsInFlight = new Set<number>();
+
+/** Patch one card's session run state (never persisted, never on the card model). */
+function patchScriptRun(cardId: number, patch: Partial<ScriptRunState>): void {
+  useWorkspace.setState((state) => ({
+    scriptRuns: {
+      ...state.scriptRuns,
+      [cardId]: { ...(state.scriptRuns[cardId] ?? emptyScriptRun()), ...patch },
+    },
+  }));
+}
+
+/**
+ * A definition edit: the card goes dirty/`definitionChanged` and NOTHING runs.
+ *
+ * Reuse, not a new mechanism: the backend's own `updateParams` does exactly this (`dirty` +
+ * `DefinitionChanged`, nodes.cpp) and the PATCH the caller sends afterwards makes the two
+ * agree. The local mirror just turns the lamp grey before the next event arrives.
+ */
+function markScriptDefinitionChanged(cardId: number): void {
+  useWorkspace.setState((state) => ({
+    cards: state.cards.map((card) =>
+      card.id === cardId && isFormulaCard(card)
+        ? { ...card, node: card.node ? { nodeId: card.node.nodeId, state: 'dirty' } : null }
+        : card,
+    ),
+    // The previews describe the previous declaration; the ids they came from stay valid.
+    scriptRuns: state.scriptRuns[cardId]
+      ? { ...state.scriptRuns, [cardId]: { ...state.scriptRuns[cardId], previews: {} } }
+      : state.scriptRuns,
+  }));
+}
+
+/**
+ * Drop the numbers a failed or cancelled node no longer owns, keeping every id.
+ *
+ * Mirrors fact C: on `dirty`/`error`/cancel the backend zeroes the stored outputs while the
+ * matrix ids survive. A stale table under a red lamp (or under a just-cleared declaration)
+ * is the exact lie the backend already refuses to tell.
+ */
+function clearScriptResults(cardId: number): void {
+  useWorkspace.setState((state) => {
+    const card = state.cards.find((entry) => entry.id === cardId);
+    if (!card || !isFormulaCard(card)) return {};
+    const slots = [
+      card.displayMatrixId,
+      ...card.outputs
+        .map((output) => output.localMatrixId)
+        .filter((id): id is number => typeof id === 'number'),
+    ];
+    const matrices = new Map(state.matrices);
+    let touched = false;
+    for (const slot of slots) {
+      if (!matrices.has(slot)) continue;
+      matrices.set(slot, new MatrixData());
+      touched = true;
+    }
+    const run = state.scriptRuns[cardId];
+    return {
+      ...(touched ? { matrices } : {}),
+      cards: state.cards.map((entry) =>
+        entry.id === cardId && isFormulaCard(entry) ? { ...entry, result: null } : entry,
+      ),
+      ...(run ? { scriptRuns: { ...state.scriptRuns, [cardId]: { ...run, previews: {} } } } : {}),
+    };
+  });
+}
+
+/**
+ * Record the stored matrix behind every declared output.
+ *
+ * Output 0 comes from `resultMatrixIds[0]` (the display matrix, unchanged path); outputs
+ * 1..K-1 come from `extraOutputs`, in declaration order. Only ids are written here — the
+ * backend allocates them once and a run only fills them (decision §三).
+ */
+function applyScriptOutputIds(
+  cardId: number,
+  primaryIds: readonly number[],
+  extras: ReadonlyArray<{ matrixId: number }>,
+): void {
+  useWorkspace.setState((state) => ({
+    cards: state.cards.map((card) => {
+      if (card.id !== cardId || !isFormulaCard(card)) return card;
+      const outputs = card.outputs.map((output, index) => {
+        if (index === 0) {
+          return { ...output, resultMatrixId: primaryIds[0] ?? output.resultMatrixId };
+        }
+        const extra = extras[index - 1];
+        return extra ? { ...output, resultMatrixId: extra.matrixId } : output;
+      });
+      return { ...card, outputs };
+    }),
+  }));
+}
+
+/** A fresh, empty preview (never shared: a panel may mutate what it owns). */
+function emptyPreview(): ScriptPreview {
+  return { rows: 0, cols: 0, columns: [], head: [] };
+}
+
+/** Read just the first rows of one stored output matrix (never the whole table). */
+async function readScriptPreview(matrixId: number): Promise<ScriptPreview | null> {
+  const frame = await backendClient.window(matrixId, 0, SCRIPT_PREVIEW_ROWS);
+  if (!frame.ok) return null;
+  const columns = frame.data ?? [];
+  const rows = frame.rows ?? 0;
+  const head: number[][] = [];
+  for (let row = 0; row < Math.min(rows, SCRIPT_PREVIEW_ROWS); ++row) {
+    head.push(columns.map((column) => column[row] ?? NaN));
+  }
+  return {
+    rows: frame.totalRows ?? rows,
+    cols: frame.totalCols ?? columns.length,
+    columns: frame.names ?? [],
+    head,
+  };
+}
+
+/** Previews for every declared output, keyed by the identity a dependent would bind. */
+async function collectScriptPreviews(cardId: number): Promise<Record<string, ScriptPreview>> {
+  const card = useWorkspace.getState().cards.find((entry) => entry.id === cardId);
+  if (!card || !isFormulaCard(card)) return {};
+  const previews: Record<string, ScriptPreview> = {};
+  for (const output of card.outputs) {
+    previews[output.outputId] =
+      output.resultMatrixId < 0
+        ? emptyPreview()
+        : (await readScriptPreview(output.resultMatrixId)) ?? emptyPreview();
+  }
+  return previews;
+}
+
+/** Is `card` still the card this run started for, in the workspace it started in? */
+function scriptCardStillCurrent(cardId: number, epoch: number): boolean {
+  return (
+    workspaceEpoch === epoch &&
+    useWorkspace.getState().cards.some((card) => card.id === cardId && isScriptCard(card))
+  );
+}
+
+type ScriptNodeOutcome = { nodeId: number } | { aborted: true } | { code: string };
+
+/**
+ * Make sure the card has a node carrying the CURRENT declaration, and hand back its id.
+ *
+ * Creating the node is not running anything: `builtin:python` is an `explicitCompute`
+ * signature, so the node is born `dirty` / `notRequested` (fact C). That is what lets a card
+ * own a node from the moment it exists while nobody's code has executed.
+ */
+async function ensureScriptNode(
+  card: FunctionCardModel,
+  bindings: NonNullable<ReturnType<typeof portBindingsFor>>,
+  epoch: number,
+): Promise<ScriptNodeOutcome> {
+  const params = wireParams(card);
+  const existing = card.node;
+  const result = existing && existing.nodeId > 0
+    ? await backendClient.patchNode(existing.nodeId, { params, inputs: bindings })
+    : await backendClient.createNode(bindings, { signatureId: card.signatureId, params });
+  if (!result.ok) {
+    if (result.code === 'backendUnavailable') {
+      useWorkspace.setState({ backend: { state: 'offline', error: result.code } });
+    } else {
+      markNodeError(card.id, result.code ?? 'internalError', {});
+    }
+    return { code: result.code ?? 'internalError' };
+  }
+  const nodeId = result.nodeId!;
+  if (!scriptCardStillCurrent(card.id, epoch)) {
+    // The card (or the whole workspace) went away while the request was in flight; a node
+    // nobody mirrors would leak server-side, so the newer intent wins.
+    if (!existing) void backendClient.deleteNode(nodeId);
+    return { aborted: true };
+  }
+  if (!existing) {
+    applyNodeSnapshot(card.id, { nodeId, state: result.state ?? 'dirty' });
+    const ids =
+      result.resultMatrixIds ?? (result.resultMatrixId !== undefined ? [result.resultMatrixId] : []);
+    if (ids.length > 0) applyScriptOutputIds(card.id, ids, []);
+  }
+  return { nodeId };
+}
+
+/**
+ * One run, clean or debug.
+ *
+ * Both modes go through the same backend call (v1 has no session kernel); what differs is
+ * where the answer is allowed to land. 净室运行 publishes: display cache, `card.result`, and
+ * therefore every dependent chart and chained card. 调试运行 keeps the answer inside this
+ * card's panel — no display-cache write, no dependent refresh — so "debugging" can never
+ * push half-finished numbers into the graph (decision §六, fixed on day one).
+ */
+async function runScriptCardNow(cardId: number, mode: 'clean' | 'debug'): Promise<void> {
+  const state = useWorkspace.getState();
+  const card = state.cards.find((entry) => entry.id === cardId);
+  if (!card || !isScriptCard(card)) return;
+  // One run per card at a time: two overlapping clicks would spawn two interpreters and
+  // race their answers into the same panel.
+  if (scriptRunsInFlight.has(cardId)) return;
+
+  // Local pre-flight: the backend answers 400 `invalidParams` for a declaration it cannot
+  // use, and a typo deserves the panel pointing at the field, not a red lamp.
+  const declaration = scriptDeclarationError(card);
+  if (declaration !== null) {
+    patchScriptRun(cardId, {
+      status: 'error',
+      mode,
+      code: 'invalidParams',
+      params: { name: declaration },
+      elapsedMs: null,
+    });
+    return;
+  }
+
+  scriptRunsInFlight.add(cardId);
+  const epoch = workspaceEpoch;
+  const startedAt = Date.now();
+  patchScriptRun(cardId, { status: 'running', mode, code: null, params: null });
+  try {
+    const bindings = portBindingsFor(card, backendMatrixIdFor);
+    if (!bindings) {
+      // A source matrix has no server id yet (still uploading, or an upstream card with no
+      // result). Nothing authoritative to bind to — say so instead of running on air.
+      patchScriptRun(cardId, { status: 'idle', mode, code: 'upstreamPending', elapsedMs: null });
+      return;
+    }
+
+    const node = await ensureScriptNode(card, bindings, epoch);
+    if ('aborted' in node) return;
+    if ('code' in node) {
+      patchScriptRun(cardId, {
+        status: 'error',
+        mode,
+        code: node.code,
+        params: null,
+        elapsedMs: Date.now() - startedAt,
+      });
+      return;
+    }
+
+    // The one trigger for an explicit-compute signature (the 摘要 panel's rule, reused).
+    const computed = await backendClient.computeNode(node.nodeId);
+    if (!scriptCardStillCurrent(cardId, epoch)) return;
+    const answer = computed as typeof computed & ScriptComputeAnswer;
+    const elapsedMs = Date.now() - startedAt;
+
+    if (!computed.ok) {
+      if (computed.code === 'backendUnavailable') {
+        useWorkspace.setState({ backend: { state: 'offline', error: computed.code } });
+      }
+      patchScriptRun(cardId, {
+        status: 'error',
+        mode,
+        code: computed.code ?? 'internalError',
+        params: null,
+        elapsedMs,
+      });
+      return;
+    }
+
+    if (computed.state === 'error') {
+      const code = computed.code ?? 'internalError';
+      markNodeError(cardId, code, answer.params ?? {});
+      clearScriptResults(cardId);
+      patchScriptRun(cardId, {
+        status: 'error',
+        mode,
+        code,
+        params: answer.params ?? {},
+        elapsedMs,
+        computedAt: Date.now(),
+      });
+      return;
+    }
+
+    if (computed.state !== 'done') {
+      // Cancelled (`/cancel`) or declined: the node went back to "not computed yet", which
+      // is not a failure — no red lamp (fact C: 取消≠失败).
+      applyNodeSnapshot(cardId, { nodeId: node.nodeId, state: computed.state ?? 'dirty' });
+      clearScriptResults(cardId);
+      patchScriptRun(cardId, { status: 'idle', mode, code: null, params: null, elapsedMs });
+      return;
+    }
+
+    applyNodeSnapshot(cardId, { nodeId: node.nodeId, state: 'done' });
+    applyScriptOutputIds(
+      cardId,
+      computed.resultMatrixIds ?? [],
+      answer.extraOutputs ?? [],
+    );
+    const previews = await collectScriptPreviews(cardId);
+    if (!scriptCardStillCurrent(cardId, epoch)) return;
+    patchScriptRun(cardId, {
+      status: 'done',
+      mode,
+      code: null,
+      params: null,
+      elapsedMs,
+      computedAt: Date.now(),
+      previews,
+    });
+    if (mode === 'clean') {
+      // The ordinary result-cache path: display matrix + `card.result` + every dependent
+      // refreshed. Debug deliberately skips this whole line.
+      await pullResultIntoCache(cardId);
+    }
+  } finally {
+    scriptRunsInFlight.delete(cardId);
+  }
+}
+
 interface WorkspaceState {
   cards: CardModel[];
   /** Parsed matrices by id. Kept outside the cards so charts can share them. */
@@ -480,6 +1143,76 @@ interface WorkspaceState {
    */
   computeSummary: (cardId: number) => void;
 
+  // ── script card (`builtin:python`) ──────────────────────────────────
+  /**
+   * Per-card run state, keyed by card id. Never persisted and never on the card model: a
+   * traceback and a duration describe ONE run on THIS machine.
+   */
+  scriptRuns: Record<number, ScriptRunState>;
+  /**
+   * Birth binding: create a script card reading the selected cards, in the given order.
+   *
+   * One port per selected card (`in:0`, `in:1`, … with injected names `A`, `B`, …), all in
+   * matrix mode, wired through the ordinary `addDependency` — a script card's inputs are
+   * edges like any other card's, so close protection and cycle detection come for free.
+   * Data cards contribute their active file; function cards contribute their output.
+   * Returns null when nothing selected can be read (a chart, an empty formula card) or the
+   * edge would close a cycle.
+   */
+  addScriptCard: (sourceCardIds: number[]) => number | null;
+  /** Edit the script text. A definition change: the card goes dirty, the DAG is untouched. */
+  setScriptText: (cardId: number, script: string) => void;
+  /**
+   * Rename one input port's injected variable (`A` → `x`).
+   *
+   * Rewrites the identifier occurrences in the script, `params.portNames[index]` and the
+   * binding's `varName` — never the `in:N` portId, so the edge, the selection and the
+   * dependency graph are all untouched.
+   */
+  renameScriptPort: (cardId: number, portId: string, varName: string) => ScriptRenameResult;
+  /**
+   * Rename one declared output (`result` → `residual`).
+   *
+   * Rewrites the script, `params.outputs[ordinal]` and therefore the label every dependent
+   * shows; the edge keeps binding `out:N`, which never changes.
+   */
+  renameScriptOutput: (cardId: number, outputId: string, name: string) => ScriptRenameResult;
+  /**
+   * Declare one more output: `params.outputs` and `outputs[]` grow together, and the new
+   * `out:N` exists (and is bindable) from this moment — the run only fills it.
+   */
+  addScriptOutput: (cardId: number) => string | null;
+  /**
+   * Remove one declared output.
+   *
+   * Refused while a dependent reads it (`code: 'bound'`) and while it is the card's display
+   * output (`code: 'displayOutput'` — output 0 is what every existing chart and chained card
+   * points at). A refusal reuses the existing blink (`blockCard`), never a new mechanism.
+   */
+  removeScriptOutput: (cardId: number, outputId: string) => ScriptOutputRemoval;
+  /**
+   * Declare one more input port, bound to the same source as the card's first port.
+   *
+   * v1 has no source picker inside the card (picking a NEW source is a canvas gesture that
+   * already exists for every other card kind), so "+ 端口" grows the declaration on the
+   * source the card already reads. Returns the new portId, or null when there is nothing to
+   * bind to.
+   */
+  addScriptPort: (cardId: number) => string | null;
+  /**
+   * 净室运行: sync the declaration to the node, `POST .../compute`, then publish the result
+   * into the display cache and the DAG (charts and chained cards follow).
+   */
+  runScriptCard: (cardId: number) => void;
+  /**
+   * 调试运行: the same backend call, but the result only reaches this card's panel.
+   *
+   * v1 runs the clean-room path (a session kernel is phase 1's next stage); the SEMANTIC
+   * difference is already fixed: no display-cache write, no dependent refresh, so a debug run
+   * can never leak half-finished numbers into the graph.
+   */
+  debugScriptCard: (cardId: number) => void;
+
   // ── view helpers ────────────────────────────────────────────────────
   tileCards: (viewportWidth: number, viewportHeight: number) => void;
   cascadeCards: () => void;
@@ -639,6 +1372,20 @@ function normalizeRestoredCards(cards: CardModel[]): CardModel[] {
 }
 
 /**
+ * Local display-cache matrix id of one declared output, or `null` when it has none.
+ *
+ * Output 0 is the card's `displayMatrixId` — the slot every chart and every chained card
+ * has always pointed at. Outputs beyond ordinal 0 carry their own slot
+ * (`OutputBinding.localMatrixId`), which is what makes a declared `out:N` something a
+ * dependent can reference at all. The rule is signature-blind on purpose: a card that
+ * declares one output behaves exactly as it did before K > 1 existed.
+ */
+function outputLocalMatrixId(card: FunctionCardModel, index: number): number | null {
+  if (index === 0) return card.displayMatrixId;
+  return card.outputs[index]?.localMatrixId ?? null;
+}
+
+/**
  * Server id for a local matrix — with a function card's display cache resolved through its
  * owning card.
  *
@@ -649,13 +1396,18 @@ function normalizeRestoredCards(cards: CardModel[]): CardModel[] {
  * so the local→server map can never answer for it. Resolving through the owning card is
  * what lets a chart or a chained function card read a formula card's output; the backend
  * already accepts a result matrix as `sourceMatrixId`.
+ *
+ * Every declared output is resolved (not just ordinal 0): a script card's `out:2` is a
+ * result matrix like any other, and the edge to it carries no rank — only this lookup.
  */
 function backendMatrixIdFor(localMatrixId: number): number | null {
   const mapped = backendMatrixIds.get(localMatrixId);
   if (mapped !== undefined) return mapped;
   for (const card of useWorkspace.getState().cards) {
-    if (!isFormulaCard(card) || card.displayMatrixId !== localMatrixId) continue;
-    const serverId = card.outputs[0]?.resultMatrixId ?? -1;
+    if (!isFormulaCard(card)) continue;
+    const index = card.outputs.findIndex((_, i) => outputLocalMatrixId(card, i) === localMatrixId);
+    if (index < 0) continue;
+    const serverId = card.outputs[index]?.resultMatrixId ?? -1;
     return serverId > 0 ? serverId : null;
   }
   return null;
@@ -729,6 +1481,27 @@ function releaseServerMatrix(serverId: number): void {
   void backendClient.deleteMatrix(serverId);
 }
 
+/**
+ * The parameter bag as the node sees it.
+ *
+ * A parameter belongs to the SIGNATURE, not to the card
+ * (docs/decisions/2026-10-27-card-contracts.md §二), so this push ships whatever the card
+ * declares and knows nothing about which signature reads which key: a formula card sends
+ * `formulas`, a script card sends its whole declaration (`script`/`portNames`/`outputs`),
+ * and a signature with no parameters sends an empty bag. Picking keys by signature here
+ * would be the card layer second-guessing the signature layer — and it is precisely why a
+ * `builtin:python` card could not have worked through the generic push at all.
+ */
+function wireParams(card: FunctionCardModel): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(card.params)) {
+    // `undefined` is "the card has nothing to say about this parameter"; JSON would drop it
+    // anyway, but an explicit skip keeps the object inspectable in tests.
+    if (value !== undefined) out[key] = value;
+  }
+  return out;
+}
+
 async function pushFunctionCard(cardId: number): Promise<void> {
   const state = useWorkspace.getState();
   const card = state.cards.find((c) => c.id === cardId);
@@ -740,7 +1513,7 @@ async function pushFunctionCard(cardId: number): Promise<void> {
   // leaving it unusable forever.
   const bindings = portBindingsFor(card, backendMatrixIdFor);
   if (!bindings) return;
-  const params: Record<string, unknown> = { formulas: card.params.formulas };
+  const params = wireParams(card);
 
   const existing = card.node;
   // Identity of the card this push was started for: it can be closed (or the whole
@@ -1330,7 +2103,12 @@ function ownerCardOfMatrix(cards: CardModel[], matrixId: number): CardModel | nu
     if (isMatrixCard(card)) {
       if (card.sources.some((source) => source.matrixId === matrixId)) return card;
     } else if (isFormulaCard(card)) {
-      if (card.displayMatrixId === matrixId) return card;
+      // Every declared output slot belongs to the card, not only ordinal 0 — a chart or a
+      // chained card reading `out:2` must resolve back to the card that publishes it.
+      const owns = card.outputs.some(
+        (_, index) => outputLocalMatrixId(card, index) === matrixId,
+      );
+      if (owns) return card;
     }
   }
   return null;
@@ -2230,9 +3008,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         if (summaryRelease) void summaryRelease.then(releaseAll);
         else releaseAll();
       } else if (isFormulaCard(card)) {
-        // A function card owns its display cache outright; no other card references it, so
-        // it must not be left behind in the map.
+        // A function card owns its display cache — and every declared output's own slot —
+        // outright; no other card references them, so they must not be left behind.
         matrices.delete(card.displayMatrixId);
+        for (const output of card.outputs) {
+          if (output.localMatrixId !== undefined) matrices.delete(output.localMatrixId);
+        }
         // The display cache is never a registered source, so a stale entry here could only
         // come from a future change; dropping it keeps the map honest either way.
         backendMatrixIds.delete(card.displayMatrixId);
@@ -2255,9 +3036,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         matrices,
         matrixIdByIdentity,
         // The panel's node is gone with the card; the entry must not survive to describe
-        // a card id that a later card could inherit.
+        // a card id that a later card could inherit. A script card's run state (traceback,
+        // previews) describes a node that is being deleted for the same reason.
         summaries: Object.fromEntries(
           Object.entries(current.summaries).filter(([key]) => Number(key) !== id),
+        ),
+        scriptRuns: Object.fromEntries(
+          Object.entries(current.scriptRuns).filter(([key]) => Number(key) !== id),
         ),
         // An offer names a card that no longer exists; keeping it would leave a banner
         // pointing at nothing (and `applyRepoint` would silently do nothing).
@@ -2319,6 +3104,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         repointOffers: [],
         // The panels' nodes were released above; their state goes with the cards.
         summaries: {},
+        // Same for each script card's last run: the nodes are gone with the cards.
+        scriptRuns: {},
       });
     },
 
@@ -2580,9 +3367,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         matrixId ?? (isMatrixCard(sourceCard) ? sourceCard.sources[sourceCard.activeSource]?.matrixId : undefined) ??
         (isFormulaCard(sourceCard) ? sourceCard.displayMatrixId : undefined);
       if (targetMatrixId === undefined) return null;
+      // A function card owns its display cache AND every declared output's own slot, so a
+      // chained card can read `out:1` exactly like it reads the primary table. Written over
+      // `outputs[]` rather than "the display matrix", which is what makes K > 1 usable
+      // without a second kind of edge.
       const ownedMatrixIds = isMatrixCard(sourceCard)
         ? sourceCard.sources.map((entry) => entry.matrixId)
-        : [sourceCard.displayMatrixId];
+        : [
+            sourceCard.displayMatrixId,
+            ...sourceCard.outputs
+              .map((output) => output.localMatrixId)
+              .filter((id): id is number => typeof id === 'number'),
+          ];
       if (!ownedMatrixIds.includes(targetMatrixId)) return null;
       const sourceMatrix = state.matrices.get(targetMatrixId);
       if (!sourceMatrix) return null;
@@ -3274,6 +4070,360 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       set({ helpOpen: false, helpSection: null });
     },
 
+    // ── script card (`builtin:python`) ────────────────────────────────
+
+    scriptRuns: {},
+
+    addScriptCard(sourceCardIds) {
+      const state = get();
+      // Birth binding, in the order the caller listed the cards: one PORT per selected card,
+      // its injected name the next free letter. Duplicates (a card selected twice) collapse —
+      // a port is a declaration, and two ports on the same source would just be two names for
+      // the same table.
+      const seeds: Array<{ cardId: number; matrixId: number }> = [];
+      for (const sourceId of sourceCardIds) {
+        if (seeds.some((seed) => seed.cardId === sourceId)) continue;
+        const source = state.cards.find((entry) => entry.id === sourceId);
+        if (!source) continue;
+        const matrixId = chartSourceMatrixId(source);
+        if (matrixId === null) continue;
+        seeds.push({ cardId: sourceId, matrixId });
+      }
+      if (seeds.length === 0) return null;
+
+      const cardId = state.nextCardId;
+      const displayMatrixId = state.nextMatrixId;
+      const inputs: PortConnection[] = seeds.map((seed, index) => ({
+        // `in:N` is the port's identity for the life of the card: renaming the injected
+        // variable (`A` → `x`) never touches it, so no edge is ever re-pointed by a rename.
+        portId: `in:${index}`,
+        target: { type: 'matrix', cardId: seed.cardId, matrixId: seed.matrixId },
+      }));
+      const portNames = seeds.map((_, index) => scriptPortLetter(index));
+
+      // Roomy: a script card holds a code editor AND two declaration panels; the formula
+      // card's 640×480 left the editor showing nine lines.
+      const size = { width: 780, height: 640 };
+      const anchor = state.cards.find((entry) => entry.id === seeds[0].cardId);
+      const spot = placeOnPlane(
+        {
+          x: (anchor?.x ?? CARD_MARGIN) + (anchor?.width ?? 0) + 32,
+          y: (anchor?.y ?? CARD_MARGIN) + 40,
+        },
+        size,
+        state.cards,
+      );
+
+      const card: FunctionCardModel = {
+        kind: 'formula',
+        id: cardId,
+        title: '',
+        ...spot,
+        width: size.width,
+        height: size.height,
+        z: topZ() + 1,
+        createdAt: Date.now(),
+        inputs,
+        signatureId: PYTHON_SIGNATURE,
+        params: {
+          script: scriptTemplate(portNames),
+          portNames,
+          // Output 0 exists from the moment the card does: an edge to `out:0` is legal
+          // before the first run (decision §三, "声明即存在").
+          outputs: ['result'],
+        },
+        outputs: [{ outputId: 'out:0', resultMatrixId: -1 }],
+        node: null,
+        result: null,
+        // The display cache starts EMPTY: only a run fills it (the backend computes).
+        displayMatrixId,
+      };
+
+      // One edge per SOURCE card (two ports on one table = one edge, two ports), through the
+      // ordinary graph: close protection, cycle detection and the connection layer come free.
+      const portsBySource = new Map<number, string[]>();
+      for (const input of inputs) {
+        const ports = portsBySource.get(input.target.cardId) ?? [];
+        ports.push(input.portId);
+        portsBySource.set(input.target.cardId, ports);
+      }
+      for (const [sourceId, ports] of portsBySource) {
+        const cycle = state.dependencies.addDependency(cardId, sourceId, ports);
+        if (cycle) {
+          // A refused edge must not leave a half-wired card behind: the edges already
+          // accepted for THIS card go back out, and the card is never added.
+          state.dependencies.removeAllDependencies(cardId);
+          get().showToast(
+            'error',
+            translatorFor(get().locale)('status.cycle', { path: cycle.join(' → ') }),
+          );
+          return null;
+        }
+      }
+
+      const matrices = new Map(state.matrices);
+      matrices.set(displayMatrixId, new MatrixData());
+      set({
+        cards: [...state.cards, card],
+        matrices,
+        dependencies: state.dependencies,
+        nextCardId: cardId + 1,
+        nextMatrixId: displayMatrixId + 1,
+        selectedId: cardId,
+      });
+      revealCard({ ...spot, ...size });
+      // The SAME node-sync path every function card uses: the card's parameters are already
+      // the wire shape (that is why `portNames` is an array), so no signature-specific push
+      // is needed. An `explicitCompute` signature is born dirty/notRequested — creating a
+      // script card runs nobody's code.
+      void syncFunctionCard(cardId);
+      return cardId;
+    },
+
+    setScriptText(cardId, script) {
+      const state = get();
+      const card = state.cards.find((entry) => entry.id === cardId);
+      if (!card || !isScriptCard(card)) return;
+      if (scriptParams(card).script === script) return;
+      set({
+        cards: state.cards.map((entry) =>
+          entry.id === cardId && isFormulaCard(entry)
+            ? { ...entry, params: { ...entry.params, script } }
+            : entry,
+        ),
+      });
+      markScriptDefinitionChanged(cardId);
+      void syncFunctionCard(cardId);
+    },
+
+    renameScriptPort(cardId, portId, varName) {
+      const state = get();
+      const card = state.cards.find((entry) => entry.id === cardId);
+      if (!card || !isScriptCard(card)) return { ok: false, error: { code: 'notFound' } };
+      const index = card.inputs.findIndex((input) => input.portId === portId);
+      if (index < 0) return { ok: false, error: { code: 'notFound' } };
+
+      const params = scriptParams(card);
+      const portNames = [...params.portNames];
+      // A saved snapshot predating this card's last port can leave the declaration short;
+      // fill from the port ids so the array stays indexable by `inputs[]`.
+      while (portNames.length < card.inputs.length) {
+        portNames.push(card.inputs[portNames.length].portId);
+      }
+      const current = portNames[index];
+      if (current === varName) return { ok: true, warning: null, replaced: 0 };
+
+      const check = checkScriptName({
+        name: varName,
+        panel: 'port',
+        portNames: portNames.filter((_, position) => position !== index),
+        outputNames: params.outputs,
+      });
+      if (check.error) return { ok: false, error: check.error };
+
+      portNames[index] = varName;
+      const script = renameInScript(params.script, current, varName);
+      set({
+        cards: state.cards.map((entry) =>
+          entry.id === cardId && isFormulaCard(entry)
+            ? { ...entry, params: { ...entry.params, script, portNames } }
+            : entry,
+        ),
+      });
+      markScriptDefinitionChanged(cardId);
+      void syncFunctionCard(cardId);
+      return { ok: true, warning: check.warning, replaced: countScriptOccurrences(params.script, current) };
+    },
+
+    renameScriptOutput(cardId, outputId, name) {
+      const state = get();
+      const card = state.cards.find((entry) => entry.id === cardId);
+      if (!card || !isScriptCard(card)) return { ok: false, error: { code: 'notFound' } };
+      const ordinal = card.outputs.findIndex((output) => output.outputId === outputId);
+      if (ordinal < 0) return { ok: false, error: { code: 'notFound' } };
+
+      const params = scriptParams(card);
+      const outputs = [...params.outputs];
+      while (outputs.length < card.outputs.length) outputs.push('');
+      const current = outputs[ordinal];
+      if (current === name) return { ok: true, warning: null, replaced: 0 };
+
+      const check = checkScriptName({
+        name,
+        panel: 'output',
+        portNames: params.portNames,
+        outputNames: outputs.filter((_, position) => position !== ordinal),
+      });
+      if (check.error) return { ok: false, error: check.error };
+
+      // Rename = rewrite the identifier in the script + the declaration. `outputs[].outputId`
+      // is NOT touched: every dependent edge binds `out:N`, so no line can be left dangling
+      // by a rename — only its label changes.
+      outputs[ordinal] = name;
+      const script = renameInScript(params.script, current, name);
+      set({
+        cards: state.cards.map((entry) =>
+          entry.id === cardId && isFormulaCard(entry)
+            ? { ...entry, params: { ...entry.params, script, outputs } }
+            : entry,
+        ),
+      });
+      markScriptDefinitionChanged(cardId);
+      void syncFunctionCard(cardId);
+      return {
+        ok: true,
+        warning: check.warning,
+        replaced: current.length > 0 ? countScriptOccurrences(params.script, current) : 0,
+      };
+    },
+
+    addScriptOutput(cardId) {
+      const state = get();
+      const card = state.cards.find((entry) => entry.id === cardId);
+      if (!card || !isScriptCard(card)) return null;
+
+      const params = scriptParams(card);
+      const name = nextScriptOutputName([...params.portNames, ...params.outputs]);
+      const outputId = nextOutputId(card.outputs);
+      // A slot of its own, so `out:N` is something a dependent can actually reference (the
+      // local→server lookup in `backendMatrixIdFor` resolves it like any other output).
+      const localMatrixId = state.nextMatrixId;
+      const matrices = new Map(state.matrices);
+      matrices.set(localMatrixId, new MatrixData());
+      const outputs: OutputBinding[] = [
+        ...card.outputs,
+        { outputId, resultMatrixId: -1, localMatrixId },
+      ];
+      set({
+        cards: state.cards.map((entry) =>
+          entry.id === cardId && isFormulaCard(entry)
+            ? {
+                ...entry,
+                outputs,
+                params: {
+                  ...entry.params,
+                  outputs: [...params.outputs, name],
+                  // Declared but unassigned is a run failure (`missingOutput`), so the new
+                  // line is a comment pointing at the next step — never silent code.
+                  script: `${params.script.replace(/\n*$/, '\n')}\n# assign ${name} to publish this table\n`,
+                },
+              }
+            : entry,
+        ),
+        matrices,
+        nextMatrixId: localMatrixId + 1,
+      });
+      markScriptDefinitionChanged(cardId);
+      void syncFunctionCard(cardId);
+      return outputId;
+    },
+
+    removeScriptOutput(cardId, outputId) {
+      const state = get();
+      const card = state.cards.find((entry) => entry.id === cardId);
+      if (!card || !isScriptCard(card)) return { ok: false, code: 'notFound' };
+      const ordinal = card.outputs.findIndex((output) => output.outputId === outputId);
+      if (ordinal < 0) return { ok: false, code: 'notFound' };
+      if (ordinal === 0) {
+        // Output 0 is the card's display matrix: every chart and every chained card built
+        // before K > 1 points at that slot, so removing it is not a declaration edit but a
+        // re-pointing of edges nobody asked to move.
+        get().blockCard(cardId);
+        return { ok: false, code: 'displayOutput' };
+      }
+
+      // The existing protection mechanism, reused: a dependent reads a MATRIX. Refuse while
+      // one still points at this output's slot — that is the same `hasDependents` rule close
+      // protection uses, narrowed to the declaration being removed.
+      const localMatrixId = card.outputs[ordinal].localMatrixId;
+      const readers =
+        localMatrixId === undefined
+          ? []
+          : state.cards
+              .filter(
+                (other) =>
+                  other.id !== cardId &&
+                  other.inputs.some((input) => input.target.matrixId === localMatrixId),
+              )
+              .map((other) => other.id);
+      if (readers.length > 0) {
+        get().blockCard(cardId);
+        return { ok: false, code: 'bound', readers };
+      }
+
+      const params = scriptParams(card);
+      const outputs = card.outputs.filter((_, position) => position !== ordinal);
+      const names = params.outputs.filter((_, position) => position !== ordinal);
+      const matrices = new Map(state.matrices);
+      if (localMatrixId !== undefined) {
+        // The slot dies with the declaration. The server-side matrix is the node's business:
+        // the next successful run re-syncs the declared count and releases the surplus.
+        matrices.delete(localMatrixId);
+      }
+      set({
+        cards: state.cards.map((entry) =>
+          entry.id === cardId && isFormulaCard(entry)
+            ? { ...entry, outputs, params: { ...entry.params, outputs: names } }
+            : entry,
+        ),
+        matrices,
+      });
+      markScriptDefinitionChanged(cardId);
+      void syncFunctionCard(cardId);
+      return { ok: true };
+    },
+
+    addScriptPort(cardId) {
+      const state = get();
+      const card = state.cards.find((entry) => entry.id === cardId);
+      if (!card || !isScriptCard(card) || card.inputs.length === 0) return null;
+
+      // v1 binds a new port to the source the card already reads: picking a NEW source is a
+      // canvas gesture that already exists for every other card kind, and inventing a second
+      // one inside the card would be the "port-level connection" the decision rules out.
+      const first = card.inputs[0];
+      const portId = nextInputPortId(card.inputs);
+      const params = scriptParams(card);
+      const portNames = [...params.portNames];
+      while (portNames.length < card.inputs.length) {
+        portNames.push(card.inputs[portNames.length].portId);
+      }
+      portNames.push(nextScriptVarName([...portNames, ...params.outputs]));
+      const cycle = state.dependencies.addDependency(cardId, first.target.cardId, portId);
+      if (cycle) {
+        get().showToast(
+          'error',
+          translatorFor(get().locale)('status.cycle', { path: cycle.join(' → ') }),
+        );
+        return null;
+      }
+      set({
+        cards: state.cards.map((entry) =>
+          entry.id === cardId && isFormulaCard(entry)
+            ? {
+                ...entry,
+                inputs: [...entry.inputs, { portId, target: { ...first.target } }],
+                params: { ...entry.params, portNames },
+              }
+            : entry,
+        ),
+        // The graph was mutated in place; publishing the reference is what tells every
+        // `dependencies` subscriber (the connection layer) that one more port exists.
+        dependencies: state.dependencies,
+      });
+      markScriptDefinitionChanged(cardId);
+      void syncFunctionCard(cardId);
+      return portId;
+    },
+
+    runScriptCard(cardId) {
+      void runScriptCardNow(cardId, 'clean');
+    },
+
+    debugScriptCard(cardId) {
+      void runScriptCardNow(cardId, 'debug');
+    },
+
     // ── compute backend ───────────────────────────────────────────────
 
     backend: { state: 'unknown' },
@@ -3459,6 +4609,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // Panel state names nodes of the workspace being replaced; a restored card starts
         // with 未请求 like every other card.
         summaries: {},
+        // A restored script card has no run of its own: the traceback, duration and previews
+        // belonged to a node that no longer exists.
+        scriptRuns: {},
       });
 
       if (droppedEdges > 0) {
@@ -3476,9 +4629,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       void (async () => {
         // A function card's display cache is a *derived* view: its numbers come from the
         // node's result matrix server-side. Registering it as a source would create a
-        // duplicate table that nothing reads (and leak one per restore).
+        // duplicate table that nothing reads (and leak one per restore). Declared outputs
+        // beyond ordinal 0 are derived in exactly the same sense — one slot each, filled
+        // only by a run — so the exclusion is written over every output, not just the first.
         const derivedIds = new Set(
-          restored.filter(isFormulaCard).map((card) => card.displayMatrixId),
+          restored
+            .filter(isFormulaCard)
+            .flatMap((card) => [
+              card.displayMatrixId,
+              ...card.outputs
+                .map((output) => output.localMatrixId)
+                .filter((id): id is number => typeof id === 'number'),
+            ]),
         );
         const ordered = [...matrices.entries()]
           .filter(([localId]) => !derivedIds.has(localId))
@@ -3504,6 +4666,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // Uploads started for the previous workspace must not bind their server ids to the
       // new workspace's local ids; `registerUploadedMatrix` releases the copy on settle.
       matrixUploads.clear();
+      // A run in flight belongs to a node of the previous workspace; its answer must not be
+      // written into the card that inherits the same id (the epoch check catches the write,
+      // this drops the in-flight marker so the new workspace can run immediately).
+      scriptRunsInFlight.clear();
       workspaceEpoch += 1;
       lastEventSeq = 0;
       stopEventLoop();
@@ -3519,6 +4685,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // Session-only panel state dies with the workspace (like the node map above, it
         // must never be answered for a card that inherits the same id).
         summaries: {},
+        scriptRuns: {},
         toast: null,
         // A reset returns the app to its initial state, including "no modal open".
         helpOpen: false,

@@ -39,6 +39,13 @@ interface MatrixCardProps {
   onOpenFormula: (column: number) => void;
   /** Relation-enumeration card from this column and its neighbour (two cell ports). */
   onOpenRelationEnum: (column: number) => void;
+  /**
+   * New script card reading this table as a whole (one matrix port, named at birth).
+   *
+   * No column argument: a script declares the names it reads, so it binds the table rather
+   * than one of its columns — the same reason the port name, not the column, is the handle.
+   */
+  onOpenScript: () => void;
   onActivate: () => void;
   /** True while a file is being dragged over this card (it would replace its data). */
   dropTarget?: boolean;
@@ -62,6 +69,7 @@ export function MatrixCard({
   onOpenChart,
   onOpenFormula,
   onOpenRelationEnum,
+  onOpenScript,
   onActivate,
   dropTarget = false,
   onReplaceFile,
@@ -304,6 +312,16 @@ export function MatrixCard({
             }}
           >
             {t('menu.newRelationEnum')}
+          </button>
+          <button
+            type="button"
+            className="context-menu__item"
+            onClick={() => {
+              onOpenScript();
+              setMenu(null);
+            }}
+          >
+            {t('menu.newScriptCard')}
           </button>
         </Popup>
       ) : null}

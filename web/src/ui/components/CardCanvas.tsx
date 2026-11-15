@@ -29,13 +29,14 @@ import {
   setWorldElement,
 } from '../cardMetrics.ts';
 import { useTranslator, useWorkspace } from '../workspaceStore.ts';
-import { isChartCard, isFormulaCard, isMatrixCard } from '../types.ts';
+import { isChartCard, isFormulaCard, isMatrixCard, isScriptCard } from '../types.ts';
 import { ConnectionLayer } from '../ConnectionLayer.tsx';
 import { CardShell } from './CardShell.tsx';
 import { ChartCard } from './ChartCard.tsx';
 import { FormulaCard, type ResolvedInput } from './FormulaCard.tsx';
 import { EmptyState } from './EmptyState.tsx';
 import { MatrixCard } from './MatrixCard.tsx';
+import { ScriptCard } from './ScriptCard.tsx';
 
 /** Empty space kept beyond the furthest card, in px: room to keep building outward. */
 const PLANE_PAD = 900;
@@ -121,6 +122,7 @@ export function CardCanvas({
   const applyRepointsForOwner = useWorkspace((s) => s.applyRepointsForOwner);
   const renameOutputColumn = useWorkspace((s) => s.renameOutputColumn);
   const addRelationEnumCard = useWorkspace((s) => s.addRelationEnumCard);
+  const addScriptCard = useWorkspace((s) => s.addScriptCard);
   const setColumnContract = useWorkspace((s) => s.setColumnContract);
   const view = useWorkspace((s) => s.view);
   const setView = useWorkspace((s) => s.setView);
@@ -516,6 +518,25 @@ export function CardCanvas({
                 const id = addRelationEnumCard(card.id, column);
                 if (id !== null) select(id);
               }}
+              onOpenScript={() => {
+                // Birth binding to this table: one matrix port, named A.
+                const id = addScriptCard([card.id]);
+                if (id !== null) select(id);
+              }}
+            />
+          );
+        }
+
+        if (isScriptCard(card)) {
+          return (
+            <ScriptCard
+              key={card.id}
+              card={card}
+              active={active}
+              closeBlocked={closeBlocked}
+              onActivate={() => bringToFront(card.id)}
+              onClose={() => handleClose(card.id)}
+              onCloseBlocked={() => reportBlocked(card.id)}
             />
           );
         }
@@ -629,6 +650,7 @@ export function CardCanvas({
       applyRepointsForOwner,
       renameOutputColumn,
       addRelationEnumCard,
+      addScriptCard,
       setColumnContract,
       dependencies,
       bringToFront,

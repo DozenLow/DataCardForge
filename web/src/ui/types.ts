@@ -153,6 +153,16 @@ export interface OutputBinding {
   outputId: string;
   /** Server-side result matrix id (authoritative copy); -1 until registration. */
   resultMatrixId: number;
+  /**
+   * Local display-cache matrix id for outputs BEYOND ordinal 0.
+   *
+   * Output 0 always mirrors into the card's `displayMatrixId` (every chart and downstream
+   * card built before K > 1 points at that slot), so only the extra outputs need a slot of
+   * their own. Allocating one here is what makes `out:N` an identity a dependent can bind
+   * to: the local→server resolution walks `outputs[]`, exactly like it already did for
+   * ordinal 0. Absent on every single-output signature, which is why nothing else notices.
+   */
+  localMatrixId?: number;
 }
 
 /** One derived column: a display name and the expression that computes it. */
@@ -193,6 +203,43 @@ export interface FunctionParams {
 /** Parameters of `builtin:expression-columns` — the signature that requires formulas. */
 export interface ExpressionColumnsParams extends FunctionParams {
   formulas: FormulaColumn[];
+}
+
+/** Published signature id of the Python script card. Frozen like every signature id. */
+export const PYTHON_SIGNATURE = 'builtin:python';
+
+/**
+ * Parameters of `builtin:python` — the DECLARED shape of a script card
+ * (docs/decisions/2026-11-15-python-script-card.md §二/§三).
+ *
+ * The signature's own `inputs`/`outputs` are an empty template: the real ports and outputs
+ * are declared here, because `K` for a script cannot be enumerated in the registry. Two
+ * consequences shape this type:
+ *
+ *   - `portNames` is an ARRAY ordered like `inputs[]`, not a map keyed by portId. That is
+ *     the wire shape the backend validates (`params.portNames`), so a card's parameter bag
+ *     can travel verbatim without the generic node push knowing which signature it is.
+ *     Renaming a port rewrites `portNames[index]`; the `in:N` portId is never touched.
+ *   - `outputs` holds the DECLARED VARIABLE NAMES in output-ordinal order. The edge
+ *     identity (`out:N`) lives on `outputs[]`, so renaming never breaks a dependent.
+ */
+export interface PythonScriptParams extends FunctionParams {
+  /** The user's Python source, verbatim: the runner wraps nothing around it (§二). */
+  script: string;
+  /** Injected variable name per bound input port, in `inputs[]` order. */
+  portNames: string[];
+  /** Declared output variable names in ordinal order. Never empty (§三: K ≥ 1). */
+  outputs: string[];
+}
+
+/** Script-card parameters pre-declared with their signature (so call sites stay honest). */
+export function scriptParams(card: FunctionCardModel): PythonScriptParams {
+  const params = card.params;
+  return {
+    script: typeof params.script === 'string' ? params.script : '',
+    portNames: Array.isArray(params.portNames) ? (params.portNames as string[]) : [],
+    outputs: Array.isArray(params.outputs) ? (params.outputs as string[]) : [],
+  };
 }
 
 /**
@@ -251,6 +298,20 @@ export function isChartCard(card: CardModel): card is ChartCardModel {
 
 export function isFormulaCard(card: CardModel): card is FunctionCardModel {
   return card.kind === 'formula';
+}
+
+/**
+ * Is this function card the Python script card?
+ *
+ * The render dispatch (`<ScriptCard>` instead of `<FormulaCard>`) and the script card's own
+ * actions ask this question; nothing in the generic infrastructure does. `builtin:python`
+ * is a signature, not a card kind — one `FunctionCardModel`, one node, one display cache —
+ * so a script card must keep working through every code path that never asks.
+ */
+export function isScriptCard(
+  card: CardModel,
+): card is FunctionCardModel & { params: PythonScriptParams } {
+  return card.kind === 'formula' && card.signatureId === PYTHON_SIGNATURE;
 }
 
 /**
