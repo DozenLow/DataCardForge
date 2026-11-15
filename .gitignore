@@ -73,3 +73,7 @@ web/tests/*.probe.test.ts
 
 # ── 本地工具环境（venv 等）────────────────────────────────────────────────
 .tools/
+
+# ── 自带 Python 运行时（scripts/fetch-python-runtime.sh 生成，不入库）──────
+# 固定 SHA256 校验后解压进 third_party/，离线可用、不依赖 pip；重做用 FORCE=1。
+third_party/
