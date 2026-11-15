@@ -27,10 +27,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { basicSetup } from 'codemirror';
-import { python } from '@codemirror/lang-python';
+import { python, pythonLanguage } from '@codemirror/lang-python';
 import { EditorState } from '@codemirror/state';
 import { EditorView, keymap } from '@codemirror/view';
 
+import {
+  BackendClient,
+  type ScriptCheckErrorCode,
+  type ScriptCheckResult,
+} from '../../backend/client.ts';
 import type { Locale } from '../i18n.ts';
 import {
   SCRIPT_PREVIEW_ROWS,
@@ -61,6 +66,15 @@ import { CardShell } from './CardShell.tsx';
  * would be a network round trip per character for a card that never auto-runs anyway.
  */
 const SCRIPT_DEBOUNCE_MS = 500;
+
+/**
+ * How long an edit waits before the authoritative check runs (POST /api/script/check).
+ *
+ * Deliberately longer than the definition sync: the local lezer layer already answers "is
+ * this plausible Python" at zero latency, and every check spawns a real CPython process, so
+ * the second layer is for the pause between bursts, not for every key.
+ */
+const SCRIPT_CHECK_DEBOUNCE_MS = 600;
 
 // ── prose ─────────────────────────────────────────────────────────────────────────────
 //
@@ -99,6 +113,16 @@ interface ScriptLabels {
   runMode: { clean: string; debug: string };
   runSummary: string;
   traceJump: string;
+  /** Two-layer diagnostics (lezer now, CPython 600 ms later). */
+  diagnostics: string;
+  diagnosticLocal: string;
+  diagnosticBackend: string;
+  diagnosticLocalSyntax: string;
+  /** Title-bar stamp for a script whose reads/writes make it non-reproducible. */
+  impureStamp: string;
+  /** `{items}` is the runner's own list of triggers, joined by `impureSeparator`. */
+  impureTitle: string;
+  impureSeparator: string;
 }
 
 const LABELS: Record<Locale, ScriptLabels> = {
@@ -162,6 +186,13 @@ const LABELS: Record<Locale, ScriptLabels> = {
     runMode: { clean: '净室', debug: '调试' },
     runSummary: '{mode}运行 · {ms} ms · {outputs} 个输出',
     traceJump: '跳到第 {line} 行',
+    diagnostics: '诊断',
+    diagnosticLocal: '本地',
+    diagnosticBackend: '后端',
+    diagnosticLocalSyntax: '这里不是合法的 Python（本地即时检查）',
+    impureStamp: '不可复现',
+    impureTitle: '不可复现：{items}',
+    impureSeparator: '、',
   },
   en: {
     cardTitle: 'Python script',
@@ -223,6 +254,13 @@ const LABELS: Record<Locale, ScriptLabels> = {
     runMode: { clean: 'Clean', debug: 'Debug' },
     runSummary: '{mode} run · {ms} ms · {outputs} output(s)',
     traceJump: 'Jump to line {line}',
+    diagnostics: 'Diagnostics',
+    diagnosticLocal: 'Local',
+    diagnosticBackend: 'Backend',
+    diagnosticLocalSyntax: 'Not valid Python (immediate local check)',
+    impureStamp: 'Not reproducible',
+    impureTitle: 'Not reproducible: {items}',
+    impureSeparator: ', ',
   },
 };
 
@@ -286,6 +324,124 @@ export function tracebackLines(stderr: string): TracebackLine[] {
       return { text, line: match ? Number(match[1]) : null };
     });
 }
+
+// ── two-layer diagnostics ────────────────────────────────────────────────────────────
+//
+// The editor diagnoses in two layers, and they exist for different reasons:
+//
+//   1. LOCAL (lezer, zero latency) — the parser CodeMirror already runs for highlighting flags
+//      unparsable regions. It answers while the user is still typing, but it is NOT the
+//      authority: it is a different implementation of "Python" from the one that will run.
+//   2. AUTHORITATIVE (POST /api/script/check, debounced) — the backend compiles the text with
+//      the pinned CPython and statically scans the AST for non-reproducible reads. Its line
+//      and column are the ones a later traceback will use, so when its verdict is for the
+//      text on screen it REPLACES the local guess instead of sitting next to it.
+//
+// The merge is a pure function so the rule is testable without a DOM. Backend verdict for the
+// current text wins; anything else (pending, stale, unavailable) falls back to the local layer,
+// so the editor never has a silent window — and "could not check" is itself a visible note,
+// because it must not look like "checked and clean".
+
+/** One diagnostic line in the card, whichever layer produced it. */
+export interface ScriptDiagnostic {
+  source: 'local' | 'backend';
+  /**
+   * `localSyntax` is lezer's guess; `syntaxError` is CPython's verdict; every other code means
+   * the authoritative layer could not answer, and those are notes, never errors.
+   */
+  code: 'localSyntax' | ScriptCheckErrorCode;
+  /** 1-based; 0 when the problem has no position (a note, or a compile-level refusal). */
+  line: number;
+  col: number;
+  /** CPython's own message for a syntax error; empty otherwise. */
+  detail: string;
+}
+
+/** A completed authoritative check, remembered together with the text it judged. */
+export interface CompletedScriptCheck {
+  text: string;
+  result: ScriptCheckResult;
+}
+
+/**
+ * The instant layer: parse `source` with the same lezer grammar the editor highlights with and
+ * report the first unparsable region. `null` when the tree has none.
+ */
+export function localSyntaxDiagnostic(source: string): ScriptDiagnostic | null {
+  const tree = pythonLanguage.parser.parse(source);
+  let found: ScriptDiagnostic | null = null;
+  tree.iterate({
+    enter: (node) => {
+      if (found !== null) return false;  // one error is the headline; the rest are its cascade
+      if (!node.type.isError) return undefined;
+      let line = 1;
+      let lineStart = 0;
+      for (let index = 0; index < node.from; index += 1) {
+        if (source.charCodeAt(index) === 10) {
+          line += 1;
+          lineStart = index + 1;
+        }
+      }
+      found = {
+        source: 'local',
+        code: 'localSyntax',
+        line,
+        col: node.from - lineStart + 1,
+        detail: '',
+      };
+      return false;
+    },
+  });
+  return found;
+}
+
+/**
+ * What the editor shows: one merged list.
+ *
+ * A verdict is only applied to the text it was produced for (`check.text === text`); a stale
+ * answer must never overwrite a diagnostic about what the user is looking at now.
+ */
+export function mergeScriptDiagnostics(
+  local: ScriptDiagnostic | null,
+  check: CompletedScriptCheck | null,
+  text: string,
+): ScriptDiagnostic[] {
+  const known = check !== null && check.text === text ? check.result : null;
+  if (known !== null) {
+    if (known.ok) return [];  // authoritative: the script compiles
+    const error = known.error;
+    if (error?.code === 'syntaxError') {
+      return [
+        {
+          source: 'backend',
+          code: 'syntaxError',
+          line: typeof error.line === 'number' ? error.line : 0,
+          col: typeof error.col === 'number' ? error.col : 0,
+          detail: error.message ?? '',
+        },
+      ];
+    }
+    // The check ran into the MACHINE, not into the script: keep the local layer and say why
+    // the authoritative one is quiet.
+    const entries: ScriptDiagnostic[] =
+      local !== null ? [local] : [];
+    entries.push({
+      source: 'backend',
+      code: error?.code ?? 'internalError',
+      line: 0,
+      col: 0,
+      detail: '',
+    });
+    return entries;
+  }
+  return local !== null ? [local] : [];
+}
+
+/**
+ * Transport for the authoritative layer. `checkScript` is stateless (one POST, no session), so
+ * a per-card client would only create objects; the card never needs the store's singleton.
+ */
+const CHECK_CLIENT = new BackendClient();
 
 // ── inline name editor ──────────────────────────────────────────────────────────────
 
@@ -625,6 +781,73 @@ export function ScriptCard({
     [card, cards, matrices, t],
   );
 
+  // ── diagnostics: local layer now, authoritative layer 600 ms after a burst ──
+  //
+  // `localDiagnostic` is recomputed from the editor's own document on every keystroke (below),
+  // so it never waits for the store's 500 ms definition sync. `check` remembers which text the
+  // last authoritative verdict was about — applying a stale verdict to newer text is the one
+  // bug this state shape is designed to make impossible.
+  const [localDiagnostic, setLocalDiagnostic] = useState<ScriptDiagnostic | null>(() =>
+    localSyntaxDiagnostic(scriptText),
+  );
+  /**
+   * The document as the EDITOR has it, not as the store has it.
+   *
+   * The store's `scriptText` lags by the definition debounce (500 ms), so merging diagnostics
+   * against it would pair a fresh local error with an old authoritative verdict and show the
+   * wrong layer for the wrong text. This state is updated in the same listener that computes
+   * the local layer, i.e. at the speed of typing.
+   */
+  const [documentText, setDocumentText] = useState(scriptText);
+  const [check, setCheck] = useState<CompletedScriptCheck | null>(null);
+  const checkTimer = useRef<number | null>(null);
+  const checkSequence = useRef(0);
+
+  const runCheck = useCallback((text: string) => {
+    const sequence = ++checkSequence.current;
+    void CHECK_CLIENT.checkScript(text).then(
+      (result) => {
+        // A newer edit already asked a newer question: this answer is about old text.
+        if (sequence !== checkSequence.current) return;
+        setCheck({ text, result });
+      },
+      () => {
+        // checkScript itself never throws; this is belt and braces for a transport that
+        // violates its own contract. Either way the local layer stays visible.
+        if (sequence !== checkSequence.current) return;
+        setCheck({
+          text,
+          result: { ok: false, impure: [], error: { code: 'backendUnavailable' } },
+        });
+      },
+    );
+  }, []);
+
+  const scheduleCheck = useCallback(
+    (text: string) => {
+      if (checkTimer.current !== null) window.clearTimeout(checkTimer.current);
+      checkTimer.current = window.setTimeout(() => {
+        checkTimer.current = null;
+        runCheck(text);
+      }, SCRIPT_CHECK_DEBOUNCE_MS);
+    },
+    [runCheck],
+  );
+
+  // Opening a card is a moment the user is looking at the script without having typed
+  // anything, so the authoritative pass runs once up front: an already-impure script must be
+  // stamped before the first edit. Later text changes come through the editor's update
+  // listener — including external rewrites, which the sync effect below dispatches into the
+  // view — so scheduling from `scriptText` here would double every edit's request.
+  useEffect(() => {
+    if (scriptText.trim().length > 0) runCheck(scriptText);
+    return () => {
+      if (checkTimer.current !== null) window.clearTimeout(checkTimer.current);
+      checkTimer.current = null;
+      ++checkSequence.current;  // a reply landing after unmount must not set state
+    };
+  }, [runCheck]);  // mount/unmount only; `scriptText` is read as the opening value on purpose
+
   // ── editor ──
   const editorHost = useRef<HTMLDivElement | null>(null);
   const editorView = useRef<EditorView | null>(null);
@@ -668,6 +891,13 @@ export function ScriptCard({
           EditorView.updateListener.of((update) => {
             if (!update.docChanged) return;
             const text = update.state.doc.toString();
+            setDocumentText(text);
+            // Layer 1, synchronously: lezer's own parse of what is in the document NOW. No
+            // timer, no request — this is what makes the first diagnostic feel instant.
+            setLocalDiagnostic(localSyntaxDiagnostic(text));
+            // Layer 2, behind the debounce: the authoritative CPython verdict. Each new edit
+            // resets the timer, so a burst of typing costs one process, not one per key.
+            scheduleCheck(text);
             if (syncTimer.current !== null) window.clearTimeout(syncTimer.current);
             syncTimer.current = window.setTimeout(() => {
               syncTimer.current = null;
@@ -761,13 +991,33 @@ export function ScriptCard({
    */
   const runtimeMissing = run?.status === 'error' && run?.code === 'runtimeMissing';
 
+  // ── two-layer diagnostics, merged for display ──
+  const diagnostics = mergeScriptDiagnostics(localDiagnostic, check, documentText);
+  /**
+   * The "not reproducible" stamp: the runner's own list of non-reproducible reads, taken from
+   * the last authoritative check — and only while that check still describes the text on
+   * screen. A stamp on text it never saw is the one thing a label must not do, so an edit
+   * clears it until the next verdict lands. It is a LABEL, never a gate: both run buttons keep
+   * working (the decision doc: the consequence belongs to the user, the tool's job is to show it).
+   */
+  const impure =
+    check !== null && check.result.ok && check.text === documentText ? check.result.impure : [];
+  const impureTitle = fill(labels.impureTitle, {
+    items: impure.join(labels.impureSeparator),
+  });
+  /**
+   * The stamp lives in the title bar. CardShell renders `title` as both the visible text and
+   * the native tooltip, so the trigger list travels with the stamp itself — hovering the
+   * truncated title is how a user finds out which read made the card impure.
+   */
+  const titleBase = outputNames[0] ? `${labels.cardTitle} — ${outputNames[0]}` : labels.cardTitle;
+  const title = impure.length === 0 ? titleBase : `${titleBase} · ${impureTitle}`;
+
   return (
     <CardShell
       card={card}
       variant="card--script"
-      title={
-        outputNames[0] ? `${labels.cardTitle} — ${outputNames[0]}` : labels.cardTitle
-      }
+      title={title}
       badge={badge}
       active={active}
       closeBlocked={closeBlocked}
@@ -932,6 +1182,58 @@ export function ScriptCard({
         </div>
 
         <div className="script-card__editor" ref={editorHost} data-script-editor={card.id} />
+
+        {/*
+          One merged list, not two panels: the user cares about "the script is wrong at line
+          N", not about which layer noticed first. The source badge is the provenance — the
+          backend's line numbers are the ones a traceback will print, so when they are there
+          they are what the list shows; the local entry exists only while that answer is in
+          flight (or unavailable).
+        */}
+        {diagnostics.length > 0 ? (
+          <ul className="script-card__diagnostics" aria-label={labels.diagnostics}>
+            {diagnostics.map((entry, index) => {
+              const isError = entry.code === 'localSyntax' || entry.code === 'syntaxError';
+              const text =
+                entry.code === 'localSyntax'
+                  ? labels.diagnosticLocalSyntax
+                  : entry.code === 'syntaxError'
+                    ? `${labels.errors.syntaxError}${entry.detail ? ` — ${entry.detail}` : ''}`
+                    : entry.code === 'runtimeMissing'
+                      ? labels.errors.runtimeMissing
+                      : entry.code === 'backendUnavailable'
+                        ? labels.errors.backendUnavailable
+                        : labels.errors.internalError;
+              return (
+                <li
+                  className={`script-card__diagnostic script-card__diagnostic--${
+                    isError ? 'error' : 'note'
+                  }`}
+                  key={`${entry.source}-${entry.code}-${entry.line}-${index}`}
+                  data-source={entry.source}
+                  data-code={entry.code}
+                  role={isError ? 'alert' : 'status'}
+                >
+                  <span className="script-card__diagnostic-source">
+                    {entry.source === 'local' ? labels.diagnosticLocal : labels.diagnosticBackend}
+                  </span>
+                  {entry.line > 0 ? (
+                    <button
+                      type="button"
+                      className="script-card__trace-jump"
+                      title={fill(labels.traceJump, { line: entry.line })}
+                      onClick={() => jumpToLine(entry.line)}
+                    >
+                      {fill(labels.failure.line, { line: entry.line })}
+                      {entry.col > 0 ? `:${entry.col}` : ''}
+                    </button>
+                  ) : null}
+                  <span className="script-card__diagnostic-message">{text}</span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
 
         <DebugPanel run={run} labels={labels} onJumpToLine={jumpToLine} />
       </div>

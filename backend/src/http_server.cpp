@@ -11,26 +11,39 @@
 #  endif
 #  include <winsock2.h>
 #  include <ws2tcpip.h>
+#  include <windows.h>
 #  ifndef MSG_NOSIGNAL
 #    define MSG_NOSIGNAL 0
 #  endif
 #  define dc_close_socket closesocket
 #else
 #  include <arpa/inet.h>
+#  include <fcntl.h>
 #  include <netinet/in.h>
 #  include <netinet/tcp.h>
+#  include <signal.h>
 #  include <sys/socket.h>
+#  include <sys/stat.h>
+#  include <sys/types.h>
+#  include <sys/wait.h>
 #  include <unistd.h>
 #  define dc_close_socket close
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
+#include <cerrno>
 #include <charconv>
+#include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <string_view>
 #include <thread>
+#include <vector>
 
 #include "expression.h"
 #include "signature.h"
@@ -413,6 +426,397 @@ bool splitMatrixPath(const std::string& path, int64_t* id, std::string* suffix) 
   return true;
 }
 
+// ── POST /api/script/check ─────────────────────────────────────────────
+//
+// Compile-only syntax check plus the runner's static "impure" scan.
+//
+// THIS ENDPOINT NEVER EXECUTES THE SUBMITTED TEXT. The only thing it spawns is
+// `runner.py --check <file>`, whose entire job is `compile(source, ..., ast.PyCF_ONLY_AST)`
+// followed by an `ast.walk` scan (backend/runner/runner.py, `_check_mode`); the script is
+// never imported and never eval/exec'd. There must never be a path in this file that runs
+// the submitted bytes — that is the safety boundary of
+// docs/decisions/2026-11-15-python-script-card.md §九, not a performance choice. The
+// "does not execute" gate in tests/script_check_test.cpp holds it.
+//
+// The spawn follows the same discipline as runPythonChild (nodes.cpp), per line:
+//   - cleared environment: PATH=/usr/bin:/bin and PYTHONPATH=<repo>/third_party/pylib only
+//   - cwd = the scratch directory, never the server's working directory
+//   - both sides setpgid, so the timeout kills the check AND anything it spawned
+//   - the scratch directory (script + logs) is removed on every exit path, timeout included
+// It is a small local spawn rather than another runPythonChild mode because the argv shape
+// differs (--check takes the script path and nothing else) and runPythonChild is shaped
+// around the --in/--out/--meta data channel.
+//
+// Envelope: 200 with {"ok":true,"lint":{"impure":[...]}} / {"ok":false,"error":{...}} for a
+// verdict — the check saying "your script is broken" is not an HTTP failure. A malformed
+// REQUEST (bad JSON, `script` missing or not a string) is a protocol error and keeps the
+// global {"code":...} body, like every other endpoint.
+constexpr int64_t kScriptCheckTimeoutMs = 10000;
+// runner.py EXIT_SYNTAX (backend/runner/runner.py). The runner reports a syntax error as one
+// JSON line on stderr and this exit code; no other exit code is a verdict.
+constexpr int kRunnerCheckSyntaxExit = 6;
+// The child does `_exit(127)` when execve fails: the interpreter is there as a file but
+// cannot be started. Missing/non-executable python3 is the ONE condition that maps to
+// runtimeMissing (a broken environment, not a broken script).
+constexpr int kChildExecFailedExit = 127;
+constexpr size_t kCheckLogReadCap = 64u * 1024u;
+
+struct CheckPaths {
+  std::filesystem::path dir;        // scratch directory = the child's cwd
+  std::filesystem::path script;     // dir/script.py — the only thing the runner reads
+  std::filesystem::path stdoutLog;  // dir/stdout.log (lint JSON)
+  std::filesystem::path stderrLog;  // dir/stderr.log (syntax JSON / tracebacks)
+  std::filesystem::path python;     // <runtime>/bin/python3
+  std::filesystem::path runner;     // <repo>/backend/runner/runner.py
+  std::filesystem::path pylib;      // <repo>/third_party/pylib
+};
+
+// Removes the check's scratch directory on every exit path (success, error, timeout).
+struct CheckScratch {
+  std::filesystem::path dir;
+  ~CheckScratch() {
+    if (dir.empty()) return;
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+  }
+};
+
+// mkdtemp on POSIX (0600 name, 0700 mode); a create-directory loop elsewhere. Never reuses
+// the parent temp directory itself: the child runs with cwd = this directory.
+bool makeCheckScratch(CheckScratch* scratch) {
+  std::error_code ec;
+  const std::filesystem::path parent = std::filesystem::temp_directory_path(ec);
+  if (ec) return false;
+#ifndef _WIN32
+  for (int attempt = 0; attempt < 16; ++attempt) {
+    std::string pattern = (parent / "dcchk-XXXXXX").string();
+    std::vector<char> buffer(pattern.begin(), pattern.end());
+    buffer.push_back('\0');
+    if (::mkdtemp(buffer.data()) != nullptr) {
+      scratch->dir = std::filesystem::path(buffer.data());
+      return true;
+    }
+  }
+  return false;
+#else
+  for (int attempt = 0; attempt < 64; ++attempt) {
+    const std::filesystem::path candidate =
+        parent / ("dcchk-" + std::to_string(::GetCurrentProcessId()) + "-" +
+                  std::to_string(::GetTickCount64()) + "-" + std::to_string(attempt));
+    if (std::filesystem::create_directory(candidate, ec)) {
+      scratch->dir = candidate;
+      return true;
+    }
+    ec.clear();
+  }
+  return false;
+#endif
+}
+
+std::string readTextFileCapped(const std::filesystem::path& path, size_t maxBytes) {
+  std::ifstream in(path, std::ios::binary);
+  if (!in) return std::string();
+  std::string out(maxBytes, '\0');
+  in.read(out.data(), static_cast<std::streamsize>(maxBytes));
+  out.resize(static_cast<size_t>(in.gcount()));
+  return out;
+}
+
+// runner.py writes exactly one protocol line, but the interpreter may prepend noise (warnings,
+// a wrapper's chatter), so the first parseable line that starts with '{' is the protocol line.
+Json firstJsonLine(const std::string& text) {
+  size_t start = 0;
+  while (start < text.size()) {
+    size_t end = text.find('\n', start);
+    if (end == std::string::npos) end = text.size();
+    std::string line = text.substr(start, end - start);
+    if (!line.empty() && line.back() == '\r') line.pop_back();
+    if (!line.empty() && line.front() == '{') {
+      Json parsed;
+      std::string parseError;
+      return Json::parse(line, &parsed, &parseError) ? parsed : Json();
+    }
+    start = end + 1;
+  }
+  return Json();
+}
+
+struct CheckSpawn {
+  bool launched = false;
+  int exitCode = -1;
+  bool timedOut = false;
+  std::string launchError;
+};
+
+#ifndef _WIN32
+
+CheckSpawn runCheckChild(const CheckPaths& paths, int64_t timeoutMs) {
+  CheckSpawn result;
+  std::vector<std::string> argvStorage = {paths.python.string(), paths.runner.string(),
+                                          "--check", paths.script.string()};
+  std::vector<char*> argv;
+  argv.reserve(argvStorage.size() + 1);
+  for (std::string& arg : argvStorage) argv.push_back(const_cast<char*>(arg.c_str()));
+  argv.push_back(nullptr);
+  // PATH and PYTHONPATH are the only things the child inherits — the same cleared
+  // environment a run gets (decision §五). The check does not need numpy, but keeping the
+  // same environment means "passes the check, fails the run" cannot come from here.
+  std::vector<std::string> envStorage = {
+      "PATH=/usr/bin:/bin",
+      "PYTHONPATH=" + paths.pylib.string(),
+  };
+  std::vector<char*> envp;
+  envp.reserve(envStorage.size() + 1);
+  for (std::string& kv : envStorage) envp.push_back(const_cast<char*>(kv.c_str()));
+  envp.push_back(nullptr);
+  const std::string stdoutPath = paths.stdoutLog.string();
+  const std::string stderrPath = paths.stderrLog.string();
+  const std::string cwd = paths.dir.string();
+  char* const program = argv[0];
+
+  const pid_t pid = ::fork();
+  if (pid < 0) {
+    result.launchError = "fork failed (errno " + std::to_string(errno) + ")";
+    return result;
+  }
+  if (pid == 0) {
+    // Child. async-signal-safe calls only from here on.
+    ::setpgid(0, 0);  // own process group: the timeout kills the check and anything it spawned
+    const int nullIn = ::open("/dev/null", O_RDONLY);
+    if (nullIn >= 0) {
+      ::dup2(nullIn, STDIN_FILENO);
+      ::close(nullIn);
+    }
+    const int outFd = ::open(stdoutPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (outFd >= 0) {
+      ::dup2(outFd, STDOUT_FILENO);
+      ::close(outFd);
+    }
+    const int errFd = ::open(stderrPath.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0600);
+    if (errFd >= 0) {
+      ::dup2(errFd, STDERR_FILENO);
+      ::close(errFd);
+    }
+    if (::chdir(cwd.c_str()) != 0) ::_exit(126);
+    ::execve(program, argv.data(), envp.data());
+    ::_exit(kChildExecFailedExit);
+  }
+  result.launched = true;
+  // Both sides call setpgid (the standard idiom): until one of them runs, the group does not
+  // exist and a timeout racing into kill(-pid) would hit ESRCH.
+  ::setpgid(pid, 0);
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+  for (;;) {
+    int status = 0;
+    const pid_t reaped = ::waitpid(pid, &status, WNOHANG);
+    if (reaped == pid) {
+      result.exitCode = WIFEXITED(status)
+                            ? WEXITSTATUS(status)
+                            : 128 + (WIFSIGNALED(status) ? WTERMSIG(status) : 0);
+      return result;
+    }
+    if (reaped < 0 && errno != EINTR) {
+      result.launchError = "waitpid failed (errno " + std::to_string(errno) + ")";
+      return result;
+    }
+    if (std::chrono::steady_clock::now() >= deadline) {
+      ::kill(static_cast<pid_t>(-pid), SIGKILL);
+      while (::waitpid(pid, &status, 0) < 0 && errno == EINTR) {
+      }
+      result.timedOut = true;
+      return result;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+  }
+}
+
+#else  // _WIN32
+
+CheckSpawn runCheckChild(const CheckPaths& paths, int64_t timeoutMs) {
+  CheckSpawn result;
+  const auto quote = [](const std::filesystem::path& p) { return L"\"" + p.wstring() + L"\""; };
+  const std::wstring command = quote(paths.python) + L" " + quote(paths.runner) + L" --check " +
+                               quote(paths.script);
+  std::vector<wchar_t> commandLine(command.begin(), command.end());
+  commandLine.push_back(L'\0');
+
+  // PATH + PYTHONPATH only (same cleared environment as a run).
+  std::vector<wchar_t> environment;
+  const auto appendVar = [&environment](const std::wstring& kv) {
+    environment.insert(environment.end(), kv.begin(), kv.end());
+    environment.push_back(L'\0');
+  };
+  appendVar(L"PATH=" + paths.python.parent_path().wstring() + L";C:\\Windows\\System32");
+  appendVar(L"PYTHONPATH=" + paths.pylib.wstring());
+  environment.push_back(L'\0');
+
+  SECURITY_ATTRIBUTES inheritable{};
+  inheritable.nLength = sizeof inheritable;
+  inheritable.bInheritHandle = TRUE;
+  const std::wstring stdoutPath = paths.stdoutLog.wstring();
+  const std::wstring stderrPath = paths.stderrLog.wstring();
+  HANDLE handleIn = ::CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                                  &inheritable, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+  HANDLE handleOut =
+      ::CreateFileW(stdoutPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    &inheritable, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  HANDLE handleErr =
+      ::CreateFileW(stderrPath.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE,
+                    &inheritable, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+  STARTUPINFOW startup{};
+  startup.cb = sizeof startup;
+  startup.dwFlags = STARTF_USESTDHANDLES;
+  startup.hStdInput = handleIn;
+  startup.hStdOutput = handleOut;
+  startup.hStdError = handleErr;
+  PROCESS_INFORMATION process{};
+  const std::wstring cwd = paths.dir.wstring();
+  const BOOL started = ::CreateProcessW(
+      paths.python.wstring().c_str(), commandLine.data(), nullptr, nullptr, TRUE,
+      CREATE_NO_WINDOW | CREATE_NEW_PROCESS_GROUP | CREATE_UNICODE_ENVIRONMENT,
+      environment.data(), cwd.c_str(), &startup, &process);
+  if (handleIn != INVALID_HANDLE_VALUE) ::CloseHandle(handleIn);
+  if (handleOut != INVALID_HANDLE_VALUE) ::CloseHandle(handleOut);
+  if (handleErr != INVALID_HANDLE_VALUE) ::CloseHandle(handleErr);
+  if (!started) {
+    result.launchError = "CreateProcessW failed (error " +
+                         std::to_string(static_cast<long long>(::GetLastError())) + ")";
+    return result;
+  }
+  ::CloseHandle(process.hThread);
+  result.launched = true;
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::milliseconds(timeoutMs);
+  for (;;) {
+    if (::WaitForSingleObject(process.hProcess, 5) == WAIT_OBJECT_0) break;
+    if (std::chrono::steady_clock::now() >= deadline) {
+      ::TerminateProcess(process.hProcess, 1);
+      ::WaitForSingleObject(process.hProcess, 5000);
+      result.timedOut = true;
+      break;
+    }
+  }
+  DWORD exitCode = 1;
+  ::GetExitCodeProcess(process.hProcess, &exitCode);
+  result.exitCode = static_cast<int>(exitCode);
+  ::CloseHandle(process.hProcess);
+  return result;
+}
+
+#endif  // _WIN32
+
+// The endpoint's own verdict envelope: 200, {"ok":false,"error":{code,...}}.
+HttpResponse checkVerdictFailed(const std::string& code, Json details = Json::object()) {
+  Json error = Json::object({{"code", Json(code)}});
+  for (const auto& member : details.members()) error.set(member.first, member.second);
+  Json body = Json::object({{"ok", Json(false)}, {"error", std::move(error)}});
+  return jsonOk(std::move(body));
+}
+
+HttpResponse handleScriptCheck(const HttpRequest& req) {
+  Json parsed;
+  std::string parseError;
+  if (!Json::parse(req.body, &parsed, &parseError) || !parsed.isObject())
+    return jsonError(400, "unexpectedToken", Json::object({{"detail", Json(parseError)}}));
+  const Json* script = parsed.find("script");
+  if (script == nullptr || !script->isString()) return jsonError(400, "unexpectedToken");
+  const std::string& source = script->asString();
+
+  // Same interpreter resolution a run uses (nodes.h), so the two can never disagree about
+  // "is there a runtime on this machine". The note is not forwarded: the verdict contract for
+  // runtimeMissing has no detail field (the card's environment stamp is the explanation); the
+  // out-parameter exists because resolvePythonRuntime reports WHY it found nothing.
+  std::string runtimeNote;
+  const std::string repo = findRepoRoot();
+  const PythonRuntime runtime = resolvePythonRuntime(&runtimeNote);
+  if (repo.empty() || runtime.python.empty()) return checkVerdictFailed("runtimeMissing");
+
+  CheckPaths paths;
+  paths.python = runtime.python;
+  paths.runner = std::filesystem::path(repo) / "backend" / "runner" / "runner.py";
+  paths.pylib = std::filesystem::path(repo) / "third_party" / "pylib";
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(paths.runner, ec))
+    return checkVerdictFailed("runtimeMissing");
+
+  CheckScratch scratch;
+  if (!makeCheckScratch(&scratch))
+    return checkVerdictFailed("internalError",
+                              Json::object({{"detail", Json("cannot create a scratch directory")}}));
+  paths.dir = scratch.dir;
+  paths.script = paths.dir / "script.py";
+  paths.stdoutLog = paths.dir / "stdout.log";
+  paths.stderrLog = paths.dir / "stderr.log";
+  {
+    std::ofstream out(paths.script, std::ios::binary | std::ios::trunc);
+    if (!out)
+      return checkVerdictFailed(
+          "internalError", Json::object({{"detail", Json("cannot write the temporary script")}}));
+    out.write(source.data(), static_cast<std::streamsize>(source.size()));
+    if (!out)
+      return checkVerdictFailed(
+          "internalError", Json::object({{"detail", Json("cannot write the temporary script")}}));
+  }
+
+  const CheckSpawn spawn = runCheckChild(paths, kScriptCheckTimeoutMs);
+  if (!spawn.launched)
+    return checkVerdictFailed("internalError", Json::object({{"detail", Json(spawn.launchError)}}));
+  if (spawn.timedOut)
+    return checkVerdictFailed(
+        "internalError",
+        Json::object({{"detail", Json("the check did not finish within " +
+                                      std::to_string(kScriptCheckTimeoutMs) + " ms")}}));
+  if (spawn.exitCode == kChildExecFailedExit) return checkVerdictFailed("runtimeMissing");
+  if (spawn.exitCode == 126)
+    return checkVerdictFailed(
+        "internalError",
+        Json::object({{"detail", Json("the check child could not enter its scratch directory")}}));
+
+  const std::string stderrText = readTextFileCapped(paths.stderrLog, kCheckLogReadCap);
+  if (spawn.exitCode == kRunnerCheckSyntaxExit) {
+    // {"error":"syntax","line":N,"col":M,"msg":"..."} on stderr; the line/col are what the
+    // editor jumps to, so they travel as numbers, never as prose.
+    const Json structured = firstJsonLine(stderrText);
+    const Json* line = structured.isObject() ? structured.find("line") : nullptr;
+    const Json* col = structured.isObject() ? structured.find("col") : nullptr;
+    if (line == nullptr || !line->isNumber() || col == nullptr || !col->isNumber())
+      return checkVerdictFailed(
+          "internalError",
+          Json::object({{"detail", Json("the runner reported a syntax error without a "
+                                        "position (stderr: " + stderrText.substr(0, 200) + ")")}}));
+    const Json* msg = structured.find("msg");
+    Json error = Json::object({{"code", Json("syntaxError")},
+                               {"line", Json(static_cast<int64_t>(line->asNumber()))},
+                               {"col", Json(static_cast<int64_t>(col->asNumber()))},
+                               {"message", Json(msg != nullptr && msg->isString() ? msg->asString()
+                                                                                  : std::string())}});
+    Json body = Json::object({{"ok", Json(false)}, {"error", std::move(error)}});
+    return jsonOk(std::move(body));
+  }
+  if (spawn.exitCode != 0)
+    return checkVerdictFailed(
+        "internalError",
+        Json::object({{"detail", Json("the runner exited with " +
+                                      std::to_string(spawn.exitCode) + " (stderr: " +
+                                      stderrText.substr(0, 200) + ")")}}));
+
+  // exit 0: stdout carries exactly one line, {"lint":{"impure":[...]}}. Pass the list through
+  // untouched — the runner owns the rule, the transport only forwards it.
+  const std::string stdoutText = readTextFileCapped(paths.stdoutLog, kCheckLogReadCap);
+  const Json structured = firstJsonLine(stdoutText);
+  const Json* lint = structured.isObject() ? structured.find("lint") : nullptr;
+  const Json* impure = (lint != nullptr && lint->isObject()) ? lint->find("impure") : nullptr;
+  if (impure == nullptr || !impure->isArray())
+    return checkVerdictFailed(
+        "internalError",
+        Json::object({{"detail", Json("the runner produced no lint payload (stdout: " +
+                                      stdoutText.substr(0, 200) + ")")}}));
+  Json body = Json::object(
+      {{"ok", Json(true)}, {"lint", Json::object({{"impure", *impure}})}});
+  return jsonOk(std::move(body));
+}
+
 }  // namespace
 
 std::string encodeMatrixFrame(const std::vector<std::vector<double>>& columns,
@@ -613,6 +1017,11 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
     }
     return jsonOk(Json::object({{"signatures", std::move(list)}}));
   }
+
+  // POST /api/script/check — compile-only check for a script card. Never executes the text;
+  // see the long note above handleScriptCheck (and decisions doc §九).
+  if (req.path == "/api/script/check" && req.method == "POST")
+    return handleScriptCheck(req);
 
   // GET /api/nodes — the ids of every live compute node. Lets a client reconcile a
   // restored workspace against the server's authoritative set (protocol v1, additive).

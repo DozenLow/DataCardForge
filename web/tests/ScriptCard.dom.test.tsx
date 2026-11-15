@@ -20,10 +20,19 @@ import { StrictMode, act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { EditorView } from '@codemirror/view';
+
+import type { ScriptCheckResult } from '../src/backend/client.ts';
 import { MatrixData } from '../src/core/MatrixData.ts';
 import { useWorkspace, emptyScriptRun } from '../src/ui/workspaceStore.ts';
 import { isScriptCard, type FunctionCardModel } from '../src/ui/types.ts';
-import { ScriptCard, tracebackLines } from '../src/ui/components/ScriptCard.tsx';
+import {
+  ScriptCard,
+  localSyntaxDiagnostic,
+  mergeScriptDiagnostics,
+  tracebackLines,
+  type ScriptDiagnostic,
+} from '../src/ui/components/ScriptCard.tsx';
 
 const client = vi.hoisted(() => ({
   hello: vi.fn(async () => ({ ok: true })),
@@ -49,6 +58,7 @@ const client = vi.hoisted(() => ({
     resultMatrixIds: [111],
   })),
   checkAccuracy: vi.fn(async () => ({})),
+  checkScript: vi.fn(async (_script: string) => ({ ok: true, impure: [] as string[] })),
   listNodes: vi.fn(async () => []),
   nodeResult: vi.fn(async () => ({ ok: false })),
   events: vi.fn(async () => []),
@@ -413,5 +423,222 @@ describe('traceback parsing', () => {
     );
     expect(parsed.map((entry) => entry.line)).toEqual([null, 12, null]);
     expect(tracebackLines('')).toEqual([]);
+  });
+});
+// ── two-layer diagnostics ─────────────────────────────────────────────────────────────
+
+/**
+ * The merge rule as a pure function.
+ *
+ * The claim is not "the backend is usually right" but a precedence order: an authoritative
+ * verdict FOR THE TEXT ON SCREEN replaces the local guess outright, a stale verdict is never
+ * applied, and a check that could not run is itself a visible note — "no errors shown" must
+ * never silently mean "the check was skipped".
+ */
+describe('diagnostic merge rule', () => {
+  const local: ScriptDiagnostic = {
+    source: 'local',
+    code: 'localSyntax',
+    line: 3,
+    col: 1,
+    detail: '',
+  };
+  const syntaxError: ScriptCheckResult = {
+    ok: false,
+    impure: [],
+    error: { code: 'syntaxError', line: 2, col: 5, message: "'(' was never closed" },
+  };
+
+  it('replaces the local guess with the backend line for the same text', () => {
+    expect(mergeScriptDiagnostics(local, { text: 'x', result: syntaxError }, 'x')).toEqual([
+      { source: 'backend', code: 'syntaxError', line: 2, col: 5, detail: "'(' was never closed" },
+    ]);
+  });
+
+  it('trusts an authoritative clean verdict over the local parser', () => {
+    // A newer CPython may accept syntax this lezer build does not know. The authority is the
+    // compiler that will actually run the script, so a clean verdict clears the local entry.
+    expect(
+      mergeScriptDiagnostics(local, { text: 'x', result: { ok: true, impure: [] } }, 'x'),
+    ).toEqual([]);
+  });
+
+  it('ignores a verdict that judged text no longer on screen', () => {
+    expect(mergeScriptDiagnostics(local, { text: 'old', result: syntaxError }, 'new')).toEqual([
+      local,
+    ]);
+  });
+
+  it('keeps the local layer and says why when the check could not run', () => {
+    const merged = mergeScriptDiagnostics(
+      local,
+      { text: 'x', result: { ok: false, impure: [], error: { code: 'runtimeMissing' } } },
+      'x',
+    );
+    expect(merged.map((entry) => entry.code)).toEqual(['localSyntax', 'runtimeMissing']);
+    expect(merged[0]).toBe(local);
+  });
+
+  it('reads the local layer off the lezer tree with one-based coordinates', () => {
+    expect(localSyntaxDiagnostic('result = A * 1.0\n')).toBeNull();
+    const broken = localSyntaxDiagnostic('value = 1\nx = (2 + 3\n');
+    // lezer blames the end of the document here; CPython blames the unclosed paren — the
+    // merge tests above are about the authoritative line replacing this one.
+    expect(broken?.source).toBe('local');
+    expect(broken?.line).toBe(3);
+    expect(broken?.code).toBe('localSyntax');
+  });
+});
+
+/**
+ * The same rules against the real store and a mounted card: what the user sees and what the
+ * debounce costs. Timers are real for mounting (the harness needs them) and fake only for the
+ * debounce window, the same pattern the help tooltip tests use.
+ */
+describe('two-layer diagnostics in the card', () => {
+  const cleanCheck = async (): Promise<ScriptCheckResult> => ({ ok: true, impure: [] });
+
+  beforeEach(() => {
+    client.checkScript.mockReset();
+    client.checkScript.mockImplementation(cleanCheck);
+  });
+
+  afterEach(() => {
+    client.checkScript.mockReset();
+    client.checkScript.mockImplementation(cleanCheck);
+  });
+
+  function editor(host: HTMLElement): EditorView {
+    const element = host.querySelector('.script-card__editor .cm-editor');
+    if (!(element instanceof HTMLElement)) throw new Error('CodeMirror did not mount');
+    const view = EditorView.findFromDOM(element);
+    if (!view) throw new Error('CodeMirror view not found from its DOM');
+    return view;
+  }
+
+  it('stamps the title bar with the impure verdict and triggers, without blocking a run', async () => {
+    client.checkScript.mockImplementation(async () => ({
+      ok: true,
+      impure: ['import socket', 'random.* without seed()'],
+    }));
+    const host = await mount(cardId);
+
+    const title = host.querySelector('.card__title');
+    expect(title?.textContent).toContain('不可复现');
+    // CardShell renders `title` as both the visible text and the native tooltip and the card
+    // does not own that component, so the trigger list travels inside the same string.
+    expect(title?.getAttribute('title')).toContain('import socket');
+    expect(title?.getAttribute('title')).toContain('random.* without seed()');
+
+    // A label, never a gate: both runs stay available.
+    expect((host.querySelector('.script-card__run') as HTMLButtonElement).disabled).toBe(false);
+    expect(
+      (host.querySelector('.script-card__run--debug') as HTMLButtonElement).disabled,
+    ).toBe(false);
+    // Purity is a warning about reproducibility, not a syntax problem.
+    expect(host.querySelector('.script-card__diagnostics')).toBeNull();
+
+    // A stamp must never describe text it did not see: the next edit clears it until the
+    // authoritative check has judged the new text.
+    const view = editor(host);
+    await act(async () => {
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: 'result = A\n' } });
+    });
+    expect(host.querySelector('.card__title')?.textContent).not.toContain('不可复现');
+  });
+
+  it('debounces the authoritative check: a burst of edits costs exactly one request', async () => {
+    const host = await mount(cardId);
+    // The opening pass is a separate claim; count from after it.
+    client.checkScript.mockClear();
+    const view = editor(host);
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        for (const text of ['x = 1\n', 'x = 1\ny = 2\n', 'x = 1\ny = 2\nz = 3\n']) {
+          view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } });
+        }
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(599);
+      });
+      expect(client.checkScript).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(client.checkScript).toHaveBeenCalledTimes(1);
+      // The LAST text of the burst is what the one request judged.
+      expect(client.checkScript).toHaveBeenLastCalledWith('x = 1\ny = 2\nz = 3\n');
+
+      // No trailing second request: the timer is one-shot.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000);
+      });
+      expect(client.checkScript).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows the local layer at once and lets the backend line replace it when it lands', async () => {
+    const host = await mount(cardId);
+    const deferred: { resolve: ((result: ScriptCheckResult) => void) | null } = {
+      resolve: null,
+    };
+    client.checkScript.mockImplementation(
+      () =>
+        new Promise<ScriptCheckResult>((resolve) => {
+          deferred.resolve = resolve;
+        }),
+    );
+    // The opening pass already happened; only the debounced request is under test here.
+    client.checkScript.mockClear();
+    const view = editor(host);
+
+    vi.useFakeTimers();
+    try {
+      await act(async () => {
+        view.dispatch({
+          changes: { from: 0, to: view.state.doc.length, insert: 'value = 1\nx = (2 + 3\n' },
+        });
+      });
+      // Zero timers and zero requests so far: this is the "0 latency" layer.
+      let entries = [...host.querySelectorAll('.script-card__diagnostic')];
+      expect(entries).toHaveLength(1);
+      expect(entries[0].getAttribute('data-source')).toBe('local');
+      expect(entries[0].textContent).toContain('本地');
+      expect(entries[0].textContent).toContain('第 3 行');
+      expect(client.checkScript).not.toHaveBeenCalled();
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(600);
+      });
+      expect(client.checkScript).toHaveBeenCalledTimes(1);
+      // In flight: the local layer is still the only answer, so it stays.
+      expect(host.querySelector('.script-card__diagnostic')?.getAttribute('data-source')).toBe(
+        'local',
+      );
+
+      await act(async () => {
+        deferred.resolve?.({
+          ok: false,
+          impure: [],
+          error: { code: 'syntaxError', line: 2, col: 5, message: "'(' was never closed" },
+        });
+      });
+      entries = [...host.querySelectorAll('.script-card__diagnostic')];
+      expect(entries).toHaveLength(1);
+      expect(entries[0].getAttribute('data-source')).toBe('backend');
+      expect(entries[0].textContent).toContain('后端');
+      // The backend's coordinates win: CPython blames the unclosed paren on line 2, while
+      // lezer blamed the end of the document (line 3).
+      expect(entries[0].textContent).toContain('第 2 行:5');
+      expect(entries[0].textContent).toContain("'(' was never closed");
+      expect(entries[0].textContent).not.toContain('第 3 行');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

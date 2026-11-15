@@ -47,6 +47,23 @@ describe.skipIf(!enabled)('live backend integration', () => {
     expect(expressionColumns!.outputs.map((output) => output.outputId)).toEqual(['result']);
   });
 
+  it('checks a script through the compile-only endpoint: lint, syntax, no execution', async () => {
+    // The same three verdicts the backend's own gate covers, seen from the client: this is
+    // the seam the editor's authoritative layer actually calls.
+    const clean = await client.checkScript('result = 1\n');
+    expect(clean).toEqual({ ok: true, impure: [] });
+
+    const impure = await client.checkScript('import socket\nvalue = socket.gethostname()\n');
+    expect(impure.ok).toBe(true);
+    expect(impure.impure.some((item) => item.includes('socket'))).toBe(true);
+
+    const broken = await client.checkScript('def f(:\n    pass\n');
+    expect(broken.ok).toBe(false);
+    expect(broken.error?.code).toBe('syntaxError');
+    expect(broken.error?.line).toBe(1);
+    expect(broken.error?.col).toBeGreaterThan(0);
+  });
+
   it('registers a table and reads it back through a DCM1 window', async () => {
     const registered = await client.registerMatrix('it-source', [
       { posName: 'Pos.1', annotation: 'A', data: [1, 2, 3] },

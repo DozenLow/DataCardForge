@@ -133,6 +133,22 @@ add_executable(dc_python_node_test tests/python_node_test.cpp)
 target_link_libraries(dc_python_node_test PRIVATE dc_core Threads::Threads)
 add_test(NAME python_node COMMAND dc_python_node_test)
 
+# POST /api/script/check (tests/script_check_test.cpp): the compile-only check the editor
+# calls while typing. Three verdicts (ok+lint / syntaxError with the runner's line+col /
+# runtimeMissing) plus the security gate that the endpoint never executes the submitted text:
+# the test script opens a marker file as its first statement and the test asserts the file
+# was never created. src/http_server.cpp is compiled in directly (same reason as origin_gate):
+# the endpoint is reached through the real router and the real one-send response writer.
+# SKIP (exit 0) when third_party/pyruntime is not provisioned.
+add_executable(dc_script_check_test tests/script_check_test.cpp src/http_server.cpp ${DC_SHA_HEADER})
+target_include_directories(dc_script_check_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
+add_dependencies(dc_script_check_test dc_build_sha)
+target_link_libraries(dc_script_check_test PRIVATE dc_core dc_static Threads::Threads)
+if(WIN32)
+  target_link_libraries(dc_script_check_test PRIVATE ws2_32)
+endif()
+add_test(NAME script_check COMMAND dc_script_check_test)
+
 # The runner's own 37-case suite (backend/tests/py/test_runner.py), registered so CI runs the
 # Python half of the data channel too — it is the only oracle for the frame codec on that
 # side. Same SKIP rule as above: no runtime, no run, no failure.

@@ -8,6 +8,7 @@
 #include <condition_variable>
 #include <cstdint>
 #include <deque>
+#include <filesystem>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -50,6 +51,20 @@ bool readDcm2FrameFile(const std::string& path, std::vector<Column>* columns, st
 // directory (then of the executable) that holds backend/runner/runner.py. Empty when the
 // binary is not running out of a source checkout.
 std::string findRepoRoot();
+
+// The vendored interpreter a script run uses. Declared here (not only inside nodes.cpp)
+// because /api/script/check must resolve the interpreter with the SAME rule a run does — a
+// second copy of this logic is exactly how "the check passes but the run cannot find python"
+// gets written. The body still lives in nodes.cpp: declaration move only, no behaviour change.
+struct PythonRuntime {
+  std::filesystem::path dir;
+  // <dir>/bin/python3 (python.exe on Windows). Empty ⇒ no usable interpreter, with the
+  // *howMissing string (passed to resolvePythonRuntime) saying why.
+  std::filesystem::path python;
+};
+// DC_PYRUNTIME wins outright — a broken override is reported, never silently replaced by the
+// checkout's copy — else <repo>/third_party/pyruntime.
+PythonRuntime resolvePythonRuntime(std::string* howMissing);
 
 enum class NodeState { Dirty, Computing, Done, Error };
 

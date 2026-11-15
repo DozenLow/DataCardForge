@@ -56,6 +56,7 @@ const client = vi.hoisted(() => ({
     resultMatrixIds: [111],
   })),
   checkAccuracy: vi.fn(async () => ({})),
+  checkScript: vi.fn(async (_script: string) => ({ ok: true, impure: [] as string[] })),
   listNodes: vi.fn(async () => []),
   nodeResult: vi.fn(async () => ({ ok: false })),
   events: vi.fn(async () => []),

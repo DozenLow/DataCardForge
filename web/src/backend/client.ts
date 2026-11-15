@@ -128,6 +128,41 @@ export interface PortBindingDto {
   columnIndex?: number;
 }
 
+/**
+ * Why a script check did not produce a verdict.
+ *
+ * `syntaxError` and `runtimeMissing` come from the endpoint itself; `internalError` means the
+ * backend tried and failed; `backendUnavailable` is added HERE when the request never got an
+ * answer (the server is down, or the body did not parse). They are deliberately one union:
+ * every consumer shows "the authoritative layer could not answer" for all but `syntaxError`,
+ * and it must be impossible to mistake that for "the script compiles".
+ */
+export type ScriptCheckErrorCode =
+  | 'syntaxError'
+  | 'runtimeMissing'
+  | 'internalError'
+  | 'backendUnavailable';
+
+/**
+ * Verdict of `POST /api/script/check` — the editor's authoritative layer.
+ *
+ * The endpoint has its OWN envelope (`{ok:true,...}` / `{ok:false,error:{...}}`), not the
+ * global `{code:...}` error body: "your script does not compile" is a verdict about the
+ * script, not a failure of the request. `line`/`col` are the SCRIPT's coordinates (1-based),
+ * produced by the same CPython that will compile the run — which is why they are the numbers
+ * the editor shows once this answer lands.
+ */
+export interface ScriptCheckResult {
+  ok: boolean;
+  /**
+   * Present when `ok`: the runner's self-describing impurity labels (e.g. `"open()"`,
+   * `"random.* without seed()"`). Empty ⇒ the script is reproducible. Empty as well when
+   * `ok` is false: a script that does not compile has no impurity verdict to report.
+   */
+  impure: string[];
+  error?: { code: ScriptCheckErrorCode; line?: number; col?: number; message?: string };
+}
+
 async function jsonRequest<T>(base: string, path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(base + path, {
     ...init,
@@ -365,6 +400,52 @@ export class BackendClient {
     } catch {
       return {};
     }
+  }
+
+  /**
+   * Compile-only check for a script card's editor (POST /api/script/check).
+   *
+   * The backend spawns `runner.py --check`, which compiles the text and statically scans the
+   * AST for non-reproducible reads — it NEVER executes the script, so this call cannot publish
+   * anything and is safe to fire while the user types.
+   *
+   * Never throws: a transport/parse failure becomes `{ok:false,error:{code:'backendUnavailable'}}`
+   * so the editor can say the authoritative layer is off instead of silently implying that the
+   * script compiled.
+   */
+  async checkScript(script: string): Promise<ScriptCheckResult> {
+    let raw: {
+      ok?: unknown;
+      lint?: { impure?: unknown };
+      error?: { code?: unknown; line?: unknown; col?: unknown; message?: unknown };
+    } = {};
+    try {
+      raw = await jsonRequest(this.base, '/script/check', {
+        method: 'POST',
+        body: JSON.stringify({ script }),
+      });
+    } catch {
+      return { ok: false, impure: [], error: { code: 'backendUnavailable' } };
+    }
+    const impure = Array.isArray(raw.lint?.impure)
+      ? raw.lint.impure.filter((item): item is string => typeof item === 'string')
+      : [];
+    if (raw.ok === true && !Array.isArray(raw.lint?.impure)) {
+      // A backend that says "ok" without the lint list is broken, not clean: reporting an
+      // empty list here would print a "reproducible" verdict nobody computed.
+      return { ok: false, impure: [], error: { code: 'internalError' } };
+    }
+    if (raw.ok === true) return { ok: true, impure };
+    const error: NonNullable<ScriptCheckResult['error']> = {
+      code:
+        typeof raw.error?.code === 'string'
+          ? (raw.error.code as ScriptCheckErrorCode)
+          : 'backendUnavailable',
+    };
+    if (typeof raw.error?.line === 'number') error.line = raw.error.line;
+    if (typeof raw.error?.col === 'number') error.col = raw.error.col;
+    if (typeof raw.error?.message === 'string') error.message = raw.error.message;
+    return { ok: false, impure, error };
   }
 
   /** All node ids the server currently holds (for reconciling a restored workspace). */

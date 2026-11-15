@@ -893,50 +893,9 @@ struct TempDirGuard {
   }
 };
 
-// The vendored interpreter: DC_PYRUNTIME wins outright — a broken override is reported, never
-// silently replaced by the checkout's copy — else <repo>/third_party/pyruntime.
-struct PythonRuntime {
-  std::filesystem::path dir;
-  std::filesystem::path python;  // <dir>/bin/python3 (python.exe on Windows)
-};
-
-PythonRuntime resolvePythonRuntime(std::string* howMissing) {
-  PythonRuntime runtime;
-  const char* override = std::getenv("DC_PYRUNTIME");
-  if (override != nullptr && override[0] != '\0') {
-    runtime.dir = std::filesystem::path(override);
-  } else {
-    const std::string repo = findRepoRoot();
-    if (repo.empty()) {
-      *howMissing =
-          "not running out of a source checkout (no backend/runner/runner.py above the "
-          "working directory) and DC_PYRUNTIME is unset";
-      return runtime;
-    }
-    runtime.dir = std::filesystem::path(repo) / "third_party" / "pyruntime";
-  }
-  std::error_code ec;
-  // The path is used after the child chdir()ed into the scratch directory, so a relative
-  // DC_PYRUNTIME must be resolved against the caller's cwd now, not there.
-  runtime.dir = std::filesystem::absolute(runtime.dir, ec);
-  if (ec) {
-    *howMissing = "cannot resolve the runtime path " + runtime.dir.string();
-    runtime.python.clear();
-    return runtime;
-  }
-#ifdef _WIN32
-  const char* kPythonExecutable = "python.exe";
-#else
-  const char* kPythonExecutable = "python3";
-#endif
-  runtime.python = runtime.dir / "bin" / kPythonExecutable;
-  if (!std::filesystem::is_regular_file(runtime.python, ec)) {
-    *howMissing = "no interpreter at " + runtime.python.string();
-    runtime.python.clear();
-  }
-  return runtime;
-}
-
+// The vendored interpreter: its declaration lives in nodes.h because /api/script/check
+// resolves the runtime with the same rule a run does. The definition moved out of this
+// anonymous namespace (below) for the same reason; behaviour is unchanged.
 struct ScriptPaths {
   std::filesystem::path tmp;     // scratch directory = the child's cwd
   std::filesystem::path in;      // tmp/in: ports.json + one frame per port
@@ -1190,6 +1149,46 @@ Json scriptErrorParams(int exitCode, const std::string& stderrTail) {
 }
 
 }  // namespace
+
+// Declared in nodes.h: /api/script/check resolves the interpreter with this same rule.
+// DC_PYRUNTIME wins outright — a broken override is reported, never silently replaced by the
+// checkout's copy — else <repo>/third_party/pyruntime.
+PythonRuntime resolvePythonRuntime(std::string* howMissing) {
+  PythonRuntime runtime;
+  const char* override = std::getenv("DC_PYRUNTIME");
+  if (override != nullptr && override[0] != '\0') {
+    runtime.dir = std::filesystem::path(override);
+  } else {
+    const std::string repo = findRepoRoot();
+    if (repo.empty()) {
+      *howMissing =
+          "not running out of a source checkout (no backend/runner/runner.py above the "
+          "working directory) and DC_PYRUNTIME is unset";
+      return runtime;
+    }
+    runtime.dir = std::filesystem::path(repo) / "third_party" / "pyruntime";
+  }
+  std::error_code ec;
+  // The path is used after the child chdir()ed into the scratch directory, so a relative
+  // DC_PYRUNTIME must be resolved against the caller's cwd now, not there.
+  runtime.dir = std::filesystem::absolute(runtime.dir, ec);
+  if (ec) {
+    *howMissing = "cannot resolve the runtime path " + runtime.dir.string();
+    runtime.python.clear();
+    return runtime;
+  }
+#ifdef _WIN32
+  const char* kPythonExecutable = "python.exe";
+#else
+  const char* kPythonExecutable = "python3";
+#endif
+  runtime.python = runtime.dir / "bin" / kPythonExecutable;
+  if (!std::filesystem::is_regular_file(runtime.python, ec)) {
+    *howMissing = "no interpreter at " + runtime.python.string();
+    runtime.python.clear();
+  }
+  return runtime;
+}
 
 NodeRegistry::ScriptCardOutcome NodeRegistry::runScriptCard(
     int64_t nodeId, const Json& params, const std::vector<PortBinding>& bindings,
