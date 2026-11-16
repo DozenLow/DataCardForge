@@ -323,3 +323,53 @@ describe('menu.newScriptCard', () => {
     expect(en('menu.newRelationEnum')).toBe('New Relation Enumeration Card…');
   });
 });
+
+// ── 4. close protection ───────────────────────────────────────────────────────
+describe('close protection asks "is this a source?", not "is this a table?"', () => {
+  it('shows a script card with a chart dependent as blocked, and refuses the close', async () => {
+    const sourceId = await dataCard([{ name: 'a.csv', matrix: table(3) }]);
+    const scriptId = store().addScriptCard([sourceId]) as number;
+    await flush();
+
+    // One clean run fills the display cache, which is what gives a chart a column to read.
+    // (A chart can only be opened from an output that has a matrix behind it.)
+    client.computeNode.mockImplementationOnce(async (nodeId: number) => ({
+      ok: true,
+      nodeId,
+      state: 'done',
+      resultMatrixIds: [900],
+    }));
+    store().runScriptCard(scriptId);
+    await flush();
+    await flush();
+
+    const chartId = store().addChartCard(scriptId, 0, 'line') as number;
+    expect(chartId).not.toBeNull();
+    await flush();
+    expect(store().dependencies.hasDependents(scriptId)).toBe(true);
+
+    const host = await mountCanvas();
+    const close = host.querySelector<HTMLButtonElement>(
+      `.card--script[data-card-id="${scriptId}"] .card__close`,
+    );
+    expect(close).not.toBeNull();
+    // The shell paints the refusal BEFORE the click — the store would refuse anyway.
+    expect(close!.className).toContain('card__close--blocked');
+    // Nothing reads a chart, so the same rule leaves the dependent's own close untouched.
+    const chartClose = host.querySelector<HTMLButtonElement>(
+      `.card--chart[data-card-id="${chartId}"] .card__close`,
+    );
+    expect(chartClose?.className ?? '').not.toContain('card__close--blocked');
+
+    await act(async () => {
+      close!.click();
+    });
+    await flush();
+
+    // The refusal came from the generic rule (`blockCard` carries the blink a matrix card's
+    // blocked close produces), and the card is still on the canvas.
+    expect(store().blockedCardId).toBe(scriptId);
+    expect(store().cards.some((entry) => entry.id === scriptId)).toBe(true);
+    expect(store().cards.some((entry) => entry.id === chartId)).toBe(true);
+  });
+});

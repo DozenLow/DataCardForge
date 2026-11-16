@@ -438,8 +438,13 @@ export function CardCanvas({
   );
 
   /**
-   * A matrix may only be closed once nothing depends on it. The store already
-   * refuses the removal; here we surface why.
+   * A card may only be closed once nothing depends on it. The store already refuses the
+   * removal; here we surface why.
+   *
+   * The question is "is this card a source?", not "is this a table": a function card
+   * publishes matrices too, and the store states the rule once — every card except a chart,
+   * which nothing can read. Keeping the narrower kind check here would have shown the button
+   * as closable on a script card and then refused the click.
    */
   const handleClose = useCallback(
     (cardId: number) => {
@@ -447,8 +452,7 @@ export function CardCanvas({
       const card = state.cards.find((c) => c.id === cardId);
       if (!card) return;
 
-      const blocked =
-        isMatrixCard(card) && state.dependencies.hasDependents(card.id);
+      const blocked = !isChartCard(card) && state.dependencies.hasDependents(card.id);
 
       if (blocked) {
         reportBlocked(cardId);
@@ -465,7 +469,7 @@ export function CardCanvas({
     () =>
       cards.map((card) => {
         const active = selectedId === card.id;
-        const closeBlocked = isMatrixCard(card) && dependencies.hasDependents(card.id);
+        const closeBlocked = !isChartCard(card) && dependencies.hasDependents(card.id);
 
         if (isMatrixCard(card)) {
           const source = card.sources[card.activeSource];

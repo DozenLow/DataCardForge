@@ -36,12 +36,14 @@ import {
   type ScriptCheckErrorCode,
   type ScriptCheckResult,
 } from '../../backend/client.ts';
+import { CHART_TYPE_ORDER, chartTypeDef, minimumColumns } from '../../charts/chartTypes.ts';
 import type { Locale } from '../i18n.ts';
 import {
   SCRIPT_PREVIEW_ROWS,
   checkScriptName,
   countScriptOccurrences,
   emptyScriptRun,
+  outputMatrixId,
   useTranslator,
   useWorkspace,
   type ScriptNameCheck,
@@ -58,6 +60,7 @@ import {
   type FunctionCardModel,
 } from '../types.ts';
 import { CardShell } from './CardShell.tsx';
+import { Popup } from './Popup.tsx';
 
 /**
  * How long an edit waits before it becomes a definition change.
@@ -93,6 +96,16 @@ interface ScriptLabels {
   addPort: string;
   addOutput: string;
   removeOutput: string;
+  /**
+   * The per-output build entry. Its whole reason for existing: a declared output used to be
+   * a dead end — visible, nameable, and connected to nothing.
+   */
+  buildFromOutput: string;
+  /** `{name}` is the human output name, `{id}` its stable `out:N`. */
+  buildTitle: string;
+  /** Shown at the top of the build menu while the output has no rows yet. */
+  outputEmpty: string;
+  buildUnavailable: string;
   noPorts: string;
   noPreview: string;
   previewToggle: string;
@@ -137,6 +150,10 @@ const LABELS: Record<Locale, ScriptLabels> = {
     addPort: '+ 端口',
     addOutput: '+ 输出',
     removeOutput: '删除此输出',
+    buildFromOutput: '建卡',
+    buildTitle: '{name}（{id}）· 从这里建卡',
+    outputEmpty: '该输出还没有数据，先运行一次',
+    buildUnavailable: '这个输出还不能建卡',
     noPorts: '没有输入端口 — 脚本只靠自己的常量计算',
     noPreview: '尚未运行 — 运行后这里显示前几行',
     previewToggle: '展开预览前 5 行',
@@ -205,6 +222,10 @@ const LABELS: Record<Locale, ScriptLabels> = {
     addPort: '+ port',
     addOutput: '+ output',
     removeOutput: 'Remove this output',
+    buildFromOutput: 'Build',
+    buildTitle: '{name} ({id}) · build from this output',
+    outputEmpty: 'No data yet — run the card first',
+    buildUnavailable: 'This output cannot be built from yet',
     noPorts: 'No input ports — the script only uses its own constants',
     noPreview: 'Not run yet — the first rows appear here after a run',
     previewToggle: 'Show the first 5 rows',
@@ -741,6 +762,28 @@ export function ScriptCard({
   const addScriptPort = useWorkspace((state) => state.addScriptPort);
   const addScriptOutput = useWorkspace((state) => state.addScriptOutput);
   const removeScriptOutput = useWorkspace((state) => state.removeScriptOutput);
+  /**
+   * The creation verbs an output can feed. They are read from the store like every other
+   * action here, and none of them is told to `select` the new card: the store already does
+   * that for all three, so a second call would only duplicate the rule.
+   */
+  const addChartCard = useWorkspace((state) => state.addChartCard);
+  const addFormulaCard = useWorkspace((state) => state.addFormulaCard);
+  const addScriptCard = useWorkspace((state) => state.addScriptCard);
+  /**
+   * Anchor of the open build menu, in VIEWPORT coordinates.
+   *
+   * The anchor is measured from the button's own rect instead of being derived from the
+   * card's bounds because `Popup` portals into `document.body`: a card is a transformed
+   * react-rnd window, so anything positioned inside it is relative to the card and clipped
+   * by `overflow: hidden`.
+   */
+  const [buildMenu, setBuildMenu] = useState<{
+    x: number;
+    y: number;
+    outputId: string;
+    ordinal: number;
+  } | null>(null);
 
   const params = scriptParams(card);
   const scriptText = params.script;
@@ -1013,6 +1056,17 @@ export function ScriptCard({
   const titleBase = outputNames[0] ? `${labels.cardTitle} — ${outputNames[0]}` : labels.cardTitle;
   const title = impure.length === 0 ? titleBase : `${titleBase} · ${impureTitle}`;
 
+  /**
+   * What the open build menu reads: the width of the output it was opened from.
+   *
+   * Taken from the run's previews rather than from the slot matrix because a declared but
+   * never-run output has a slot but no rows — "0 columns" and "not run yet" are the same
+   * thing to this menu, and the hint says so.
+   */
+  const buildMenuCols = buildMenu ? (run?.previews[buildMenu.outputId]?.cols ?? 0) : 0;
+  /** The name a "created chart" toast quotes: the user's label, or the identity if unnamed. */
+  const buildMenuName = buildMenu ? outputNames[buildMenu.ordinal] || buildMenu.outputId : '';
+
   return (
     <CardShell
       card={card}
@@ -1156,6 +1210,28 @@ export function ScriptCard({
                     <span className="script-card__shape">
                       {preview && preview.rows > 0 ? `${preview.rows}×${preview.cols}` : '—'}
                     </span>
+                    {/*
+                      Every declared output — ordinal 0 included — gets a way out. The rows
+                      below are `out:N` like any other, and the store can already build from
+                      any of them; this button is only the entry point that was missing.
+                    */}
+                    <button
+                      type="button"
+                      className="script-card__build"
+                      title={labels.buildFromOutput}
+                      aria-label={`${labels.buildFromOutput} ${outputNames[ordinal] ?? ordinal + 1}`}
+                      onClick={(event) => {
+                        const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+                        setBuildMenu({
+                          x: rect.left,
+                          y: rect.bottom + 4,
+                          outputId: output.outputId,
+                          ordinal,
+                        });
+                      }}
+                    >
+                      {labels.buildFromOutput}
+                    </button>
                     <OutputPreview preview={preview} labels={labels} />
                     <button
                       type="button"
@@ -1237,6 +1313,101 @@ export function ScriptCard({
 
         <DebugPanel run={run} labels={labels} onJumpToLine={jumpToLine} />
       </div>
+
+      {/*
+        The build menu: one entry per declared output, rendered as a sibling of the card
+        body so nothing inside the card's `overflow: hidden` can clip it (see `Popup`).
+        Every branch closes the menu itself — a menu that survives its own click leaves the
+        user wondering whether the click landed.
+      */}
+      {buildMenu ? (
+        <Popup
+          x={buildMenu.x}
+          y={buildMenu.y}
+          className="context-menu context-menu--list"
+          onDismiss={() => setBuildMenu(null)}
+        >
+          <div className="context-menu__title">
+            {fill(labels.buildTitle, {
+              name: outputNames[buildMenu.ordinal] || buildMenu.outputId,
+              id: buildMenu.outputId,
+            })}
+          </div>
+          {/* No rows yet: say it once, and let the chart items below read as a rule rather
+              than as a menu that silently does nothing. */}
+          {buildMenuCols === 0 ? (
+            <div className="context-menu__hint">{labels.outputEmpty}</div>
+          ) : null}
+          {CHART_TYPE_ORDER.map((id) => {
+            const def = chartTypeDef(id);
+            // A chart reads this output's columns from the left, so "enough" is about the
+            // output's own width — the same rule the data card's column menu applies. With
+            // zero columns every type fails it, which is what disables the whole group on a
+            // card that has not run yet.
+            const enough = buildMenuCols >= minimumColumns(id);
+            const needColumns = t('status.needTrailingColumns', {
+              type: t(def.labelKey),
+              n: minimumColumns(id),
+              have: buildMenuCols,
+            });
+            return (
+              <button
+                key={id}
+                type="button"
+                className="context-menu__item"
+                title={enough ? t(def.hintKey) : needColumns}
+                disabled={!enough}
+                onClick={() => {
+                  const created = addChartCard(card.id, 0, id, buildMenu.outputId);
+                  // Read the action at click time instead of subscribing: a toast is
+                  // fire-and-forget display state, not something this card renders.
+                  //
+                  // "Not enough columns" is the menu's own rule. A null answer while the
+                  // item was ENABLED means the opposite case: the numbers exist but the
+                  // card's cache has not caught up (a run announces itself one round trip
+                  // before the slot lands). Blaming the width there would point at the data.
+                  const toast = useWorkspace.getState().showToast;
+                  if (created === null) {
+                    toast('error', enough ? labels.buildUnavailable : needColumns);
+                  }
+                  else toast('info', t('status.chartCreated', { name: buildMenuName }));
+                  setBuildMenu(null);
+                }}
+              >
+                {t(def.labelKey)}
+              </button>
+            );
+          })}
+          <div className="context-menu__separator" />
+          <button
+            type="button"
+            className="context-menu__item"
+            onClick={() => {
+              // One table in, one table out: the slot id is the store's to resolve
+              // (`out:0` is the display cache, `out:N` its own slot) — never derived here.
+              const matrixId = outputMatrixId(card, buildMenu.outputId);
+              const created = matrixId === null ? null : addFormulaCard(card.id, matrixId);
+              if (created === null) {
+                useWorkspace.getState().showToast('error', labels.buildUnavailable);
+              }
+              setBuildMenu(null);
+            }}
+          >
+            {t('menu.newFormula')}
+          </button>
+          <button
+            type="button"
+            className="context-menu__item"
+            onClick={() => {
+              // Same birth binding the data card's column menu uses, pointed at this output.
+              addScriptCard([{ cardId: card.id, outputId: buildMenu.outputId }]);
+              setBuildMenu(null);
+            }}
+          >
+            {t('menu.newScriptCard')}
+          </button>
+        </Popup>
+      ) : null}
     </CardShell>
   );
 }

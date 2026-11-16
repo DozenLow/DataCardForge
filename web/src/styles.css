@@ -2851,6 +2851,29 @@ body {
   cursor: default;
 }
 
+/* 「建卡」: the compact per-output build entry, a sibling of the remove/add controls.
+   It sits inside the output row, so it must not grow and must not wrap the row. */
+.script-card__build {
+  flex: 0 0 auto;
+  font-size: 10px;
+  line-height: 1;
+  padding: 1px 5px;
+  color: var(--accent);
+  background: transparent;
+  border: 1px solid var(--border-strong);
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.script-card__build:hover:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+.script-card__build:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 /* Output previews: five rows, only when the user asks for them. */
 .script-card__preview {
   display: inline-flex;
