@@ -1053,7 +1053,19 @@ interface WorkspaceState {
    * aborted by the caller, never applied here.
    */
   replaceCardSources: (cardId: number, entries: MatrixEntry[], index?: number) => boolean;
-  addChartCard: (matrixCardId: number, columnIndex: number, chartType?: ChartTypeId) => number | null;
+  /**
+   * Draw a chart from one column of `matrixCardId`.
+   *
+   * `outputId` picks which declared output the chart reads (`out:1`, …). Omitted, the
+   * long-standing default applies: a data card's active file, or a function card's display
+   * output. A data card declares no outputs, so naming one there is refused.
+   */
+  addChartCard: (
+    matrixCardId: number,
+    columnIndex: number,
+    chartType?: ChartTypeId,
+    outputId?: string,
+  ) => number | null;
   removeCard: (id: number) => boolean;
   closeAllCards: () => void;
   setBounds: (id: number, bounds: { x: number; y: number; width: number; height: number }) => void;
@@ -1185,14 +1197,15 @@ interface WorkspaceState {
   /**
    * Birth binding: create a script card reading the selected cards, in the given order.
    *
-   * One port per selected card (`in:0`, `in:1`, … with injected names `A`, `B`, …), all in
+   * One port per selected source (`in:0`, `in:1`, … with injected names `A`, `B`, …), all in
    * matrix mode, wired through the ordinary `addDependency` — a script card's inputs are
    * edges like any other card's, so close protection and cycle detection come for free.
-   * Data cards contribute their active file; function cards contribute their output.
+   * Data cards contribute their active file; function cards contribute their output, or the
+   * output named by `outputId`.
    * Returns null when nothing selected can be read (a chart, an empty formula card) or the
    * edge would close a cycle.
    */
-  addScriptCard: (sourceCardIds: number[]) => number | null;
+  addScriptCard: (seeds: Array<number | { cardId: number; outputId?: string }>) => number | null;
   /** Edit the script text. A definition change: the card goes dirty, the DAG is untouched. */
   setScriptText: (cardId: number, script: string) => void;
   /**
@@ -1426,6 +1439,20 @@ function normalizeRestoredCards(cards: CardModel[]): CardModel[] {
 function outputLocalMatrixId(card: FunctionCardModel, index: number): number | null {
   if (index === 0) return card.displayMatrixId;
   return card.outputs[index]?.localMatrixId ?? null;
+}
+
+/**
+ * Local matrix id of one declared output, addressed by its stable `outputId`.
+ *
+ * Exported for the component layer, which addresses an output by id (`out:1`) but needs the
+ * local slot id to attach a chart or a chained card to it. That mapping is the store's rule
+ * to keep: a component deriving it itself would have to know the "ordinal 0 IS
+ * `displayMatrixId`" exception, and would be wrong the day that exception moves.
+ */
+export function outputMatrixId(card: FunctionCardModel, outputId: string): number | null {
+  const index = card.outputs.findIndex((output) => output.outputId === outputId);
+  if (index < 0) return null;
+  return outputLocalMatrixId(card, index);
 }
 
 /**
@@ -1950,6 +1977,30 @@ const MAX_CACHE_ROWS = 200_000;
  */
 const RESULT_PREVIEW_ROWS = 100;
 
+/**
+ * How much of each output slot beyond ordinal 0 the browser currently holds.
+ *
+ * Ordinal 0 keeps its bookkeeping on the card (`card.result`) because that is where the
+ * user's "show more" choice lives. Every other declared output has no such field — and must
+ * not grow one on the persisted card model — so completeness is tracked here, keyed by the
+ * local matrix id the slot owns. Without it a K-output card cannot tell "out:2 is complete"
+ * from "out:2 was never pulled".
+ */
+const outputSlotCache = new Map<
+  number,
+  { shownRows: number; totalRows: number; complete: boolean }
+>();
+
+/**
+ * Pulls of one slot that are still on the wire, keyed by the local matrix id they fill.
+ *
+ * A chart asks for the same slot from several paths (`ensureChartData` per refresh, the
+ * preview pull, "show more"), and a full-table pull takes many window reads. Without this,
+ * the refresh that follows one pull starts a second pull of the same slot while the first
+ * is still paging, and each duplicate ends by refreshing again.
+ */
+const outputSlotPulls = new Map<number, Promise<boolean>>();
+
 interface ResultFetch {
   matrix: MatrixData;
   /** Rows mirrored into the cache (= matrix.rowCount()). */
@@ -2058,6 +2109,91 @@ function applyResultCache(cardId: number, result: ResultFetch): void {
 }
 
 /**
+ * Whether the browser already holds every row of one declared output.
+ *
+ * Ordinal 0 answers from the card (`card.result`), every other output from the slot cache:
+ * the two are filled by different writers, so "the card is complete" is a per-slot question,
+ * not a per-card one.
+ */
+function outputSlotComplete(card: FunctionCardModel, index: number): boolean {
+  // A result taller than MAX_CACHE_ROWS never satisfies "shown == total", so a truncated one
+  // is as complete as it can ever get. Answering only `complete` here would make every
+  // refresh re-download the capped table, forever.
+  if (index === 0) return card.result?.complete === true || card.result?.truncated === true;
+  const localMatrixId = outputLocalMatrixId(card, index);
+  // No slot means no dependent can name this output, so there is nothing left to fetch.
+  if (localMatrixId === null) return true;
+  return outputSlotCache.get(localMatrixId)?.complete === true;
+}
+
+/** Every local matrix a function card publishes: its display slot plus each extra output. */
+function ownedOutputMatrixIds(card: FunctionCardModel): number[] {
+  const ids = [card.displayMatrixId];
+  for (let index = 1; index < card.outputs.length; ++index) {
+    const localMatrixId = outputLocalMatrixId(card, index);
+    if (localMatrixId !== null && !ids.includes(localMatrixId)) ids.push(localMatrixId);
+  }
+  return ids;
+}
+
+/**
+ * Mirror one declared output beyond ordinal 0 into the local slot that output owns.
+ *
+ * Ordinal 0 is `applyResultCache`'s job (it carries `card.result` and the "show more"
+ * choice). Every other output used to keep an empty slot forever, so a chart or a chained
+ * card could bind to `out:N` and read nothing. Dependents are NOT refreshed here: the
+ * caller refreshes once after it has filled every slot, because a K-output card is still
+ * one card's worth of change.
+ */
+async function pullOutputSlot(
+  card: FunctionCardModel,
+  index: number,
+  rowBudget: number,
+): Promise<boolean> {
+  const output = card.outputs[index];
+  if (!output || output.resultMatrixId < 0) return false;
+  const localMatrixId = outputLocalMatrixId(card, index);
+  if (localMatrixId === null) return false;
+  // The slot is a fixed identity, so a pull already filling it answers a second request too:
+  // a full table is dozens of window reads, and a refresh landing mid-pull used to start a
+  // duplicate of all of them.
+  const running = outputSlotPulls.get(localMatrixId);
+  if (running) return running;
+  const epoch = workspaceEpoch;
+  const task = (async () => {
+    const result = await fetchResultRows(output.resultMatrixId, rowBudget);
+    if (!result) return false;
+    // A reset / restore while the read was on the wire: local ids restart, so this answer
+    // has no reader (the same epoch rule every other async write follows).
+    if (epoch !== workspaceEpoch) return false;
+    // The declaration can be withdrawn during the same await: `removeScriptOutput` drops the
+    // local slot a pull was filling, and an unguarded write would leave a matrix behind that
+    // no card owns — nothing would ever release it. Re-read the card and re-derive the slot
+    // instead of trusting the pre-await copy.
+    const owner = useWorkspace.getState().cards.find((entry) => entry.id === card.id);
+    if (!owner || !isFormulaCard(owner) || outputLocalMatrixId(owner, index) !== localMatrixId) {
+      return false;
+    }
+    useWorkspace.setState((state) => {
+      const matrices = new Map(state.matrices);
+      matrices.set(localMatrixId, result.matrix);
+      return { matrices };
+    });
+    outputSlotCache.set(localMatrixId, {
+      shownRows: result.shownRows,
+      totalRows: result.totalRows,
+      // `truncated` is `fetchResultRows` stopping at MAX_CACHE_ROWS: the rows past the cap are
+      // out of reach by design, and asking again would only re-read the same capped window.
+      // So the cache holds all it will ever hold, and another pull cannot change that.
+      complete: result.shownRows >= result.totalRows || result.truncated,
+    });
+    return true;
+  })().finally(() => outputSlotPulls.delete(localMatrixId));
+  outputSlotPulls.set(localMatrixId, task);
+  return task;
+}
+
+/**
  * Concurrent pulls of the same card are collapsed: create + event + PATCH used to trigger
  * three identical full-table downloads of the same result.
  */
@@ -2076,6 +2212,19 @@ async function pullPreviewIntoCache(cardId: number): Promise<void> {
   const result = await fetchResultRows(output.resultMatrixId, budget);
   if (!result) return;
   applyResultCache(cardId, result);
+
+  // Ordinal 0 is done above; every further declared output has a slot of its own that only
+  // a pull can fill. A slot already expanded keeps its full budget, like the display cache.
+  let wrote = false;
+  for (let index = 1; index < card.outputs.length; ++index) {
+    const localMatrixId = outputLocalMatrixId(card, index);
+    const held = localMatrixId === null ? undefined : outputSlotCache.get(localMatrixId);
+    const slotBudget = held?.complete ? MAX_CACHE_ROWS : RESULT_PREVIEW_ROWS;
+    if (await pullOutputSlot(card, index, slotBudget)) wrote = true;
+  }
+  // One refresh for the whole card, after every slot holds its numbers: doing it per slot
+  // would re-derive the same chart's edges once per declared output.
+  if (wrote) useWorkspace.getState().refreshDependentsOf(cardId);
 }
 
 /**
@@ -2104,12 +2253,22 @@ async function loadFullResultIntoCache(cardId: number): Promise<void> {
   const task = (async () => {
     const card = useWorkspace.getState().cards.find((c) => c.id === cardId);
     if (!card || !isFormulaCard(card)) return;
+    // "Complete" is a property of every slot, not of ordinal 0: a card whose display cache
+    // was already expanded still owes a chart reading `out:2` the rest of that table.
+    const allComplete = card.outputs.every((_, index) => outputSlotComplete(card, index));
+    if (allComplete) return;
+
     const output = card.outputs[0];
-    if (!output || output.resultMatrixId < 0) return;
-    if (card.result?.complete) return;
-    const result = await fetchResultRows(output.resultMatrixId, MAX_CACHE_ROWS);
-    if (!result) return;
-    applyResultCache(cardId, result);
+    if (output && output.resultMatrixId >= 0 && !outputSlotComplete(card, 0)) {
+      const result = await fetchResultRows(output.resultMatrixId, MAX_CACHE_ROWS);
+      if (result) applyResultCache(cardId, result);
+    }
+
+    let wrote = false;
+    for (let index = 1; index < card.outputs.length; ++index) {
+      if (await pullOutputSlot(card, index, MAX_CACHE_ROWS)) wrote = true;
+    }
+    if (wrote) useWorkspace.getState().refreshDependentsOf(cardId);
   })().finally(() => pullsInFlight.delete(cardId));
   pullsInFlight.set(cardId, task);
   return task;
@@ -2120,17 +2279,44 @@ async function loadFullResultIntoCache(cardId: number): Promise<void> {
  * a fraction of the data. So a chart dependent pulls the full result instead of the preview.
  * (An explicit user action — "open a chart from this output" — is what makes paying for the
  * whole table correct.)
+ *
+ * Which matrix the chart reads is part of the question: a function card publishes one slot
+ * per declared output, so filling only ordinal 0 leaves a chart bound to `out:1` holding the
+ * preview forever. Only the slots a chart actually names are filled.
  */
 function ensureChartData(ownerCardId: number): void {
   const state = useWorkspace.getState();
   const owner = state.cards.find((c) => c.id === ownerCardId);
-  if (!owner || !isFormulaCard(owner) || owner.result?.complete) return;
-  const dependents = state.dependencies.getDependents(ownerCardId);
-  const needsFull = dependents.some((id) => {
-    const card = state.cards.find((c) => c.id === id);
-    return card ? isChartCard(card) : false;
+  if (!owner || !isFormulaCard(owner)) return;
+
+  // The slots a dependent chart actually reads: every attached column plus the explicit X
+  // axis, which is a second, independent reference to one of them.
+  const wanted = new Set<number>();
+  for (const dependentId of state.dependencies.getDependents(ownerCardId)) {
+    const card = state.cards.find((entry) => entry.id === dependentId);
+    if (!card || !isChartCard(card)) continue;
+    for (const source of card.config.sources) wanted.add(source.matrixId);
+    if (card.config.xAxisSource) wanted.add(card.config.xAxisSource.matrixId);
+  }
+  if (wanted.size === 0) return;
+
+  const pending: Array<Promise<boolean>> = [];
+  for (let index = 0; index < owner.outputs.length; ++index) {
+    const localMatrixId = outputLocalMatrixId(owner, index);
+    if (localMatrixId === null || !wanted.has(localMatrixId)) continue;
+    if (outputSlotComplete(owner, index)) continue;
+    if (index === 0) {
+      void loadFullResultIntoCache(ownerCardId);
+    } else {
+      pending.push(pullOutputSlot(owner, index, MAX_CACHE_ROWS));
+    }
+  }
+  // One refresh after the loop: the freshly pulled rows have to reach the chart's `raw`, and
+  // refreshing per slot would walk the dependents once per declared output.
+  if (pending.length === 0) return;
+  void Promise.all(pending).then((wrote) => {
+    if (wrote.some(Boolean)) useWorkspace.getState().refreshDependentsOf(ownerCardId);
   });
-  if (needsFull) void loadFullResultIntoCache(ownerCardId);
 }
 
 /**
@@ -2295,8 +2481,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     // whole column, so a chart dependent upgrades the cache before it re-points.
     if (isFormulaCard(owner)) ensureChartData(ownerCardId);
 
-    // A data card re-points dependents at its newly active file; a function card has one
-    // output table, so dependents simply re-read it.
+    // A data card re-points dependents at its newly active file; a function card's outputs
+    // are fixed slots, so each dependent keeps the slot its binding names and only re-reads
+    // the values (see `refreshSource`).
     let activeMatrixId: number | undefined;
     let matrixIds: Set<number>;
     if (isMatrixCard(owner)) {
@@ -2305,32 +2492,52 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       for (const retired of retiredMatrixIds) matrixIds.add(retired);
     } else if (isFormulaCard(owner)) {
       activeMatrixId = owner.displayMatrixId;
-      matrixIds = new Set([owner.displayMatrixId]);
+      matrixIds = new Set(ownedOutputMatrixIds(owner));
     } else {
       return;
     }
     if (activeMatrixId === undefined) return;
-    const activeMatrix = state.matrices.get(activeMatrixId);
+    const activeId = activeMatrixId;
+    const activeMatrix = state.matrices.get(activeId);
     if (!activeMatrix) return;
 
     const dependentIds = new Set(state.dependencies.getDependents(ownerCardId));
     if (dependentIds.size === 0) return;
 
     /**
-     * Re-point one attached column at the newly active matrix.
+     * The matrix a source bound to `matrixId` reads after this refresh, or `null` when that
+     * slot holds nothing yet (the curve keeps its previous values).
      *
-     * A column that vanished in the new file keeps its previous values so the curve does
-     * not silently disappear — the behaviour the Qt frontend settled on.
+     * A data card has ONE address — its newly active file — so every dependent follows it.
+     * A function card has a slot per declared output, and the id a dependent carries is the
+     * port it bound to: it survives the refresh and only that slot's values are re-read.
+     * Collapsing it onto `displayMatrixId` is what made every output beyond ordinal 0
+     * unfeedable — a chart on `out:1` would silently plot output 0 instead.
      */
-    const rePoint = (source: ChartSource): ChartSource => {
-      if (source.columnIndex >= activeMatrix.columnCount()) {
-        return { ...source, matrixId: activeMatrixId };
+    const refreshSource = (matrixId: number): { id: number; matrix: MatrixData } | null => {
+      const id = isMatrixCard(owner) || !matrixIds.has(matrixId) ? activeId : matrixId;
+      const matrix = state.matrices.get(id);
+      return matrix ? { id, matrix } : null;
+    };
+
+    /**
+     * Re-point one attached column at the matrix it should be showing.
+     *
+     * A column that vanished keeps its previous values so the curve does not silently
+     * disappear — the behaviour the Qt frontend settled on.
+     */
+    const rePoint = (
+      source: ChartSource,
+      target: { id: number; matrix: MatrixData },
+    ): ChartSource => {
+      if (source.columnIndex >= target.matrix.columnCount()) {
+        return { ...source, matrixId: target.id };
       }
-      const column = activeMatrix.column(source.columnIndex);
+      const column = target.matrix.column(source.columnIndex);
       const raw = column.data.slice();
       return {
         ...source,
-        matrixId: activeMatrixId,
+        matrixId: target.id,
         raw,
         label: columnLabel(column),
       };
@@ -2345,8 +2552,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           const sources = card.config.sources.map((source) => {
             // Only sources that actually read this card's data are re-pointed.
             if (!matrixIds.has(source.matrixId)) return source;
+            const target = refreshSource(source.matrixId);
+            if (!target) return source;
             changed = true;
-            return rePoint(source);
+            return rePoint(source, target);
           });
 
           // The explicit X axis is a second, independent reference to a column of this
@@ -2354,13 +2563,16 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           // against the *previous* file's X values.
           let xAxisSource = card.config.xAxisSource;
           if (xAxisSource && matrixIds.has(xAxisSource.matrixId)) {
-            changed = true;
-            // A vanished X column falls back to the row index rather than keeping stale
-            // values: the dropdown's label and the drawn axis must not disagree.
-            xAxisSource =
-              xAxisSource.columnIndex >= activeMatrix.columnCount()
-                ? null
-                : rePoint(xAxisSource);
+            const target = refreshSource(xAxisSource.matrixId);
+            if (target) {
+              changed = true;
+              // A vanished X column falls back to the row index rather than keeping stale
+              // values: the dropdown's label and the drawn axis must not disagree.
+              xAxisSource =
+                xAxisSource.columnIndex >= target.matrix.columnCount()
+                  ? null
+                  : rePoint(xAxisSource, target);
+            }
           }
 
           if (!changed) return card;
@@ -2909,14 +3121,24 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       return true;
     },
 
-    addChartCard(ownerCardId, columnIndex, chartType) {
+    addChartCard(ownerCardId, columnIndex, chartType, outputId) {
       const state = get();
       const ownerCard = state.cards.find((c) => c.id === ownerCardId);
       if (!ownerCard || isChartCard(ownerCard)) return null;
 
       // A table's active file, or a function card's output table — both are matrices the
-      // chart can read, which is what makes a dataflow edge out of a function card.
-      const sourceMatrixId = chartSourceMatrixId(ownerCard);
+      // chart can read, which is what makes a dataflow edge out of a function card. Naming
+      // an output replaces that default: without it a function card only ever offered
+      // ordinal 0, so the second table it declares could be seen but never plotted.
+      let sourceMatrixId: number | null;
+      if (outputId !== undefined) {
+        if (!isFormulaCard(ownerCard)) return null;
+        const index = ownerCard.outputs.findIndex((output) => output.outputId === outputId);
+        if (index < 0) return null;
+        sourceMatrixId = outputLocalMatrixId(ownerCard, index);
+      } else {
+        sourceMatrixId = chartSourceMatrixId(ownerCard);
+      }
       if (sourceMatrixId === null) return null;
       const matrix = state.matrices.get(sourceMatrixId);
       if (!matrix) return null;
@@ -2998,6 +3220,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         selectedId: cardId,
       });
       revealCard({ ...chartSpot, ...chartSize });
+      // A chart reads a whole column, so the slot it was just bound to may need the rest of
+      // the table pulled in (the preview only carries the first screenful). Called after the
+      // card is in the store: `ensureChartData` finds the chart through the dependency graph
+      // and only then knows which slot is actually read.
+      ensureChartData(ownerCardId);
       return cardId;
     },
 
@@ -4125,19 +4352,35 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
 
     scriptRuns: {},
 
-    addScriptCard(sourceCardIds) {
+    addScriptCard(seedRefs) {
       const state = get();
-      // Birth binding, in the order the caller listed the cards: one PORT per selected card,
-      // its injected name the next free letter. Duplicates (a card selected twice) collapse —
-      // a port is a declaration, and two ports on the same source would just be two names for
-      // the same table.
+      // Birth binding, in the order the caller listed the sources: one PORT per source, its
+      // injected name the next free letter. The key is the (card, matrix) pair, not the card:
+      // a function card can publish several outputs and two of them are two different tables,
+      // while the same table selected twice collapses — a port is a declaration, and two
+      // ports on one table would just be two names for the same numbers.
       const seeds: Array<{ cardId: number; matrixId: number }> = [];
-      for (const sourceId of sourceCardIds) {
-        if (seeds.some((seed) => seed.cardId === sourceId)) continue;
+      const seen = new Set<string>();
+      for (const seedRef of seedRefs) {
+        const sourceId = typeof seedRef === 'number' ? seedRef : seedRef.cardId;
+        const outputId = typeof seedRef === 'number' ? undefined : seedRef.outputId;
         const source = state.cards.find((entry) => entry.id === sourceId);
         if (!source) continue;
-        const matrixId = chartSourceMatrixId(source);
+        let matrixId: number | null;
+        if (outputId !== undefined && isFormulaCard(source)) {
+          const index = source.outputs.findIndex((output) => output.outputId === outputId);
+          // A named output the card no longer declares is a stale selection, not a reason to
+          // bind output 0 behind the caller's back.
+          if (index < 0) continue;
+          matrixId = outputLocalMatrixId(source, index);
+        } else {
+          // A data card (or a bare card id) keeps its long-standing meaning: the active file.
+          matrixId = chartSourceMatrixId(source);
+        }
         if (matrixId === null) continue;
+        const key = `${sourceId}:${matrixId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
         seeds.push({ cardId: sourceId, matrixId });
       }
       if (seeds.length === 0) return null;
@@ -4622,6 +4865,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     loadSnapshot(snapshot) {
       // A push started against the previous workspace must not bind into this one.
       workspaceEpoch += 1;
+      // Slot completeness is per-workspace bookkeeping keyed by local matrix id, and those
+      // ids restart: the restored workspace re-learns it from its first pull. The same holds
+      // for pulls still in flight — they carry the old epoch and answer nobody.
+      outputSlotCache.clear();
+      outputSlotPulls.clear();
       const matrices = new Map<number, MatrixData>();
       for (const entry of snapshot.matrices) {
         const matrix = new MatrixData();
@@ -4734,6 +4982,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // written into the card that inherits the same id (the epoch check catches the write,
       // this drops the in-flight marker so the new workspace can run immediately).
       scriptRunsInFlight.clear();
+      // Local matrix ids restart at 1 as well, so a slot marked complete here would make the
+      // new workspace believe it holds rows nobody ever fetched — and a pull in flight would
+      // be merged into a request for a slot of the same id in the new workspace.
+      outputSlotCache.clear();
+      outputSlotPulls.clear();
       workspaceEpoch += 1;
       lastEventSeq = 0;
       stopEventLoop();
