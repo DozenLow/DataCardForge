@@ -27,7 +27,7 @@
 - 🧭 **项目演进史**（`history.md`）— 把决策/日志/踩坑/审计按因果链串成一条历史：四个时代、四条螺旋线、教训清单与现状
   - [项目演进史（DataCardForge）](history.md) · [EN](history.en.md) ← **先读这篇再进各分册**
 - 📌 **决策记录**（`decisions/`）— 已经拍板、影响后续的方向性结论
-  - [Python 脚本卡：卡是函数、注入是名字绑定、输出先声明](decisions/2026-11-15-python-script-card.md) ← **最新：算法完备性的 O(1) 逃生舱；阶段 1 实施中**
+  - [Python 脚本卡：卡是函数、注入是名字绑定、输出先声明](decisions/2026-11-15-python-script-card.md) ← **最新：算法完备性的 O(1) 逃生舱；阶段 1 已合入，K 个输出全部可接线**
   - [回归卡改名「关系枚举」——选列变成端口绑定，列头带上 X : Y](decisions/2026-10-31-relation-enum-card.md) ← 卡片能选列了，表格横向滚动对齐也修了
   - [数据卡可以换文件：换数据自动跟随，切文件仍显式重指向](decisions/2026-10-31-file-replacement.md) ← 保存的工作区可以当模板复用
   - [结果默认只显示前 100 行；稠密帧携带整表形状](decisions/2026-10-29-result-preview.md) ← 大结果不再整包下传

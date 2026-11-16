@@ -30,7 +30,7 @@ were considered and dropped. Three entrances, each answering one question:
   causal history: four eras, four spirals, a lesson list and the current state
   - [Project history (DataCardForge)](history.en.md) ← **read this one before the individual volumes**
 - 📌 **Decision records** (`decisions/`) — settled, direction-setting conclusions
-  - [Python script card: a card is a function, injection is name binding, outputs are declared first](decisions/2026-11-15-python-script-card.md) ← **latest: the O(1) escape hatch for algorithmic completeness; stage 1 in progress**
+  - [Python script card: a card is a function, injection is name binding, outputs are declared first](decisions/2026-11-15-python-script-card.md) ← **latest: the O(1) escape hatch for algorithmic completeness; stage 1 landed, every declared output is wireable**
   - [Regression card renamed to "relation enumeration": picking a column is a port binding, headers carry X : Y](decisions/2026-10-31-relation-enum-card.md) ← cards can finally pick columns; horizontal table-scroll alignment fixed too
   - [Data cards can replace their file: replacing follows automatically, switching still re-points explicitly](decisions/2026-10-31-file-replacement.md) ← a saved workspace finally works as a template
   - [Results show the first 100 rows by default; dense frames carry the full-table shape](decisions/2026-10-29-result-preview.md) ← large results are no longer shipped whole
