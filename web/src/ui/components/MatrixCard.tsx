@@ -14,16 +14,16 @@
 import { useState } from 'react';
 
 import { MatrixData } from '../../core/MatrixData.ts';
-import {
-  CHART_TYPE_ORDER,
-  chartTypeDef,
-  minimumColumns,
-  type ChartTypeId,
-} from '../../charts/chartTypes.ts';
+import type { ChartTypeId } from '../../charts/chartTypes.ts';
 import { useTranslator, useWorkspace } from '../workspaceStore.ts';
 import type { MatrixCardModel } from '../types.ts';
 import { CardShell } from './CardShell.tsx';
-import { Popup } from './Popup.tsx';
+import {
+  ChartTypeItems,
+  ContextMenu,
+  ContextMenuItem,
+  ContextMenuSub,
+} from './ContextMenu.tsx';
 import { SummaryPanel } from './SummaryPanel.tsx';
 import { VirtualTable } from './VirtualTable.tsx';
 
@@ -88,6 +88,11 @@ export function MatrixCard({
   const rows = matrix?.rowCount() ?? 0;
   const cols = matrix?.columnCount() ?? 0;
   const activeSourceName = card.sources[card.activeSource]?.name ?? '';
+  /** The header the menu was opened on — the menu's title and the chart toast's name. */
+  const menuColumnLabel =
+    menu && matrix && menu.column < cols
+      ? matrix.columnLabel(menu.column) || matrix.column(menu.column).posName
+      : '';
 
   const title = matrix
     ? t(card.sources.length > 1 ? 'card.matrixMulti' : 'card.matrix', {
@@ -235,68 +240,34 @@ export function MatrixCard({
       </div>
 
       {menu ? (
-        <Popup
-          x={menu.x}
-          y={menu.y}
-          className="context-menu context-menu--list"
-          onDismiss={() => setMenu(null)}
-        >
-          <div className="context-menu__title">
-            {t('table.contextChartMenu')} ·{' '}
-            {matrix ? matrix.columnLabel(menu.column) || matrix.column(menu.column).posName : ''}
-          </div>
-          {CHART_TYPE_ORDER.map((id) => {
-            const def = chartTypeDef(id);
-            // A chart is built from this column *and the ones after it*, so the test is
-            // against the remaining columns — not the matrix's total. Testing the total
-            // let the last column offer "scatter", which then created nothing at all.
-            const remaining = cols - menu.column;
-            const enough = minimumColumns(id) <= remaining;
-            return (
-              <button
-                key={id}
-                type="button"
-                className="context-menu__item"
-                title={enough ? t(def.hintKey) : t('status.needTrailingColumns', {
-                  type: t(def.labelKey),
-                  n: minimumColumns(id),
-                  have: remaining,
-                })}
-                disabled={!enough}
-                onClick={() => {
-                  const created = onOpenChart(menu.column, id);
-                  if (created === null) {
-                    showToast('error', t('status.needTrailingColumns', {
-                      type: t(def.labelKey),
-                      n: minimumColumns(id),
-                      have: remaining,
-                    }));
-                  } else {
-                    showToast('info', t('status.chartCreated', {
-                      name: matrix ? matrix.columnLabel(menu.column) : '',
-                    }));
-                  }
-                  setMenu(null);
-                }}
-              >
-                {t(def.labelKey)}
-              </button>
-            );
-          })}
+        // The title is the column name, not the old "绘制图表 · <column>" line: "draw chart"
+        // is now a submenu entry, and a title must say where the menu is — the header it was
+        // opened on — because all three card menus share this shape.
+        <ContextMenu x={menu.x} y={menu.y} title={menuColumnLabel} onDismiss={() => setMenu(null)}>
+          <ContextMenuSub label={t('table.contextChartMenu')}>
+            <ChartTypeItems
+              remaining={cols - menu.column}
+              columnLabel={menuColumnLabel}
+              onPick={(type) => {
+                // The primitive is menu-agnostic: it reports the outcome, the card owns its
+                // own lifecycle. Close here for both outcomes — on a refusal the toast is
+                // the answer, and a menu left open reads as "the click did nothing".
+                const created = onOpenChart(menu.column, type);
+                setMenu(null);
+                return created;
+              }}
+            />
+          </ContextMenuSub>
           <div className="context-menu__separator" />
-          <button
-            type="button"
-            className="context-menu__item"
+          <ContextMenuItem
             onClick={() => {
               onOpenFormula(menu.column);
               setMenu(null);
             }}
           >
             {t('menu.newFormula')}
-          </button>
-          <button
-            type="button"
-            className="context-menu__item"
+          </ContextMenuItem>
+          <ContextMenuItem
             title={
               cols >= 2
                 ? t('menu.newRelationEnum')
@@ -312,18 +283,16 @@ export function MatrixCard({
             }}
           >
             {t('menu.newRelationEnum')}
-          </button>
-          <button
-            type="button"
-            className="context-menu__item"
+          </ContextMenuItem>
+          <ContextMenuItem
             onClick={() => {
               onOpenScript();
               setMenu(null);
             }}
           >
             {t('menu.newScriptCard')}
-          </button>
-        </Popup>
+          </ContextMenuItem>
+        </ContextMenu>
       ) : null}
     </CardShell>
   );

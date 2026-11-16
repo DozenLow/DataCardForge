@@ -111,6 +111,41 @@ afterEach(async () => {
   document.body.innerHTML = '';
 });
 
+/**
+ * The menu a submenu is NOT: `Popup` appends the second-level list after its parent, so the
+ * last `.context-menu--list` in the document is the one a submenu opened.
+ */
+function lastMenu(): HTMLElement {
+  const menus = [...document.querySelectorAll<HTMLElement>('.context-menu--list')];
+  return menus[menus.length - 1];
+}
+
+/**
+ * Open the "绘制图表" submenu of the header menu on screen and return it.
+ *
+ * The nine chart types live one level down since they all produce the same kind of output;
+ * level one is reserved for gestures that create *different* things.
+ */
+async function openChartSubmenu(): Promise<HTMLElement> {
+  const sub = [...document.querySelectorAll<HTMLButtonElement>('.context-menu__item')].find(
+    (button) => button.textContent?.includes('绘制图表'),
+  );
+  expect(sub).toBeDefined();
+  await act(async () => {
+    sub!.click();
+  });
+  return lastMenu();
+}
+
+/** Dispatch a right-click on one element, the gesture that opens these menus. */
+async function rightClick(target: Element): Promise<void> {
+  await act(async () => {
+    target.dispatchEvent(
+      new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 160 }),
+    );
+  });
+}
+
 describe('function card zones', () => {
   it('renders the three zones', async () => {
     const host = await mount(makeCard(), {
@@ -394,16 +429,20 @@ describe('charting from the output table', () => {
     const host = await mount(makeCard(), { resultMatrix: matrix(2, 4) });
     const header = host.querySelector<HTMLElement>('.card--formula .vtable__colhead');
     expect(header).not.toBeNull();
-    await act(async () => {
-      header!.dispatchEvent(
-        new MouseEvent('contextmenu', { bubbles: true, clientX: 200, clientY: 160 }),
-      );
-    });
+    await rightClick(header!);
+
     const menu = document.querySelector('.context-menu--list');
     expect(menu).not.toBeNull();
+    // Level one: one entry that opens the chart types, plus the other creation gesture.
+    // The nine chart types are not spread across level one — they all produce a chart.
+    expect(menu!.textContent).toContain('绘制图表');
+    expect(menu!.textContent).not.toContain('折线图');
+
+    const submenu = await openChartSubmenu();
+    expect(submenu).not.toBe(menu);
     // Every declared chart type is offered, exactly like a data card's column header.
-    expect(menu!.textContent).toContain('折线图');
-    expect(menu!.textContent).toContain('相关性热力图');
+    expect(submenu.textContent).toContain('折线图');
+    expect(submenu.textContent).toContain('相关性热力图');
   });
 
   it('creates the chart through onOpenChart with the clicked column', async () => {
@@ -416,14 +455,15 @@ describe('charting from the output table', () => {
       },
     });
     const header = host.querySelector<HTMLElement>('.card--formula .vtable__colhead');
+    await rightClick(header!);
+    // Through the submenu: 绘制图表 → 折线图. `items[0]` used to be the line chart itself.
+    const submenu = await openChartSubmenu();
+    const line = [...submenu.querySelectorAll<HTMLButtonElement>('.context-menu__item')].find(
+      (item) => item.textContent?.trim() === '折线图',
+    );
+    expect(line).toBeDefined();
     await act(async () => {
-      header!.dispatchEvent(
-        new MouseEvent('contextmenu', { bubbles: true, clientX: 200, clientY: 160 }),
-      );
-    });
-    const items = [...document.querySelectorAll<HTMLButtonElement>('.context-menu__item')];
-    await act(async () => {
-      items[0].click();
+      line!.click();
     });
     expect(calls).toEqual([{ column: 0, type: 'line' }]);
   });
@@ -543,14 +583,12 @@ describe('an empty result zone says why it is empty', () => {
 });
 
 describe('the result-column menu explains a single-column table', () => {
+  // The rule and the greyed-out types live in the "绘制图表" submenu now, so this helper
+  // walks all the way in: right-click the header → 绘制图表 → the chart list.
   const openMenu = async (host: HTMLElement) => {
     const header = host.querySelector<HTMLElement>('.card--formula .vtable__colhead')!;
-    await act(async () => {
-      header.dispatchEvent(
-        new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 200, clientY: 160 }),
-      );
-    });
-    return document.querySelector<HTMLElement>('.context-menu--list')!;
+    await rightClick(header);
+    return openChartSubmenu();
   };
   const item = (menu: HTMLElement, label: string) =>
     [...menu.querySelectorAll<HTMLButtonElement>('.context-menu__item')].find(

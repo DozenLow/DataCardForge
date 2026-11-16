@@ -1220,6 +1220,21 @@ body {
   background: var(--border);
 }
 
+/* A first-level entry that opens a second-level menu ("绘制图表 ▸"). The label and its
+   chevron are pushed apart so the row reads as a way through, not as a leaf item. */
+.context-menu__item--sub {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.context-menu__chevron {
+  opacity: 0.6;
+  font-size: 10px;
+  line-height: 1;
+}
+
 /* One-line rule under a menu title (e.g. why the pair-based chart types are greyed out). */
 .context-menu__hint {
   max-width: 240px;
@@ -2847,29 +2862,6 @@ body {
 }
 
 .script-card__add:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-
-/* 「建卡」: the compact per-output build entry, a sibling of the remove/add controls.
-   It sits inside the output row, so it must not grow and must not wrap the row. */
-.script-card__build {
-  flex: 0 0 auto;
-  font-size: 10px;
-  line-height: 1;
-  padding: 1px 5px;
-  color: var(--accent);
-  background: transparent;
-  border: 1px solid var(--border-strong);
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.script-card__build:hover:not(:disabled) {
-  background: var(--accent-soft);
-}
-
-.script-card__build:disabled {
   opacity: 0.45;
   cursor: default;
 }

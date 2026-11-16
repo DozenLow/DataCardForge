@@ -15,7 +15,10 @@
  * reads. A test that stubbed the store would only prove the component can call a function.
  *
  * What these tests guard:
- *   - one entry per declared output, ordinal 0 included;
+ *   - one entry per declared output, ordinal 0 included — opened by RIGHT-CLICKING the row
+ *     (the header gesture: a data card builds from a column header, and an output row is
+ *     this card's header). The left-click 「建卡」 button it replaced contradicted that rule;
+ *   - the nine chart types sit one level down, behind「绘制图表」;
  *   - a card that has not run yet says so, and its chart group is disabled as one;
  *   - a chart built from `out:1` plots `out:1`'s numbers, not ordinal 0's;
  *   - the two other creation entries bind the same slot, with the same birth binding;
@@ -162,16 +165,52 @@ function menuItem(text: string): HTMLButtonElement {
   return found;
 }
 
-/** Click the build entry of one output row and return the menu's items. */
+/** Right-click one output row — the gesture that opens the build menu. */
 async function openBuildMenu(host: HTMLElement, ordinal: number): Promise<HTMLButtonElement[]> {
-  const buttons = [...host.querySelectorAll<HTMLButtonElement>('.script-card__build')];
-  const target = buttons[ordinal];
-  if (!target) throw new Error(`output ${ordinal} has no build entry`);
+  const row = host.querySelectorAll<HTMLElement>('.script-card__row--output')[ordinal];
+  if (!row) throw new Error(`output row ${ordinal} is missing`);
+  await rightClick(row);
+  return menuItems();
+}
+
+/**
+ * Open the build menu, then walk into「绘制图表」and return the nine chart entries.
+ *
+ * Only the submenu's own items are returned: level one is still on screen (a submenu is a
+ * second list, not a replacement), and mixing the two would make "9 chart types" untestable.
+ */
+async function openChartMenu(host: HTMLElement, ordinal: number): Promise<HTMLButtonElement[]> {
+  const level = await openBuildMenu(host, ordinal);
+  const sub = level.find((item) => item.textContent?.includes(zh('table.contextChartMenu')));
+  if (!sub) {
+    throw new Error(`no chart submenu (had: ${level.map((item) => item.textContent).join(' | ')})`);
+  }
+  await click(sub);
+  const menus = [...document.querySelectorAll<HTMLElement>('.context-menu')];
+  return [...menus[menus.length - 1].querySelectorAll<HTMLButtonElement>('.context-menu__item')];
+}
+
+/** Right-click one element (it bubbles to the output row it lives in). */
+async function rightClick(target: Element): Promise<void> {
   await act(async () => {
-    target.click();
+    target.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX: 320,
+        clientY: 240,
+      }),
+    );
   });
   await flush();
-  return menuItems();
+}
+
+/** Escape dismisses every open menu, at both levels. */
+async function dismiss(): Promise<void> {
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }));
+  });
+  await flush();
 }
 
 async function click(item: HTMLButtonElement): Promise<void> {
@@ -279,25 +318,36 @@ afterEach(async () => {
 });
 
 describe('the build entry', () => {
-  it('gives every declared output one entry, ordinal 0 included', async () => {
+  it('opens on every declared output row, ordinal 0 included', async () => {
     const host = await mount(cardId);
-    const buttons = [...host.querySelectorAll<HTMLButtonElement>('.script-card__build')];
+    // No button any more: the entry point is the row's own right-click.
+    expect(host.querySelector('.script-card__build')).toBeNull();
 
-    expect(buttons).toHaveLength(2);
-    // Named after the output, so the row is still readable once the panel is narrow.
-    expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
-      '建卡 result',
-      '建卡 result2',
-    ]);
-    // It sits between the shape and the preview: the row reads name · id · shape · 建卡 · data.
-    const row = host.querySelectorAll('.script-card__row--output')[1];
-    const children = [...row!.children].map((child) => child.className);
-    expect(children.indexOf('script-card__build')).toBe(children.indexOf('script-card__shape') + 1);
+    for (const [ordinal, outputId] of [
+      [0, 'out:0'],
+      [1, 'out:1'],
+    ] as const) {
+      await openBuildMenu(host, ordinal);
+      const title = document.querySelector('.context-menu__title')?.textContent ?? '';
+      expect(title).toContain(outputId);
+      await dismiss();
+      expect(document.querySelector('.context-menu')).toBeNull();
+    }
+  });
+
+  it('leaves the name field its own right-click', async () => {
+    // The row is a text box and a couple of buttons; a right-click in the box is the
+    // browser's paste gesture, not a request to build a card.
+    const host = await mount(cardId);
+    const input = host.querySelector<HTMLInputElement>('.script-card__row--output input');
+    expect(input).not.toBeNull();
+    await rightClick(input!);
+    expect(document.querySelector('.context-menu')).toBeNull();
   });
 
   it('says the output has no data yet, and disables the chart group as one', async () => {
     const host = await mount(cardId);
-    const items = await openBuildMenu(host, 1);
+    const level = await openBuildMenu(host, 1);
 
     // The title names both the label and the stable id — the id is what a dependent stores.
     const title = document.querySelector('.context-menu__title')?.textContent ?? '';
@@ -309,13 +359,16 @@ describe('the build entry', () => {
       '该输出还没有数据，先运行一次',
     );
 
-    // Nine chart types, then the separator, then the two card types: 9 + 2 items.
-    expect(items).toHaveLength(CHART_TYPE_ORDER.length + 2);
-    const chartItems = items.slice(0, CHART_TYPE_ORDER.length);
-    expect(chartItems.every((item) => item.disabled)).toBe(true);
+    // Level one is three entries: the chart submenu, then the two card types.
+    expect(level).toHaveLength(3);
     // The two creation entries are NOT gated by data: a formula card reads a declaration.
-    expect(items[CHART_TYPE_ORDER.length].disabled).toBe(false);
-    expect(items[CHART_TYPE_ORDER.length + 1].disabled).toBe(false);
+    expect(level[1].disabled).toBe(false);
+    expect(level[2].disabled).toBe(false);
+
+    // …while every chart type is disabled by the zero-column rule, seen through the submenu.
+    const charts = await openChartMenu(host, 1);
+    expect(charts).toHaveLength(CHART_TYPE_ORDER.length);
+    expect(charts.every((item) => item.disabled)).toBe(true);
   });
 });
 
@@ -324,7 +377,7 @@ describe('building from a named output', () => {
     await runWithData();
     const slot = extraSlot();
     const host = await mount(cardId);
-    const items = await openBuildMenu(host, 1);
+    const items = await openChartMenu(host, 1);
 
     // The card has run, so the "no data yet" hint is gone…
     expect(document.querySelector('.context-menu__hint')).toBeNull();
@@ -401,13 +454,14 @@ describe('the dictionary', () => {
     });
     await flush();
 
-    const buttons = [...host.querySelectorAll<HTMLButtonElement>('.script-card__build')];
-    expect(buttons[1].textContent).toBe('Build');
-
-    await openBuildMenu(host, 1);
+    const level = await openBuildMenu(host, 1);
+    // The submenu entry is a shared key, with the chevron the primitive appends.
+    expect(level[0].textContent).toContain(en('table.contextChartMenu'));
     expect(menuItem(en('menu.newFormula')).textContent).toBe('New Formula Card…');
     expect(menuItem(en('menu.newScriptCard')).textContent).toBe('New Script Card…');
-    // The chart labels come from the dictionary too.
+
+    // The chart labels come from the dictionary too — one level down.
+    await click(level[0]);
     expect(menuItem(en(chartTypeDef('line').labelKey)).textContent).toBe('Line');
   });
 });

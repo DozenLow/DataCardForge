@@ -28,11 +28,16 @@ import { useTranslator, useWorkspace, type RepointOffer } from '../workspaceStor
 import { registerPort, unregisterPort, type AnchorSide } from '../cardMetrics.ts';
 import type { FunctionCardModel, NodeStatus } from '../types.ts';
 import type { MessageKey } from '../i18n.ts';
-import { CHART_TYPE_ORDER, chartTypeDef, minimumColumns, type ChartTypeId } from '../../charts/chartTypes.ts';
+import type { ChartTypeId } from '../../charts/chartTypes.ts';
 import { REGRESSION_SIGNATURE } from '../migrate.ts';
 import { CardShell } from './CardShell.tsx';
+import {
+  ChartTypeItems,
+  ContextMenu,
+  ContextMenuItem,
+  ContextMenuSub,
+} from './ContextMenu.tsx';
 import { HoverHelp, useHoverHelp } from './HoverHelp.tsx';
-import { Popup } from './Popup.tsx';
 import { SummaryPanel } from './SummaryPanel.tsx';
 import { ROW_HEADER_WIDTH, VirtualTable } from './VirtualTable.tsx';
 
@@ -126,7 +131,6 @@ export function FormulaCard({
   const setBounds = useWorkspace((s) => s.setBounds);
   const setFormula = useWorkspace((s) => s.setFormula);
   const removeFormula = useWorkspace((s) => s.removeFormula);
-  const showToast = useWorkspace((s) => s.showToast);
   // The reference dialog is store-owned: the Help menu opens the same one, and this card
   // must not need a prop relayed through CardCanvas to reach it.
   const openHelp = useWorkspace((s) => s.openHelp);
@@ -316,6 +320,17 @@ export function FormulaCard({
 
   const rows = resultMatrix?.rowCount() ?? 0;
   const cols = resultMatrix?.columnCount() ?? 0;
+  /**
+   * The result header the menu was opened on — empty once that column is gone.
+   *
+   * A recompute can replace the table under an open menu, and the effect above only closes
+   * the menu on the render AFTER it notices; reading `column(i).posName` unguarded threw in
+   * that one frame (the column no longer exists).
+   */
+  const chartMenuLabel =
+    chartMenu && resultMatrix && chartMenu.column < cols
+      ? resultMatrix.columnLabel(chartMenu.column) || resultMatrix.column(chartMenu.column).posName
+      : '';
   // ── relation enumeration: the pair IS the horizontal axis ────────────────────────────
   // The transport has no row-label channel (`Matrix` carries column annotations only), so
   // "which two columns does this number describe?" can only be answered on the column axis.
@@ -876,80 +891,44 @@ export function FormulaCard({
       </div>
 
       {chartMenu && resultMatrix ? (
-        <Popup
+        // Title = the result column this menu was opened on. "绘制图表" used to share this
+        // line; it is now the submenu entry that carries the nine chart types.
+        <ContextMenu
           x={chartMenu.x}
           y={chartMenu.y}
-          className="context-menu context-menu--list"
+          title={chartMenuLabel}
           onDismiss={() => setChartMenu(null)}
         >
-          <div className="context-menu__title">
-            {t('table.contextChartMenu')} ·{' '}
-            {chartMenu.column < cols
-              ? resultMatrix.columnLabel(chartMenu.column) ||
-                resultMatrix.column(chartMenu.column).posName
-              : ''}
-          </div>
-          {/* A single trailing column cannot carry a scatter/regression/correlation: say so
-              once, so the disabled items below read as a rule and not as a broken menu. */}
-          {cols - chartMenu.column === 1 ? (
-            <div className="context-menu__hint">{t('chart.singleColumnHint')}</div>
-          ) : null}
-          {CHART_TYPE_ORDER.map((id) => {
-            const def = chartTypeDef(id);
-            // A chart is built from this column *and the ones after it*, so the test is
-            // against the remaining columns — not the table's total.
-            const remaining = cols - chartMenu.column;
-            const enough = minimumColumns(id) <= remaining;
-            return (
-              <button
-                key={id}
-                type="button"
-                className="context-menu__item"
-                title={
-                  enough
-                    ? t(def.hintKey)
-                    : t('status.needTrailingColumns', {
-                        type: t(def.labelKey),
-                        n: minimumColumns(id),
-                        have: remaining,
-                      })
-                }
-                disabled={!enough}
-                onClick={() => {
-                  const created = onOpenChart(chartMenu.column, id);
-                  if (created === null) {
-                    showToast(
-                      'error',
-                      t('status.needTrailingColumns', {
-                        type: t(def.labelKey),
-                        n: minimumColumns(id),
-                        have: remaining,
-                      }),
-                    );
-                  } else {
-                    showToast('info', t('status.chartCreated', {
-                      name: resultMatrix.columnLabel(chartMenu.column),
-                    }));
-                  }
-                  setChartMenu(null);
-                }}
-              >
-                {t(def.labelKey)}
-              </button>
-            );
-          })}
+          <ContextMenuSub label={t('table.contextChartMenu')}>
+            {/* A single trailing column cannot carry a scatter/regression/correlation: say so
+                once, above the list, so the disabled items read as a rule and not as a broken
+                menu. It sits in the submenu now because that is where the rule applies. */}
+            {cols - chartMenu.column === 1 ? (
+              <div className="context-menu__hint">{t('chart.singleColumnHint')}</div>
+            ) : null}
+            <ChartTypeItems
+              remaining={cols - chartMenu.column}
+              columnLabel={chartMenuLabel}
+              onPick={(type) => {
+                // The menu primitive is menu-agnostic: it reports the outcome, the card owns
+                // its own lifecycle. Closing here (also when the store refuses, the toast is
+                // the answer then) is what every other entry of this menu already does.
+                const created = onOpenChart(chartMenu.column, type);
+                setChartMenu(null);
+                return created;
+              }}
+            />
+          </ContextMenuSub>
           <div className="context-menu__separator" />
-          <button
-            type="button"
-            className="context-menu__item"
+          <ContextMenuItem
             onClick={() => {
               onOpenFunction();
               setChartMenu(null);
             }}
           >
             {t('menu.newFormula')}
-          </button>
-        </Popup>
+          </ContextMenuItem>
+        </ContextMenu>
       ) : null}
     </CardShell>
   );
