@@ -4,7 +4,8 @@
  * A chart depends on the whole matrix *card*, so which columns it draws is purely a
  * presentation choice. This dock is the one place that choice is made (it replaced the
  * footer's "+ Add column…" select). Collapsed it costs a thin rail; expanded it lists
- * every column of each matrix card's active file, grouped by file name.
+ * every matrix the workspace publishes — a data card's active file, and each output of a
+ * function card — grouped by where the columns come from.
  *
  * It deliberately imports nothing from ChartCard or the ECharts stack, so it stays
  * inexpensive and testable on its own.
@@ -12,8 +13,8 @@
 import { useMemo } from 'react';
 
 import { chartTypeDef, minimumColumns } from '../../charts/chartTypes.ts';
-import { useTranslator, useWorkspace } from '../workspaceStore.ts';
-import { isMatrixCard, type ChartCardModel } from '../types.ts';
+import { publishedMatrices, useTranslator, useWorkspace } from '../workspaceStore.ts';
+import type { ChartCardModel } from '../types.ts';
 
 interface ColumnDockProps {
   card: ChartCardModel;
@@ -33,6 +34,17 @@ interface DockGroup {
   columns: DockColumn[];
 }
 
+/**
+ * Display label for one column of a listed matrix.
+ *
+ * The store builds the same label for every `ChartSource` it materialises (`columnLabel`),
+ * but this file also lists columns the chart has never attached, and that helper is private
+ * to the store — so the rule is repeated here rather than exported a second time.
+ */
+function dockColumnLabel(column: { posName: string; annotation: string }): string {
+  return column.annotation !== '' ? `${column.posName} ${column.annotation}` : column.posName;
+}
+
 export function ColumnDock({ card, open, onToggle }: ColumnDockProps) {
   const { t } = useTranslator();
   const cards = useWorkspace((s) => s.cards);
@@ -46,28 +58,61 @@ export function ColumnDock({ card, open, onToggle }: ColumnDockProps) {
 
   const groups = useMemo<DockGroup[]>(() => {
     const out: DockGroup[] = [];
+    // (matrixId, columnIndex) pairs a group already offers. The fallback below uses it to
+    // add only what the user could not reach any other way — and to dedupe a source that
+    // was somehow attached twice.
+    const listed = new Set<string>();
+
     for (const entry of cards) {
-      if (!isMatrixCard(entry)) continue;
-      const file = entry.sources[entry.activeSource];
-      if (!file) continue;
-      const matrix = matrices.get(file.matrixId);
-      if (!matrix) continue;
-      const columns: DockColumn[] = [];
-      for (let index = 0; index < matrix.columnCount(); ++index) {
-        const column = matrix.column(index);
-        columns.push({
-          matrixId: file.matrixId,
-          columnIndex: index,
-          label:
-            column.annotation !== ''
-              ? `${column.posName} ${column.annotation}`
-              : column.posName,
+      // `publishedMatrices` enumerates what the card publishes; a chart publishes nothing,
+      // so it contributes no group without this file needing to know what a chart is.
+      for (const published of publishedMatrices(entry)) {
+        const matrix = matrices.get(published.matrixId);
+        // A declared slot exists before anything fills it. Listing zero columns would only
+        // add an empty heading, and there is no column for the user to choose anyway.
+        if (!matrix || matrix.columnCount() === 0) continue;
+
+        const columns: DockColumn[] = [];
+        for (let index = 0; index < matrix.columnCount(); ++index) {
+          columns.push({
+            matrixId: published.matrixId,
+            columnIndex: index,
+            label: dockColumnLabel(matrix.column(index)),
+          });
+          listed.add(`${published.matrixId}:${index}`);
+        }
+
+        // A file is identified by its name; an output by the card that declares it plus the
+        // name the declaration gives it (falling back to the identity, which never lies).
+        const ownerLabel = entry.title.trim() || t('chart.columnDockOwner', { n: entry.id });
+        out.push({
+          name:
+            published.fileName ?? `${ownerLabel} · ${published.outputName ?? published.outputId}`,
+          columns,
         });
       }
-      out.push({ name: file.name, columns });
     }
+
+    // Whatever the chart draws that no card publishes would otherwise be invisible — and an
+    // invisible attached column cannot be unchecked, which is exactly the trap this dock
+    // exists to prevent. The label recorded at attach time is used because there may be no
+    // matrix left to read names from: its source card was closed, or its slot never got
+    // filled, and the chart still plots the values it holds.
+    const unlisted: DockColumn[] = [];
+    for (const source of card.config.sources) {
+      const key = `${source.matrixId}:${source.columnIndex}`;
+      if (listed.has(key)) continue;
+      listed.add(key);
+      unlisted.push({
+        matrixId: source.matrixId,
+        columnIndex: source.columnIndex,
+        label: source.label,
+      });
+    }
+    if (unlisted.length > 0) out.push({ name: t('chart.columnDockUnlisted'), columns: unlisted });
+
     return out;
-  }, [cards, matrices]);
+  }, [cards, matrices, card.config.sources, t]);
 
   const isChecked = (matrixId: number, columnIndex: number): boolean =>
     card.config.sources.some(
@@ -121,8 +166,10 @@ export function ColumnDock({ card, open, onToggle }: ColumnDockProps) {
         <div className="chart-card__dock-empty">{t('chart.columnDockEmpty')}</div>
       ) : (
         <div className="chart-card__dock-list">
-          {groups.map((group) => (
-            <div key={group.name} className="chart-card__dock-group">
+          {groups.map((group, groupIndex) => (
+            // A group name is not unique: two cards can publish outputs called the same
+            // thing, and the fallback group's title is a fixed string.
+            <div key={groupIndex} className="chart-card__dock-group">
               <div className="chart-card__dock-group-title" title={group.name}>
                 {group.name}
               </div>

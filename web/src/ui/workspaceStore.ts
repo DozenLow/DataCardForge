@@ -1455,6 +1455,79 @@ export function outputMatrixId(card: FunctionCardModel, outputId: string): numbe
   return outputLocalMatrixId(card, index);
 }
 
+/** One matrix a card publishes, as a picker has to address it. */
+export interface PublishedMatrix {
+  matrixId: number;
+  /** `null` for an uploaded data file; the stable output identity otherwise. */
+  outputId: string | null;
+  /** The name the card declares for this output (`params.outputs[i]` / formula name). */
+  outputName: string | null;
+  /** File name, for a data file. */
+  fileName: string | null;
+}
+
+/**
+ * The name a function card declares for one output, or `null` when it declares none.
+ *
+ * Both spellings live in the parameter bag alone — `outputs` for a script card, `formulas`
+ * for an expression card — so this reads params instead of asking which signature the card
+ * runs. That is what gives a future signature labelled outputs for free, and it is also why
+ * an unnamed output stays `null` rather than borrowing a generic "Output N" string: the
+ * caller can then fall back to the identity (`out:1`), which is always true.
+ */
+function declaredOutputName(card: FunctionCardModel, index: number): string | null {
+  const declared: unknown = card.params.outputs;
+  if (Array.isArray(declared)) {
+    const name: unknown = declared[index];
+    if (typeof name === 'string' && name.trim() !== '') return name;
+  }
+  const formulas: unknown = card.params.formulas;
+  if (Array.isArray(formulas)) {
+    const name: unknown = (formulas[index] as { name?: unknown } | undefined)?.name;
+    if (typeof name === 'string' && name.trim() !== '') return name;
+  }
+  return null;
+}
+
+/**
+ * Every matrix a card publishes, in the order a picker should list it.
+ *
+ * A picker addresses a matrix by id — that is what a chart's `config.sources` stores — and
+ * which id stands behind a card's second output is a rule only the store knows (ordinal 0
+ * IS `displayMatrixId`, the rest carry their own slot; see `outputLocalMatrixId`). Keeping
+ * the enumeration here is the same reasoning as `outputMatrixId`: a component that derived
+ * it itself would have to know the ordinal-0 exception, and would list the wrong slots the
+ * day that exception moves.
+ *
+ * Kinds are not discriminated beyond what owning a matrix means. A data card publishes the
+ * file it is showing (a specific file, not the card); a function card publishes one address
+ * per declared output, whether or not that slot has been fed yet — a slot that is still
+ * empty is a real source a chart may already point at.
+ */
+export function publishedMatrices(card: CardModel): PublishedMatrix[] {
+  if (isMatrixCard(card)) {
+    const file = card.sources[card.activeSource];
+    if (!file) return [];
+    return [{ matrixId: file.matrixId, outputId: null, outputName: null, fileName: file.name }];
+  }
+  if (isFormulaCard(card)) {
+    const out: PublishedMatrix[] = [];
+    for (let index = 0; index < card.outputs.length; ++index) {
+      const matrixId = outputLocalMatrixId(card, index);
+      // No slot means no dependent can name this output, so there is nothing to list.
+      if (matrixId === null) continue;
+      out.push({
+        matrixId,
+        outputId: card.outputs[index].outputId,
+        outputName: declaredOutputName(card, index),
+        fileName: null,
+      });
+    }
+    return out;
+  }
+  return [];
+}
+
 /**
  * Server id for a local matrix — with a function card's display cache resolved through its
  * owning card.
