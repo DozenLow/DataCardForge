@@ -2366,6 +2366,10 @@ async function pullOutputSlot(
     if (!owner || !isFormulaCard(owner) || outputLocalMatrixId(owner, index) !== localMatrixId) {
       return false;
     }
+    // The same slot may still hold a NEWER run's result: a rerun rewrites
+    // `outputs[index].resultMatrixId` while this read was in flight, and writing now would
+    // put the previous run's numbers into the slot that already points at the current one.
+    if (owner.outputs[index]?.resultMatrixId !== output.resultMatrixId) return false;
     useWorkspace.setState((state) => {
       const matrices = new Map(state.matrices);
       matrices.set(localMatrixId, result.matrix);
@@ -2401,8 +2405,15 @@ async function pullPreviewIntoCache(cardId: number): Promise<void> {
   // but how much is refreshed follows the user's last choice: a card the user expanded with
   // "show more" keeps mirroring the whole table instead of collapsing back to the preview.
   const budget = card.result?.complete ? MAX_CACHE_ROWS : RESULT_PREVIEW_ROWS;
-  const result = await fetchResultRows(output.resultMatrixId, budget);
+  // Which result this read belongs to. A rerun (automatic or not) reassigns the output to a
+  // new server matrix while this read is on the wire; writing such an answer would place the
+  // PREVIOUS run's numbers under the current one — the "chart shows the old table after a
+  // switch" race. The run that superseded it has its own pull.
+  const targetMatrixId = output.resultMatrixId;
+  const result = await fetchResultRows(targetMatrixId, budget);
   if (!result) return;
+  const now = useWorkspace.getState().cards.find((entry) => entry.id === cardId);
+  if (!now || !isFormulaCard(now) || now.outputs[0]?.resultMatrixId !== targetMatrixId) return;
   applyResultCache(cardId, result);
 
   // Ordinal 0 is done above; every further declared output has a slot of its own that only
@@ -3836,6 +3847,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
             error: null,
           },
         }));
+        // The restore's pushes were dropped while this lookup was in flight.
+        resumeAutoRuns();
       })();
     },
 
@@ -3854,6 +3867,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       if (state.trust.persistence === 'persistent' && scriptIds.length > 0) {
         void backendClient.trustRecord(hash, scriptIds.map(String));
       }
+      resumeAutoRuns();
     },
 
     setTrustPersistence(persist) {
@@ -3888,6 +3902,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
               : [],
           },
         }));
+        resumeAutoRuns();
       })();
     },
 
@@ -3898,6 +3913,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       if (state.trust.confirmed.includes(cardId)) return;
       set({ trust: { ...state.trust, confirmed: [...state.trust.confirmed, cardId] } });
       void backendClient.trustRecord(hash, [String(cardId)]);
+      // Confirming is a gate opening for this card: an armed one should catch up now.
+      maybeAutoRunScript(cardId);
     },
 
     confirmAllTrustedScripts() {
@@ -3912,6 +3929,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         trust: { ...state.trust, confirmed: [...state.trust.confirmed, ...remaining] },
       });
       void backendClient.trustRecord(hash, remaining.map(String));
+      resumeAutoRuns();
     },
 
     revokeWorkspaceTrust() {
@@ -5314,6 +5332,24 @@ export function useMatrix(matrixId: number): MatrixData | undefined {
 }
 
 /**
+ * Ask every armed script card with a waiting node to catch up.
+ *
+ * Automatic reruns are gated (workspace trust, environment, blockers), and a trigger that
+ * arrives while a gate is shut is *dropped*, not queued — that is what froze propagation in
+ * the first place. Reopening a file is exactly such a case: the restore pushes its nodes
+ * (dirty) before the trust answer exists, so without this replay an armed card of a
+ * file-backed workspace would silently never rerun again. Called whenever a gate opens.
+ */
+function resumeAutoRuns(): void {
+  const state = useWorkspace.getState();
+  for (const card of state.cards) {
+    if (!isScriptCard(card) || card.autoRun !== true) continue;
+    if (!card.node || card.node.state !== 'dirty') continue;
+    maybeAutoRunScript(card.id);
+  }
+}
+
+/**
  * The blocking conditions implied by the current state.
  *
  * Pure and cheap (a handful of fields + a card scan), so it can run on every store change.
@@ -5365,5 +5401,10 @@ function blockersEqual(a: readonly Blocker[], b: readonly Blocker[]): boolean {
 useWorkspace.subscribe((state) => {
   const next = computeBlockers(state);
   if (blockersEqual(state.blockers, next)) return;
+  const wasFrozen = state.propagationFrozen;
   useWorkspace.setState({ blockers: next, propagationFrozen: next.length > 0 });
+  // The gate released: whatever was dropped while it was shut gets one chance to advance.
+  // (Nothing is queued by design — a blocked trigger must not pile up — so this is the one
+  // place that remembers "there was work waiting".)
+  if (wasFrozen && next.length === 0) resumeAutoRuns();
 });

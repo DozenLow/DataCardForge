@@ -51,6 +51,11 @@ const client = vi.hoisted(() => ({
   listNodes: vi.fn(),
   nodeResult: vi.fn(),
   events: vi.fn(),
+  trustStatus: vi.fn(),
+  trustDecidePersistence: vi.fn(),
+  trustLookup: vi.fn(),
+  trustRecord: vi.fn(),
+  trustRevoke: vi.fn(),
   window: vi.fn(),
 }));
 
@@ -146,6 +151,32 @@ beforeEach(() => {
   client.deleteNode.mockReset().mockResolvedValue({ ok: true });
   client.deleteMatrix.mockReset().mockResolvedValue({ ok: true });
   client.events.mockReset().mockResolvedValue([]);
+  client.trustStatus.mockReset().mockResolvedValue({
+    ok: true,
+    persistence: 'persistent',
+    location: '/tmp/trust.json',
+    envId: 'v1-test',
+    envChanged: false,
+    entries: 0,
+  });
+  client.trustLookup.mockReset().mockResolvedValue({
+    ok: true,
+    hash: '',
+    known: false,
+    envMatch: true,
+    scripts: [],
+    persistence: 'persistent',
+  });
+  client.trustRecord.mockReset().mockResolvedValue(true);
+  client.trustRevoke.mockReset().mockResolvedValue(true);
+  client.trustDecidePersistence.mockReset().mockResolvedValue({
+    ok: true,
+    persistence: 'persistent',
+    location: '/tmp/trust.json',
+    envId: 'v1-test',
+    envChanged: false,
+    entries: 0,
+  });
 });
 
 afterEach(() => {
@@ -1324,5 +1355,121 @@ describe('done means the numbers landed', () => {
     expect(scriptCardOf(cardId).result?.complete).toBe(true);
     // The chart is refreshed once the slot is complete, and never with the 1-point preview.
     expect(chart().config.sources[0]?.raw?.length).toBeGreaterThan(fullLength);
+  });
+});
+
+
+// ── restoring a FILE-backed workspace (trust × auto-run) ──────────────────────────────────
+//
+// Opening a file is a sequence: restore the cards (which pushes their nodes, and an armed
+// script card answers a dirty node by rerunning), then ask the backend whether this file's
+// scripts are trusted. While that lookup is in flight nothing may run — but the push has
+// already happened, so the trigger must be replayed once the answer arrives. Otherwise
+// "reopen an armed workspace and it recomputes by itself" silently stops working for every
+// workspace that came from a file.
+
+describe('restored workspace trust', () => {
+  it('runs an armed card once the trust answer arrives', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    store().runScriptCard(cardId);
+    await flush();
+    await flush();
+    expect(scriptCardOf(cardId).autoRun).toBe(true);
+    const snapshot = store().toSnapshot();
+
+    // A fresh session: the same file, loaded and then looked up.
+    store().reset();
+    let answer: ((value: unknown) => void) | null = null;
+    client.trustStatus.mockImplementation(
+      () => new Promise((resolve) => { answer = resolve; }),
+    );
+    client.trustLookup.mockResolvedValue({
+      ok: true,
+      hash: 'a'.repeat(64),
+      known: true,
+      envMatch: true,
+      scripts: [String(cardId)],
+      persistence: 'persistent',
+    });
+    client.computeNode.mockClear();
+
+    store().loadSnapshot(snapshot);
+    store().beginWorkspaceTrust('a'.repeat(64), [cardId]);
+    await flush();
+    await flush();
+    // The lookup has not answered: the card must not run yet…
+    expect(client.computeNode).not.toHaveBeenCalled();
+
+    // …and once it answers, the armed card catches up with its dirty node.
+    answer!({
+      ok: true,
+      persistence: 'persistent',
+      location: '/tmp/trust.json',
+      envId: 'v1-test',
+      envChanged: false,
+      entries: 1,
+    });
+    await flush();
+    await flush();
+    await vi.waitFor(() => expect(client.computeNode).toHaveBeenCalledTimes(1));
+  });
+});
+
+
+// ── a superseded pull must not write (2026-11-17) ─────────────────────────────────────────
+//
+// A rerun reassigns the output to a new server matrix while the previous pull is on the
+// wire. That older answer used to be written into the display cache under the new run's
+// name, which is how a chart could show the previous file after a switch.
+
+describe('stale result pulls', () => {
+  it('ignores an answer for a result the card no longer points at', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+
+    let release: ((value: unknown) => void) | null = null;
+    client.window.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+
+    store().runScriptCard(cardId);
+    await flush();
+    await flush();
+    // The compute finished and the pull is on the wire…
+    expect(scriptCardOf(cardId).node?.state).toBe('done');
+
+    // …and a second run supersedes it before the answer arrives.
+    useWorkspace.setState((state) => ({
+      cards: state.cards.map((card) =>
+        card.id === cardId && isScriptCard(card)
+          ? {
+              ...card,
+              outputs: card.outputs.map((output, index) =>
+                index === 0 ? { ...output, resultMatrixId: output.resultMatrixId + 1000 } : output,
+              ),
+            }
+          : card,
+      ),
+    }));
+
+    release!({
+      ok: true,
+      rows: 2,
+      columns: 1,
+      totalRows: 2,
+      totalCols: 1,
+      names: ['Pos.1'],
+      data: [new Float64Array([9, 9])],
+    });
+    await flush();
+    await flush();
+    await flush();
+
+    // The stale answer was dropped: the card's numbers are not the ones it returned.
+    expect(scriptCardOf(cardId).result?.totalRows).not.toBe(2);
   });
 });
