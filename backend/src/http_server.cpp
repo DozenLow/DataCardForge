@@ -362,6 +362,20 @@ void writeAll(socket_t fd, const char* data, size_t len) {
   }
 }
 
+/**
+ * The CORS allow-list, as a value rather than a string literal buried in the writer.
+ *
+ * It must name every verb route() serves: a browser checks this list before sending a
+ * cross-origin request, so a verb missing here makes its route unreachable from a page —
+ * which is what happened to PATCH /api/nodes/{id} until 2026-11-17 (the route existed, the
+ * preflight never offered it).
+ *
+ * PUT is absent on purpose: nothing implements it, and advertising a verb the server would
+ * answer 404 to describes a server that does not exist. Same-origin traffic never reads this
+ * header, so the list is exactly the cross-origin contract.
+ */
+constexpr const char* kCorsAllowedMethods = "GET, POST, PATCH, DELETE, OPTIONS";
+
 void sendResponse(socket_t fd, HttpResponse& res, bool headersOnly, const std::string& allowOrigin) {
   std::string payload;
   if (res.binary) {
@@ -382,7 +396,7 @@ void sendResponse(socket_t fd, HttpResponse& res, bool headersOnly, const std::s
     // Content-Type is the only header the front end sets, so that is the whole allow-list.
     headers += "Access-Control-Allow-Origin: " + allowOrigin + "\r\n";
     headers += "Vary: Origin\r\n";
-    headers += "Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS\r\n";
+    headers += std::string("Access-Control-Allow-Methods: ") + kCorsAllowedMethods + "\r\n";
     headers += "Access-Control-Allow-Headers: Content-Type\r\n";
   }
   headers += "\r\n";

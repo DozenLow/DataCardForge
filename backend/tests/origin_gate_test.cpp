@@ -315,7 +315,11 @@ int main() {
   CHECK(res.status == 200);
   CHECK(headerValue(res, "access-control-allow-origin") == frontend);
   CHECK(headerValue(res, "vary") == "Origin");
-  CHECK(headerValue(res, "access-control-allow-methods") == "GET, POST, PUT, DELETE, OPTIONS");
+  // The allow-list has to name every verb route() serves. It was missing PATCH until
+  // 2026-11-17: the server implements PATCH /api/nodes/{id}, but a browser would have been
+  // stopped at the preflight, leaving that route unreachable from any page. PUT is absent on
+  // purpose — nothing implements it.
+  CHECK(headerValue(res, "access-control-allow-methods") == "GET, POST, PATCH, DELETE, OPTIONS");
   CHECK(headerValue(res, "access-control-allow-headers") == "Content-Type");
   CHECK(res.body.find("\"protocol\"") != std::string::npos);
 
@@ -364,13 +368,27 @@ int main() {
   CHECK(res.body.empty());
   CHECK(headerValue(res, "access-control-allow-origin") == frontend);
   CHECK(headerValue(res, "vary") == "Origin");
-  CHECK(headerValue(res, "access-control-allow-methods") == "GET, POST, PUT, DELETE, OPTIONS");
+  CHECK(headerValue(res, "access-control-allow-methods") == "GET, POST, PATCH, DELETE, OPTIONS");
   CHECK(headerValue(res, "access-control-allow-headers") == "Content-Type");
 
   // A preflight is answered for any path — the browser asks before the real request, and
   // that request is what gets routed (and may then 404).
   CHECK(sendRequest(port, buildRequest("OPTIONS", "/api/nodes", frontend), &res));
   CHECK(res.status == 204);
+  CHECK(headerValue(res, "access-control-allow-origin") == frontend);
+
+  // ── the allow-list covers the verbs the router actually serves ────────
+  // PATCH /api/nodes/{id} exists (parameter/definition edits). A cross-origin page can only
+  // reach it if the preflight offers PATCH — same-machine traffic never asks, which is why
+  // the mismatch stayed invisible in development.
+  CHECK(sendRequest(port, buildRequest("OPTIONS", "/api/nodes/1", frontend), &res));
+  CHECK(res.status == 204);
+  CHECK(headerValue(res, "access-control-allow-methods").find("PATCH") != std::string::npos);
+  // ...and the verb really reaches route() instead of being turned away by the gate: the
+  // registry has no node 1, so the answer is the router's 404, not a 403.
+  CHECK(sendRequest(port, buildRequest("PATCH", "/api/nodes/1", frontend, "{}"), &res));
+  CHECK(res.status == 404);
+  CHECK(res.body.find("unknownNode") != std::string::npos);
   CHECK(headerValue(res, "access-control-allow-origin") == frontend);
 
   CHECK(sendRequest(port, buildRequest("OPTIONS", "/api/hello", "https://evil.example"), &res));
