@@ -1021,6 +1021,24 @@ function maybeAutoRunScript(cardId: number, retrigger = false): void {
 }
 
 /**
+ * Ask every armed script card with a waiting node to catch up.
+ *
+ * Automatic reruns are gated (workspace trust, environment, blockers), and a trigger that
+ * arrives while a gate is shut is *dropped*, not queued — that is what froze propagation in
+ * the first place. Reopening a file is exactly such a case: the restore pushes its nodes
+ * (dirty) before the trust answer exists, so without this replay an armed card of a
+ * file-backed workspace would silently never rerun again. Called whenever a gate opens.
+ */
+function resumeAutoRuns(): void {
+  const state = useWorkspace.getState();
+  for (const card of state.cards) {
+    if (!isScriptCard(card) || card.autoRun !== true) continue;
+    if (!card.node || card.node.state !== 'dirty') continue;
+    maybeAutoRunScript(card.id);
+  }
+}
+
+/**
  * Blocking conditions (2026-11-17): an environment/structure problem that makes the graph
  * unable to advance. A COMPUTE error is deliberately NOT one of these — a syntax mistake in
  * one card must not freeze the workspace; it stays a red card with a diagnostics panel.
@@ -5331,23 +5349,6 @@ export function useMatrix(matrixId: number): MatrixData | undefined {
   return useWorkspace((s) => s.matrices.get(matrixId));
 }
 
-/**
- * Ask every armed script card with a waiting node to catch up.
- *
- * Automatic reruns are gated (workspace trust, environment, blockers), and a trigger that
- * arrives while a gate is shut is *dropped*, not queued — that is what froze propagation in
- * the first place. Reopening a file is exactly such a case: the restore pushes its nodes
- * (dirty) before the trust answer exists, so without this replay an armed card of a
- * file-backed workspace would silently never rerun again. Called whenever a gate opens.
- */
-function resumeAutoRuns(): void {
-  const state = useWorkspace.getState();
-  for (const card of state.cards) {
-    if (!isScriptCard(card) || card.autoRun !== true) continue;
-    if (!card.node || card.node.state !== 'dirty') continue;
-    maybeAutoRunScript(card.id);
-  }
-}
 
 /**
  * The blocking conditions implied by the current state.
