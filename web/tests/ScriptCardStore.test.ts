@@ -664,3 +664,58 @@ describe('workspace symmetry', () => {
     expect(owner.kind).toBe('matrix');
   });
 });
+describe('declaration-column presentation (2026-11-17)', () => {
+  it('persists the fold state through the snapshot and defaults to expanded', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    await flush();
+
+    store().setFunctionPanelOpen(cardId, 'inputs', false);
+    expect(scriptCardOf(cardId).inputsPanelOpen).toBe(false);
+    // A fresh card carries no flag until something writes it; the card renders `?? true`.
+    expect(scriptCardOf(cardId).outputsPanelOpen ?? true).toBe(true);
+
+    const snapshot = store().toSnapshot();
+    const saved = snapshot.cards.find((card) => card.id === cardId) as FunctionCardModel;
+    expect(saved.inputsPanelOpen).toBe(false);
+    expect(saved.outputsPanelOpen).toBeUndefined();
+
+    store().reset();
+    store().loadSnapshot(snapshot);
+    await flush();
+    const restored = scriptCardOf(cardId);
+    expect(restored.inputsPanelOpen).toBe(false);
+    expect(restored.outputsPanelOpen).toBe(true);
+  });
+
+  it('opens expanded when the file predates the fold state', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    await flush();
+
+    const snapshot = store().toSnapshot();
+    // A file written before 2026-11-17 has neither field.
+    const legacy = {
+      ...snapshot,
+      cards: snapshot.cards.map((card) => {
+        if (card.id !== cardId) return card;
+        const { inputsPanelOpen: _i, outputsPanelOpen: _o, ...rest } = card as FunctionCardModel;
+        return rest;
+      }),
+    };
+
+    store().reset();
+    store().loadSnapshot(legacy);
+    await flush();
+    const restored = scriptCardOf(cardId);
+    expect(restored.inputsPanelOpen).toBe(true);
+    expect(restored.outputsPanelOpen).toBe(true);
+  });
+
+  it('leaves data and chart cards alone', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const matrix = store().cards.find((entry) => entry.id === source);
+    store().setFunctionPanelOpen(source, 'inputs', false);
+    expect(store().cards.find((entry) => entry.id === source)).toBe(matrix);
+  });
+});

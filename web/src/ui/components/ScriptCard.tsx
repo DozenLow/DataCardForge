@@ -70,6 +70,7 @@ import {
   type FunctionCardModel,
 } from '../types.ts';
 import { CardShell } from './CardShell.tsx';
+import { SidePanel } from './SidePanel.tsx';
 import {
   ChartTypeItems,
   ContextMenu,
@@ -774,6 +775,7 @@ export function ScriptCard({
   const addChartCard = useWorkspace((state) => state.addChartCard);
   const addFormulaCard = useWorkspace((state) => state.addFormulaCard);
   const addScriptCard = useWorkspace((state) => state.addScriptCard);
+  const setFunctionPanelOpen = useWorkspace((state) => state.setFunctionPanelOpen);
   /**
    * Anchor of the open build menu, in VIEWPORT coordinates.
    *
@@ -791,6 +793,9 @@ export function ScriptCard({
 
   const params = scriptParams(card);
   const scriptText = params.script;
+  // Fold state is presentation, persisted with the card (absent = expanded, the old look).
+  const inputsOpen = card.inputsPanelOpen ?? true;
+  const outputsOpen = card.outputsPanelOpen ?? true;
   const portNames = card.inputs.map((input, index) => portVarName(card, input, index));
   const outputNames = card.outputs.map((_, ordinal) => params.outputs[ordinal] ?? '');
 
@@ -1222,13 +1227,36 @@ export function ScriptCard({
         */}
         <div className="script-card__body">
           {/* ── left: what the script reads ── */}
-          <section
+          <SidePanel
+            side="left"
+            open={inputsOpen}
+            onToggle={(open) => setFunctionPanelOpen(card.id, 'inputs', open)}
+            title={labels.ports}
+            panelId={`script-inputs-${card.id}`}
             className="script-card__panel script-card__panel--inputs"
-            aria-label={labels.ports}
-            // Scrolling a panel moves every row in it, so the anchors have to be re-measured.
+            // Scrolling a column (or its rail) moves the ports, so re-measure the anchors.
             onScroll={() => invalidateLayout()}
+            rail={
+              ports.length === 0 ? (
+                <span className="side-panel__rail-empty">—</span>
+              ) : (
+                ports.map((port) => (
+                  <button
+                    type="button"
+                    className="script-card__rail-port"
+                    key={port.portId}
+                    // While the column is folded, the rail item IS the port element: same id,
+                    // same side, so `portAnchor` keeps the wire at this row's height.
+                    ref={portRefFor(port.portId, 'left')}
+                    title={`${port.varName} · ${port.portId} · ${port.label}`}
+                    onClick={() => setFunctionPanelOpen(card.id, 'inputs', true)}
+                  >
+                    {port.varName}
+                  </button>
+                ))
+              )
+            }
           >
-            <div className="script-card__panel-title">{labels.ports}</div>
             {ports.length === 0 ? (
               <p className="script-card__panel-empty">{labels.noPorts}</p>
             ) : (
@@ -1282,18 +1310,33 @@ export function ScriptCard({
             >
               {labels.addPort}
             </button>
-          </section>
+          </SidePanel>
 
           {/* ── middle: the script itself ── */}
           <div className="script-card__editor" ref={editorHost} data-script-editor={card.id} />
 
           {/* ── right: what the script produces ── */}
-          <section
+          <SidePanel
+            side="right"
+            open={outputsOpen}
+            onToggle={(open) => setFunctionPanelOpen(card.id, 'outputs', open)}
+            title={labels.outputs}
+            panelId={`script-outputs-${card.id}`}
             className="script-card__panel script-card__panel--outputs"
-            aria-label={labels.outputs}
             onScroll={() => invalidateLayout()}
+            rail={card.outputs.map((output, ordinal) => (
+              <button
+                type="button"
+                className="script-card__rail-port script-card__rail-port--output"
+                key={output.outputId}
+                ref={portRefFor(output.outputId, 'right')}
+                title={`${outputNames[ordinal] || output.outputId} · ${output.outputId}`}
+                onClick={() => setFunctionPanelOpen(card.id, 'outputs', true)}
+              >
+                {outputNames[ordinal] || output.outputId}
+              </button>
+            ))}
           >
-            <div className="script-card__panel-title">{labels.outputs}</div>
             <ul className="script-card__row-list" ref={outputsList}>
               {card.outputs.map((output, ordinal) => {
                 const preview = run?.previews[output.outputId];
@@ -1381,7 +1424,7 @@ export function ScriptCard({
             >
               {labels.addOutput}
             </button>
-          </section>
+          </SidePanel>
         </div>
 
         {/*

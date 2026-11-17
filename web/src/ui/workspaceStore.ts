@@ -1094,6 +1094,14 @@ interface WorkspaceState {
   removeChartSource: (cardId: number, matrixId: number, columnIndex: number) => void;
   /** Persist the column-dock open state on a chart card. */
   setChartColumnPanel: (cardId: number, open: boolean) => void;
+  /**
+   * Expand/collapse one declaration column of a function card.
+   *
+   * Presentation only: nothing is pushed to the backend and no edge changes. The collapsed
+   * rail still renders the card's ports, which is what keeps the wires anchored on the port
+   * (see docs/decisions/2026-11-17-port-anchored-connections.md).
+   */
+  setFunctionPanelOpen: (cardId: number, panel: 'inputs' | 'outputs', open: boolean) => void;
 
   // ── function card behaviour ─────────────────────────────────────────
   /**
@@ -1414,6 +1422,10 @@ function normalizeRestoredCards(cards: CardModel[]): CardModel[] {
       return {
         ...card,
         node: null,
+        // Presentation survives a save file; a card written before the fold existed opens
+        // expanded, which is what it looked like when it was written.
+        inputsPanelOpen: card.inputsPanelOpen ?? true,
+        outputsPanelOpen: card.outputsPanelOpen ?? true,
         outputs: card.outputs.map((output) => ({ ...output, resultMatrixId: -1 })),
         // Preserve every other parameter: the column contract is a promise the user made,
         // and silently dropping it on restore would un-lock the widths behind their back.
@@ -3699,6 +3711,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         cards: state.cards.map((card) =>
           card.id === cardId && isChartCard(card) ? { ...card, columnPanelOpen: open } : card,
         ),
+      }));
+    },
+
+    setFunctionPanelOpen(cardId, panel, open) {
+      set((state) => ({
+        cards: state.cards.map((card) => {
+          if (card.id !== cardId || !isFormulaCard(card)) return card;
+          return {
+            ...card,
+            ...(panel === 'inputs' ? { inputsPanelOpen: open } : { outputsPanelOpen: open }),
+          };
+        }),
       }));
     },
 

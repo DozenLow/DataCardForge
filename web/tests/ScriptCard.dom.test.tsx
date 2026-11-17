@@ -807,3 +807,85 @@ describe('port endpoints', () => {
     expect(portAnchor(cardId, 'out:0')).toEqual(before);
   });
 });
+
+// ── collapsible declaration columns (2026-11-17) ─────────────────────────────────────
+//
+// Folding a column must NOT unmount its ports: the rail item is the endpoint while the
+// column is folded (docs/decisions/2026-11-17-port-anchored-connections.md), so the wire
+// keeps meeting the row's height instead of falling back to the card edge.
+
+/** Click one column's collapse control. */
+async function collapsePanel(host: HTMLElement, side: 'inputs' | 'outputs'): Promise<void> {
+  const button = host.querySelector<HTMLButtonElement>(
+    `.script-card__panel--${side} .side-panel__collapse`,
+  );
+  if (!button) throw new Error(`no collapse control on ${side}`);
+  await act(async () => {
+    button.click();
+  });
+  await flush();
+}
+
+describe('collapsible declaration columns', () => {
+  it('folds a column into a labeled rail that keeps its port chips mounted', async () => {
+    const host = await mount(cardId);
+    expect(host.querySelectorAll('.script-card__panel[data-open="true"]')).toHaveLength(2);
+    expect(host.querySelectorAll('.script-card__rail-port')).toHaveLength(0);
+
+    await collapsePanel(host, 'inputs');
+
+    // The store owns the presentation flag; the card follows it.
+    expect(card().inputsPanelOpen).toBe(false);
+    const rail = host.querySelector<HTMLElement>(
+      '.script-card__panel--inputs[data-open="false"]',
+    );
+    expect(rail).not.toBeNull();
+    const chips = [...rail!.querySelectorAll<HTMLElement>('.script-card__rail-port')];
+    expect(chips.map((chip) => chip.textContent)).toEqual(['A']);
+    // The rail title is the column's identity, and the chip carries the row identity.
+    expect(rail!.querySelector('.side-panel__rail-title')?.textContent).toBe('输入端口');
+    expect(chips[0].getAttribute('title')).toContain('in:0');
+  });
+
+  it('keeps the wire anchor on the folded rail chip', async () => {
+    const host = await mount(cardId);
+    await collapsePanel(host, 'inputs');
+    await collapsePanel(host, 'outputs');
+
+    const chip = host.querySelector<HTMLElement>(
+      '.script-card__panel--inputs .script-card__rail-port',
+    )!;
+    const outputChip = host.querySelector<HTMLElement>(
+      '.script-card__panel--outputs .script-card__rail-port',
+    )!;
+    // jsdom reports zeros; the card rect is wide enough that the clamp cannot fake the answer.
+    stubRect(cardRoot(host), { left: 100, top: 100, width: 800, height: 500 });
+    stubRect(chip, { left: 104, top: 160, width: 26, height: 90 });
+    stubRect(outputChip, { left: 704, top: 240, width: 26, height: 70 });
+
+    // Same port id, same side as the expanded row: only the measured element changed.
+    expect(portAnchor(cardId, 'in:0')).toEqual({ x: 104, y: 205, side: 'left' });
+    expect(portAnchor(cardId, 'out:0')).toEqual({ x: 730, y: 275, side: 'right' });
+  });
+
+  it('expands again from the rail title and hands the anchor back to the row head', async () => {
+    const host = await mount(cardId);
+    await collapsePanel(host, 'inputs');
+
+    const title = host.querySelector<HTMLButtonElement>(
+      '.script-card__panel--inputs .side-panel__rail-title',
+    )!;
+    await act(async () => {
+      title.click();
+    });
+    await flush();
+
+    expect(card().inputsPanelOpen).toBe(true);
+    expect(host.querySelector('.script-card__panel--inputs .script-card__rail-port')).toBeNull();
+
+    const head = rowHead(host, 'inputs');
+    stubRect(cardRoot(host), { left: 100, top: 100, width: 800, height: 500 });
+    stubRect(head, { left: 120, top: 220, width: 150, height: 40 });
+    expect(portAnchor(cardId, 'in:0')).toEqual({ x: 120, y: 240, side: 'left' });
+  });
+});

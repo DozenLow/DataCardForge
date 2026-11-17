@@ -2692,7 +2692,8 @@ body {
 /* Inputs | editor | outputs. Fixed side columns, a flexible editor that can never collapse. */
 .script-card__body {
   display: grid;
-  grid-template-columns: minmax(0, 168px) minmax(0, 1fr) minmax(0, 184px);
+  /* `auto` side columns: the panels size themselves (30px rail, 168/184px expanded). */
+  grid-template-columns: auto minmax(0, 1fr) auto;
   /* One row, pinned to the body's own height: the columns scroll INSIDE them, so diagnostics
      and the debug panel keep their place instead of being pushed off the card. */
   grid-template-rows: minmax(0, 1fr);
@@ -2700,31 +2701,167 @@ body {
   min-height: 0;
 }
 
+/* Width carrier: the SidePanel container keeps this class in BOTH fold states, so the rail
+   can be narrower without collapsing the grid. */
 .script-card__panel {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
   min-width: 0;
-  padding: 4px 6px;
-  overflow-y: auto;
   background: var(--surface-alt);
+  transition: width 140ms ease;
 }
 
 /* The dividing edges belong to the side columns: the editor keeps its full width. */
 .script-card__panel--inputs {
+  width: 168px;
   border-right: 1px solid var(--border);
 }
 
 .script-card__panel--outputs {
+  width: 184px;
   border-left: 1px solid var(--border);
 }
 
-.script-card__panel-title {
+/* A folded column is a rail: line height + padding of the rotated labels. */
+.script-card__panel.side-panel--rail {
+  width: 30px;
+}
+
+/* ── Collapsible side panel (shared with the formula card) ── */
+.side-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
+.side-panel__head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+}
+
+.side-panel__title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 10px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--text-dim);
+}
+
+.side-panel__collapse {
+  font: inherit;
+  line-height: 1;
+  padding: 1px 6px;
+  color: var(--text-dim);
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.side-panel__collapse:hover {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.side-panel__body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 4px 6px;
+}
+
+/* Folded: one thin column of rotated labels; the rail still holds the port elements. */
+.side-panel--rail {
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  overflow-y: auto;
+}
+
+.side-panel__rail-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.side-panel__rail-empty {
+  font-size: 10px;
+  color: var(--text-dim);
+}
+
+/*
+ * Rotated rail text. `sideways` turns EVERY script 90° (Chinese included); `vertical-rl` +
+ * `mixed` — the chart dock's choice — leaves CJK upright and only rotates Latin.
+ */
+.side-panel__rail-title {
+  font: inherit;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+  background: transparent;
+  border: 0;
+  padding: 2px 0;
+  cursor: pointer;
+  writing-mode: vertical-rl;
+  text-orientation: sideways;
+  white-space: nowrap;
+  max-height: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.side-panel__rail-title:hover {
+  color: var(--text);
+}
+
+/* A rail chip IS the port element while folded, so it must stay legible (and clickable). */
+.script-card__rail-port {
+  font: inherit;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 1px;
+  cursor: pointer;
+  writing-mode: vertical-rl;
+  text-orientation: sideways;
+  white-space: nowrap;
+  max-height: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.script-card__rail-port:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.script-card__rail-port--output {
+  background: var(--surface-alt);
+}
+
+/* Older engines: a readable upright fallback beats a broken rail. */
+@supports not (text-orientation: sideways) {
+  .side-panel__rail-title,
+  .script-card__rail-port {
+    text-orientation: mixed;
+  }
 }
 
 .script-card__panel-empty {

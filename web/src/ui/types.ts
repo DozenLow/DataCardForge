@@ -255,6 +255,16 @@ export interface FunctionCardModel extends CardBase {
   params: FunctionParams;
   /** K outputs = one node. K is fixed by the signature, never by the data. */
   outputs: OutputBinding[];
+  /**
+   * Whether the card's declaration columns are expanded (2026-11-17).
+   *
+   * A presentation choice, persisted with the card like the chart's `columnPanelOpen` — and
+   * deliberately NOT in `params`: parameters belong to the signature and travel to the
+   * backend, while which column is folded is nobody's business but the user's. A card written
+   * before this field existed opens expanded, which is what it looked like when written.
+   */
+  inputsPanelOpen?: boolean;
+  outputsPanelOpen?: boolean;
   /** The single backend compute node; null while registration is pending/offline. */
   node: NodeStatus | null;
   /**
