@@ -756,101 +756,42 @@ try {
   const posErrors = await page.locator('.formula-card__error').allInnerTexts();
   check('a Pos.N reference computes', posErrors.length === 0, posErrors.join(' | '));
 
-  // ── 11c. the pending re-point offer must be impossible to miss ──────
-  // v2 never re-points a function card silently, so a file switch leaves a decision the
-  // user has to make. It used to be a pale accent-coloured box, and users walked past it —
-  // the report was literally "I switched the file and the function card did not follow".
-  // Its look is therefore a contract: yellow gradient + flashing, asserted as two separate
-  // halves (a gradient without motion, or motion over the wrong colour, each fails).
+  // ── 11c. switching the file follows the dependent cards ─────────────
+  // Corrected model (2026-11-17): the dropdown switches WHICH FILE the table holds, i.e. a
+  // data change, so its readers follow it immediately — no confirmation banner. The old
+  // behaviour kept the formula card on the previous file and offered a yellow re-point box;
+  // the report was "I switched the file and the function card did not follow".
   const fileSelector = page.locator('.matrix-card__selector').first();
   const activeFileIndex = await page.evaluate(() => {
     const select = document.querySelector('.matrix-card__selector');
     return select ? select.selectedIndex : -1;
   });
   const otherFileIndex = activeFileIndex === 0 ? 1 : 0;
-  await fileSelector.selectOption({ index: otherFileIndex });
-  await page.waitForTimeout(600);
-  check(
-    'switching the file offers a re-point on the dependent formula card',
-    await page
-      .locator('.card--formula .formula-card__repoint')
-      .isVisible()
-      .catch(() => false),
-  );
-
-  const offerLook = await page.evaluate(() => {
-    const box = document.querySelector('.card--formula .formula-card__repoint');
-    if (!box) return null;
-    const style = getComputedStyle(box);
-    // "Yellow" as a measurement, not an opinion: every gradient stop's hue must sit in the
-    // amber band (35°–70°) with real saturation. The stops are resolved rgb() after var()
-    // substitution, so this reads the theme that is actually in force.
-    const stops = [...style.backgroundImage.matchAll(/rgba?\(([^)]+)\)/g)].map((match) => {
-      const [r, g, b] = match[1]
-        .split(',')
-        .slice(0, 3)
-        .map(Number)
-        .map((value) => value / 255);
-      const max = Math.max(r, g, b);
-      const min = Math.min(r, g, b);
-      const delta = max - min;
-      if (delta === 0) return { hue: 0, sat: 0 };
-      const raw =
-        max === r ? ((g - b) / delta) % 6 : max === g ? (b - r) / delta + 2 : (r - g) / delta + 4;
-      return { hue: (raw * 60 + 360) % 360, sat: max === 0 ? 0 : delta / max };
+  const resultCell = () =>
+    page.evaluate(() => {
+      const cell = document.querySelector('.card--formula .vtable__row .vtable__cell');
+      return cell ? cell.textContent : null;
     });
-    return {
-      gradient: /linear-gradient/.test(style.backgroundImage),
-      stops,
-      animation: style.animationName,
-      duration: parseFloat(style.animationDuration),
-    };
-  });
+  const formulaCellBeforeSwitch = await resultCell();
+  await fileSelector.selectOption({ index: otherFileIndex });
+  await page.waitForTimeout(2_500);
+  const formulaCellAfterSwitch = await resultCell();
   check(
-    'the offer sits on a yellow gradient',
-    Boolean(offerLook?.gradient) &&
-      offerLook.stops.length >= 2 &&
-      offerLook.stops.every((stop) => stop.hue >= 35 && stop.hue <= 70 && stop.sat >= 0.25),
-    JSON.stringify(offerLook?.stops),
+    'switching the file follows the dependent formula card automatically',
+    formulaCellBeforeSwitch !== null &&
+      formulaCellAfterSwitch !== null &&
+      formulaCellBeforeSwitch !== formulaCellAfterSwitch,
+    `${String(formulaCellBeforeSwitch)} -> ${String(formulaCellAfterSwitch)}`,
   );
   check(
-    'the offer flashes',
-    offerLook?.animation === 'repoint-flash' && offerLook.duration > 0,
-    JSON.stringify({ animation: offerLook?.animation, duration: offerLook?.duration }),
+    'no re-point confirmation is needed any more',
+    (await page.locator('.formula-card__repoint, .script-card__repoint').count()) === 0,
   );
-
-  // The flash must not be the only thing carrying the box: under reduced motion the yellow
-  // and a static ring stay, and only the animation goes — otherwise the accessibility
-  // setting would erase the one affordance asking for a decision.
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.waitForTimeout(250);
-  const reducedOffer = await page.evaluate(() => {
-    const box = document.querySelector('.card--formula .formula-card__repoint');
-    if (!box) return null;
-    const style = getComputedStyle(box);
-    return {
-      animation: style.animationName,
-      gradient: /linear-gradient/.test(style.backgroundImage),
-      ring: style.boxShadow,
-    };
-  });
-  await page.emulateMedia({ reducedMotion: null });
+  const switchErrors = await page.locator('.formula-card__error').allInnerTexts();
   check(
-    'reduced motion keeps the yellow offer and only stops the flashing',
-    reducedOffer !== null &&
-      reducedOffer.animation === 'none' &&
-      reducedOffer.gradient &&
-      reducedOffer.ring !== 'none',
-    JSON.stringify(reducedOffer),
-  );
-
-  // …and the decision really is pending, not sticky: pointing the card at the file the
-  // table already shows retires the offer.
-  await fileSelector.selectOption({ index: activeFileIndex });
-  await page.waitForTimeout(400);
-  check(
-    'the offer retires once the card already reads the active file',
-    (await page.locator('.formula-card__repoint').count()) === 0,
+    'the following formula card computes on the new file',
+    switchErrors.length === 0,
+    switchErrors.join(' | '),
   );
 
   // The reported failure: after 视图 → 平铺 the card becomes viewport-sized, and the result
@@ -1007,13 +948,6 @@ try {
     pipelineY !== null && replacedY !== null && replacedY !== pipelineY,
     `${String(pipelineY)} -> ${String(replacedY)}`,
   );
-  const offerCount = await page.locator('.formula-card__repoint').count();
-  check(
-    'a replacement is a data change: no re-point offer appears',
-    offerCount === 0,
-    `${offerCount} offer(s)`,
-  );
-
   // The actual template-reuse journey: save the pipeline, empty the workspace, reopen the
   // saved file, and feed it different data again.
   const workspacePath = await saveWorkspaceViaMenu(page, exportDir);

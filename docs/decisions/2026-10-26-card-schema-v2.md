@@ -166,7 +166,7 @@ C++ 解析成 `ComputeNode` + 边集，输出规范化图逐字段对拍。首�
 | 后端 | `fix(backend): 单元格编辑级联` | `PATCH /api/matrices/{id}` 此前不发 `onMatrixChanged`，改单元格后函数卡仍显示旧数字 |
 | 前端 | `feat(web): 卡片 schema v2` | `CardBase.inputs[]`、`FunctionCardModel`（signatureId/params/outputs/node/displayMatrixId）、`WorkspaceSnapshot.version = 2`、`migrate.ts`（纯函数、确定性 v1→v2）、图表侧统一 `commitChartConfig`（先验环后改边） |
 | 前端 | `feat(web): 函数卡三区布局` | 输入 / 计算公式 / 输出三区；单节点四态灯；`upstreamError` 呈现为灰色「失效」而非红色 |
-| 前端 | `feat(web): 重指向确认流` | 切文件 ⇒ `RepointOffer`（列差异预览、行数变化陈述、「仍然应用（列不匹配）」、批量确认），确认 = 一次显式图编辑 |
+| 前端 | `feat(web): 重指向确认流` | 切文件 ⇒ `RepointOffer`（列差异预览、行数变化陈述、「仍然应用（列不匹配）」、批量确认），确认 = 一次显式图编辑（**2026-11-17 修正：切文件改为数据变更，读卡直接跟随，报价流下线**） |
 | 前端 | `feat(web): 输出列重命名 + 列数契约` | 输出区顶端重命名入口、底部提示条常驻陈述契约、违约时给出「扩展契约 / 解除锁定」两条出路 |
 | 前端 | `fix(web): 结果按窗口翻页` | v1 只取一个 5000 行窗口，1 万行源表在卡里只显示一半（数字对、图在撒谎）；现翻页取全，上限 20 万行并显式告知 |
 | 测试 | `test: 卡片层差分夹具` | 同一份 JSON（6 例）由 `cardFixtures.test.ts`（18 例）与 `card_fixture_run.cpp`（ctest `card_fixtures`）双边裁判 |

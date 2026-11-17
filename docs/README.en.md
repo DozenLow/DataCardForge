@@ -37,7 +37,7 @@ were considered and dropped. Three entrances, each answering one question:
   - [Connection endpoints land on the input/output sub-cards: port first, facing card edge as fallback](decisions/2026-11-17-port-anchored-connections.md) ← after the script card's three-column body, wires leave and enter at the port row's height
   - [Python script card: a card is a function, injection is name binding, outputs are declared first](decisions/2026-11-15-python-script-card.md) ← the O(1) escape hatch for algorithmic completeness; stage 1 landed, every declared output is wireable
   - [Regression card renamed to "relation enumeration": picking a column is a port binding, headers carry X : Y](decisions/2026-10-31-relation-enum-card.md) ← cards can finally pick columns; horizontal table-scroll alignment fixed too
-  - [Data cards can replace their file: replacing follows automatically, switching still re-points explicitly](decisions/2026-10-31-file-replacement.md) ← a saved workspace finally works as a template
+  - [Replacing AND switching a data card's file are data changes: readers follow](decisions/2026-10-31-file-replacement.md) ← a saved workspace finally works as a template
   - [Results show the first 100 rows by default; dense frames carry the full-table shape](decisions/2026-10-29-result-preview.md) ← large results are no longer shipped whole
   - [Connection endpoints land on card centres: one cubic Bézier + flowing dashes](decisions/2026-10-29-connection-center-anchors.md) ← wires point where the data flows
   - [Engine-level performance gate: 12 cases, p50×3 budget, 1.3× regression guard](decisions/2026-10-29-perf-gate.md) ← turns "it got slower" into an executable number

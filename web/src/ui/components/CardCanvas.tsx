@@ -116,10 +116,6 @@ export function CardCanvas({
   const addChartCard = useWorkspace((s) => s.addChartCard);
   const addFormulaCard = useWorkspace((s) => s.addFormulaCard);
   const showToast = useWorkspace((s) => s.showToast);
-  const repointOffers = useWorkspace((s) => s.repointOffers);
-  const applyRepoint = useWorkspace((s) => s.applyRepoint);
-  const dismissRepoint = useWorkspace((s) => s.dismissRepoint);
-  const applyRepointsForOwner = useWorkspace((s) => s.applyRepointsForOwner);
   const renameOutputColumn = useWorkspace((s) => s.renameOutputColumn);
   const addRelationEnumCard = useWorkspace((s) => s.addRelationEnumCard);
   const addScriptCard = useWorkspace((s) => s.addScriptCard);
@@ -541,12 +537,6 @@ export function CardCanvas({
               onActivate={() => bringToFront(card.id)}
               onClose={() => handleClose(card.id)}
               onCloseBlocked={() => reportBlocked(card.id)}
-              // Switching the data card's file offers every function card that reads it a
-              // re-point; a script card reads `in:N`, so it needs the same banner the
-              // formula card has (before this it was silently left on the old file).
-              repoint={repointOffers.find((entry) => entry.cardId === card.id) ?? null}
-              onApplyRepoint={() => applyRepoint(card.id)}
-              onDismissRepoint={() => dismissRepoint(card.id)}
             />
           );
         }
@@ -597,10 +587,6 @@ export function CardCanvas({
           const sourceColumnNames = sourceMatrix
             ? sourceMatrix.columns().map((c) => c.annotation || c.posName)
             : [];
-          const offer = repointOffers.find((entry) => entry.cardId === card.id) ?? null;
-          const batch = offer
-            ? repointOffers.filter((entry) => entry.ownerCardId === offer.ownerCardId).length
-            : 0;
           return (
             <FormulaCard
               key={card.id}
@@ -608,13 +594,6 @@ export function CardCanvas({
               resultMatrix={matrices.get(card.displayMatrixId)}
               sourceColumnNames={sourceColumnNames}
               inputs={resolvedInputs}
-              repoint={offer}
-              repointBatch={batch}
-              onApplyRepoint={() => applyRepoint(card.id)}
-              onDismissRepoint={() => dismissRepoint(card.id)}
-              onApplyAllRepoints={() => {
-                if (offer) applyRepointsForOwner(offer.ownerCardId);
-              }}
               onRenameOutputColumn={(index, name) => renameOutputColumn(card.id, index, name)}
               onSetColumnContract={(columns) => setColumnContract(card.id, columns)}
               onOpenFunction={() => {
@@ -654,10 +633,6 @@ export function CardCanvas({
       cards,
       selectedId,
       matrices,
-      repointOffers,
-      applyRepoint,
-      dismissRepoint,
-      applyRepointsForOwner,
       renameOutputColumn,
       addRelationEnumCard,
       addScriptCard,

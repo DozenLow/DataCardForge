@@ -924,68 +924,6 @@ describe('collapsible declaration columns', () => {
 // says why. The store's run path enforces the same predicate, so no other entry point (a
 // shortcut, a future automatic rerun) can execute it before the confirmation.
 
-describe('file-switch offer', () => {
-  it('shows the offer on the input port and wires both buttons', async () => {
-    const onApply = vi.fn();
-    const onDismiss = vi.fn();
-    const offer = {
-      cardId,
-      portId: 'in:0',
-      ownerCardId: 1,
-      fromMatrixId: 10,
-      toMatrixId: 11,
-      fromName: 'large.txt',
-      toName: 'large - 副本.txt',
-      sameColumns: true,
-      addedLabels: [],
-      removedLabels: [],
-      fromRows: 165000,
-      toRows: 161903,
-      rowDelta: -3097,
-      toCols: 6,
-    };
-    const host = document.createElement('div');
-    document.body.appendChild(host);
-    const root = createRoot(host);
-    roots.push(root);
-    await act(async () => {
-      root.render(
-        <StrictMode>
-          <ScriptCard
-            card={card()}
-            active
-            closeBlocked={false}
-            onActivate={() => {}}
-            onClose={() => {}}
-            onCloseBlocked={() => {}}
-            repoint={offer}
-            onApplyRepoint={onApply}
-            onDismissRepoint={onDismiss}
-          />
-        </StrictMode>,
-      );
-    });
-    await flush();
-
-    const banner = host.querySelector('.script-card__repoint')!;
-    expect(banner).not.toBeNull();
-    expect(banner.textContent).toContain('数据文件已切换');
-    expect(banner.textContent).toContain('large - 副本.txt');
-    expect(banner.textContent).toContain('161903');
-
-    const apply = [...banner.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-      button.textContent?.includes('改读当前文件'),
-    )!;
-    const dismiss = [...banner.querySelectorAll<HTMLButtonElement>('button')].find((button) =>
-      button.textContent?.includes('忽略'),
-    )!;
-    await act(async () => apply.click());
-    await act(async () => dismiss.click());
-    expect(onApply).toHaveBeenCalledTimes(1);
-    expect(onDismiss).toHaveBeenCalledTimes(1);
-  });
-});
-
 describe('blocking outline', () => {
   it('outlines the offending card while a node-level blocker is open', async () => {
     const host = await mount(cardId);

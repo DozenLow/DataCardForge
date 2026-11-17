@@ -34,7 +34,7 @@
   - [连线端点落在输入/输出小卡片：端口优先、缺端口回退朝向卡边](decisions/2026-11-17-port-anchored-connections.md) ← 脚本卡三栏后，线从端口行的高度进出
   - [Python 脚本卡：卡是函数、注入是名字绑定、输出先声明](decisions/2026-11-15-python-script-card.md) ← 算法完备性的 O(1) 逃生舱；阶段 1 已合入，K 个输出全部可接线
   - [回归卡改名「关系枚举」——选列变成端口绑定，列头带上 X : Y](decisions/2026-10-31-relation-enum-card.md) ← 卡片能选列了，表格横向滚动对齐也修了
-  - [数据卡可以换文件：换数据自动跟随，切文件仍显式重指向](decisions/2026-10-31-file-replacement.md) ← 保存的工作区可以当模板复用
+  - [数据卡换文件/切文件都是数据变更：下游自动跟随](decisions/2026-10-31-file-replacement.md) ← 保存的工作区可以当模板复用
   - [结果默认只显示前 100 行；稠密帧携带整表形状](decisions/2026-10-29-result-preview.md) ← 大结果不再整包下传
   - [连线端点落在卡片中心：单条三次贝塞尔 + 流动虚线](decisions/2026-10-29-connection-center-anchors.md) ← 连线指向与数据流向一致
   - [引擎层性能门禁：12 个用例、p50×3 预算、1.3× 回归护栏](decisions/2026-10-29-perf-gate.md) ← 把「变慢了」变成可执行的数字

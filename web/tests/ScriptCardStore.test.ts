@@ -1081,19 +1081,16 @@ describe('blocking gate state', () => {
 });
 
 
-// ── file switch on a multi-file table (2026-11-17) ────────────────────────────────────────
+// ── file switching follows the readers (2026-11-17) ──────────────────────────────────────
 //
-// Switching which file a table shows is a VIEW change: a function card stays on the matrix
-// it was born with, and the UI offers the switch instead. The offer builder used to look
-// only at the legacy single `source` port, so a script card (`in:N`) never saw an offer: the
-// table moved, the script stayed on the old file, and its node stayed `done` — the report
-// "the light stays green and the rerun does nothing".
+// Switching which file a table shows is switching the data the card holds, not a view
+// change: every function card that reads the table follows it, exactly like a replaced
+// file. (The earlier model offered a confirmation banner; it made the script keep reading
+// the previous file while its node stayed green.)
 
-describe('file-switch offer', () => {
-  /** A table with two files; returns the card id (the active file is index 0). */
+describe('file switching', () => {
+  /** A table with two files; the active file is index 0. */
   async function twoFileTable(): Promise<number> {
-    // `reset()` resets the workspace, not the app-level backend banner: a previous test that
-    // simulated an outage must not leave this one frozen.
     useWorkspace.setState({ backend: { state: 'online' } });
     const cardId = store().addMatrixCard([
       { name: 'large.txt', matrix: matrix([[1], [2], [3]]) },
@@ -1110,58 +1107,67 @@ describe('file-switch offer', () => {
     const calls = client.patchNode.mock.calls as unknown as Array<
       [number, { inputs?: Array<{ sourceMatrixId?: number }> }]
     >;
-    const call = calls.at(-1);
-    return call?.[1]?.inputs?.[0]?.sourceMatrixId;
+    return calls.at(-1)?.[1]?.inputs?.[0]?.sourceMatrixId;
   }
 
-  it('offers a script card the file its table now shows, on its own port', async () => {
+  it('re-points a reading script card at the displayed file and reruns it', async () => {
     const tableId = await twoFileTable();
     const scriptId = await makeScriptCard([tableId]);
-    const boundMatrix = scriptCardOf(scriptId).inputs[0].target.matrixId;
+    const firstMatrix = scriptCardOf(scriptId).inputs[0].target.matrixId;
+    const table = store().cards.find((entry) => entry.id === tableId) as MatrixCardModel;
+    const secondMatrix = table.sources[1].matrixId;
+    expect(firstMatrix).toBe(table.sources[0].matrixId);
 
-    // Arm the card so applying the offer also proves the automatic rerun.
+    // Armed so the follow also proves the automatic rerun.
     store().runScriptCard(scriptId);
     await flush();
     await flush();
     expect(scriptCardOf(scriptId).autoRun).toBe(true);
 
-    store().setActiveSource(tableId, 1);
-    const offers = store().repointOffers.filter((offer) => offer.cardId === scriptId);
-    expect(offers).toHaveLength(1);
-    expect(offers[0]).toMatchObject({
-      portId: 'in:0',
-      fromName: 'large.txt',
-      toName: 'large - 副本.txt',
-      fromRows: 3,
-      toRows: 2,
-    });
-    expect(offers[0].fromMatrixId).toBe(boundMatrix);
-
     const beforeSwitch = lastSourceMatrixId();
     client.computeNode.mockClear();
-    store().applyRepoint(scriptId);
-    await flush();
 
-    // The input now reads the displayed file and the offer is gone…
-    expect(scriptCardOf(scriptId).inputs[0].target.matrixId).toBe(offers[0].toMatrixId);
-    expect(store().repointOffers.some((offer) => offer.cardId === scriptId)).toBe(false);
-    // …the backend was told about the new binding…
+    store().setActiveSource(tableId, 1);
+
+    // The binding follows the switch immediately — no banner, no second click.
+    expect(scriptCardOf(scriptId).inputs[0].target.matrixId).toBe(secondMatrix);
     await vi.waitFor(() => {
       const afterSwitch = lastSourceMatrixId();
       expect(afterSwitch).toBeDefined();
       expect(afterSwitch).not.toBe(beforeSwitch);
     });
-    // …and the armed card ran again, which is what makes the light leave `done`.
     await vi.waitFor(() => expect(client.computeNode).toHaveBeenCalledTimes(1));
+
+    // And back: the reader returns to the first file with it.
     await flush();
-    await flush();
+    store().setActiveSource(tableId, 0);
+    expect(scriptCardOf(scriptId).inputs[0].target.matrixId).toBe(firstMatrix);
   });
 
-  it('does not offer anything when the script already reads the displayed file', async () => {
+  it('leaves readers of another table alone', async () => {
     const tableId = await twoFileTable();
-    const scriptId = await makeScriptCard([tableId]);
+    const otherId = await loadSource('other.csv', [[7], [8]]);
+    const scriptId = await makeScriptCard([otherId]);
+    const bound = scriptCardOf(scriptId).inputs[0].target.matrixId;
+
     store().setActiveSource(tableId, 1);
-    store().setActiveSource(tableId, 0);
-    expect(store().repointOffers.some((offer) => offer.cardId === scriptId)).toBe(false);
+    await flush();
+    expect(scriptCardOf(scriptId).inputs[0].target.matrixId).toBe(bound);
+  });
+
+  it('re-points a formula card that reads the table', async () => {
+    const tableId = await twoFileTable();
+    const formulaId = store().addFormulaCard(tableId);
+    expect(formulaId).not.toBeNull();
+    await flush();
+    await flush();
+    const card = store().cards.find((entry) => entry.id === formulaId) as FunctionCardModel;
+    const before = card.inputs[0].target.matrixId;
+    store().setActiveSource(tableId, 1);
+    await flush();
+    const after = (store().cards.find((entry) => entry.id === formulaId) as FunctionCardModel)
+      .inputs[0].target.matrixId;
+    expect(after).toBeDefined();
+    expect(after).not.toBe(before);
   });
 });

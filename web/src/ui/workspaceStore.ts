@@ -293,35 +293,6 @@ export interface Toast {
  * the card shows it as a pending banner. Nothing changes until the user confirms — the
  * difference from v1 is that the edit is announced instead of happening behind their back.
  */
-export interface RepointOffer {
-  /** The function card that could be re-pointed. */
-  cardId: number;
-  /**
-   * Which input port of that card changes. Script cards declare `in:N` ports, so a card
-   * can have one offer per port; the legacy single-input formula card uses `source`.
-   */
-  portId: string;
-  /** The data card whose active file changed. */
-  ownerCardId: number;
-  fromMatrixId: number;
-  toMatrixId: number;
-  /** File name currently bound (for the banner text). */
-  fromName: string;
-  /** Column headers identical (same labels, same order) ⇒ a plain one-click confirm. */
-  sameColumns: boolean;
-  /** Column labels present in the new file but not in the old one. */
-  addedLabels: string[];
-  /** Column labels present in the old file but gone from the new one. */
-  removedLabels: string[];
-  /** New row count minus old; row counts never block a re-point (only columns are a map). */
-  rowDelta: number;
-  fromRows: number;
-  toRows: number;
-  /** Column count of the new matrix (shown when the headers match). */
-  toCols: number;
-  /** File name of the new matrix, for the banner text. */
-  toName: string;
-}
 
 // ── script card (`builtin:python`) ────────────────────────────────────────────────────
 //
@@ -1280,13 +1251,9 @@ interface WorkspaceState {
    * Pending offers to re-point a function card at the newly active file of its data card.
    * Rebuilt whenever a table switches files; empty once the user applies or dismisses.
    */
-  repointOffers: RepointOffer[];
   /** Apply one offer: an explicit, undoable graph edit (re-pointing back is another edit). */
-  applyRepoint: (cardId: number) => void;
   /** Apply every offer that reads the same data card (batch confirm). */
-  applyRepointsForOwner: (ownerCardId: number) => void;
   /** Keep the current input; the offer disappears until the next file switch. */
-  dismissRepoint: (cardId: number) => void;
   /**
    * Name one output column. The first rename also creates the column contract: from then
    * on the output's width is promised, and a drift stops the flow (structured error).
@@ -3009,69 +2976,6 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
    * "apply anyway" path: expressions reference columns BY NAME, so a changed header set is
    * the one difference that can silently change what the card computes.
    */
-  const buildRepointOffers = (
-    cards: CardModel[],
-    ownerCardId: number,
-    newActiveMatrixId: number,
-  ): RepointOffer[] => {
-    const owner = cards.find((card) => card.id === ownerCardId);
-    if (!owner || !isMatrixCard(owner)) return [];
-    const ownedMatrixIds = new Set(owner.sources.map((source) => source.matrixId));
-    const newMatrix = get().matrices.get(newActiveMatrixId);
-    const labelSet = (matrixId: number): { labels: string[]; rows: number } | null => {
-      const matrix = get().matrices.get(matrixId);
-      if (!matrix) return null;
-      return {
-        labels: matrix.columns().map((column) => column.annotation || column.posName),
-        rows: matrix.rowCount(),
-      };
-    };
-    const next = labelSet(newActiveMatrixId);
-    if (!next) return [];
-
-    const offers: RepointOffer[] = [];
-    for (const card of cards) {
-      if (!isFormulaCard(card)) continue;
-      // EVERY matrix input is a candidate, not only the legacy single `source` port: a
-      // script card reads `in:0`, `in:1`, … and before this loop skipped it entirely, so
-      // switching a file silently left the script on the other one.
-      for (const input of card.inputs) {
-        if (input.target.type !== 'matrix') continue;
-        if (!ownedMatrixIds.has(input.target.matrixId)) continue;
-        if (input.target.matrixId === newActiveMatrixId) continue;
-        const previous = labelSet(input.target.matrixId);
-        if (!previous) continue;
-
-        const previousSet = new Set(previous.labels);
-        const nextSet = new Set(next.labels);
-        const sameColumns =
-          previous.labels.length === next.labels.length &&
-          previous.labels.every((label, index) => label === next.labels[index]);
-        offers.push({
-          cardId: card.id,
-          portId: input.portId,
-          ownerCardId,
-          fromMatrixId: input.target.matrixId,
-          toMatrixId: newActiveMatrixId,
-          fromName:
-            owner.sources.find((source) => source.matrixId === input.target.matrixId)?.name ??
-            `#${input.target.matrixId}`,
-          sameColumns,
-          addedLabels: next.labels.filter((label) => !previousSet.has(label)),
-          removedLabels: previous.labels.filter((label) => !nextSet.has(label)),
-          fromRows: previous.rows,
-          toRows: next.rows,
-          toCols: next.labels.length,
-          rowDelta: next.rows - previous.rows,
-          toName:
-            owner.sources.find((source) => source.matrixId === newActiveMatrixId)?.name ??
-            `#${newActiveMatrixId}`,
-        });
-      }
-    }
-    void newMatrix;
-    return offers;
-  };
 
   /**
    * Commit a chart config change and keep `inputs[]` (the authoritative edges) in step.
@@ -3138,7 +3042,6 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     blockers: [],
     blockedCardId: null,
     blockNonce: 0,
-    repointOffers: [],
     toast: null,
     helpOpen: false,
     helpSection: null,
@@ -3299,12 +3202,6 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         matrices: allocated.matrices,
         matrixIdByIdentity: allocated.matrixIdByIdentity,
         nextMatrixId: allocated.nextMatrixId,
-        // A pending offer names a matrix that no longer means what it used to; the
-        // replacement is the newer intent.
-        repointOffers: state.repointOffers.filter(
-          (offer) =>
-            !oldToNew.has(offer.fromMatrixId) && !oldToNew.has(offer.toMatrixId),
-        ),
       });
 
       // Charts are views: they follow the file the card now shows.
@@ -3551,10 +3448,6 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           Object.entries(current.scriptRuns).filter(([key]) => Number(key) !== id),
         ),
         // An offer names a card that no longer exists; keeping it would leave a banner
-        // pointing at nothing (and `applyRepoint` would silently do nothing).
-        repointOffers: current.repointOffers.filter(
-          (offer) => offer.cardId !== id && offer.ownerCardId !== id,
-        ),
         selectedId: current.selectedId === id ? null : current.selectedId,
         blockedCardId: current.blockedCardId === id ? null : current.blockedCardId,
       }));
@@ -3607,8 +3500,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         blockedCardId: null,
         blockNonce: state.blockNonce + 1,
         dependencies: new DependencyGraph(),
-        repointOffers: [],
-        // The panels' nodes were released above; their state goes with the cards.
+            // The panels' nodes were released above; their state goes with the cards.
         summaries: {},
         // Same for each script card's last run: the nodes are gone with the cards.
         scriptRuns: {},
@@ -3663,6 +3555,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       const card = state.cards.find((c) => c.id === cardId);
       if (!card || !isMatrixCard(card)) return;
       if (index < 0 || index >= card.sources.length || index === card.activeSource) return;
+      const nextActiveMatrixId = card.sources[index].matrixId;
 
       set({
         cards: state.cards.map((c) =>
@@ -3679,16 +3572,21 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // Charts that read this card must pick up the new file's data.
       refreshDependentsOf(cardId);
 
-      // Function cards do NOT follow automatically (v2). Offer the switch instead: the
-      // card shows a pending banner and nothing changes until the user confirms.
-      const active = get().cards.find((c) => c.id === cardId);
-      const activeMatrixId =
-        active && isMatrixCard(active)
-          ? active.sources[active.activeSource]?.matrixId
-          : undefined;
-      if (activeMatrixId !== undefined) {
-        set({ repointOffers: buildRepointOffers(get().cards, cardId, activeMatrixId) });
+      // Switching the file IS switching what this card holds (2026-11-17, correcting the
+      // earlier "view change" reading): every function card that reads this table follows it
+      // to the file it now shows, exactly like a replaced file. Charts already follow above;
+      // a reader bound to another slot would leave the card and its input describing two
+      // different files, which is the state this rule exists to prevent. The binding edit is
+      // explicit here (not a hidden edit of the card), and the push makes the formula card
+      // recompute / the armed script rerun; an unarmed script goes dirty and waits.
+      const oldToNew = new Map<number, number>();
+      for (const source of card.sources) {
+        if (source.matrixId !== nextActiveMatrixId) {
+          oldToNew.set(source.matrixId, nextActiveMatrixId);
+        }
       }
+      const readers = repointReadersOf(cardId, oldToNew);
+      for (const readerId of readers) void syncFunctionCard(readerId);
     },
 
     editCell(cardId, row, col, value) {
@@ -4281,82 +4179,6 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // never evaluates. The binding is the card's explicit matrix — it does not drift with
       // the table's active file (that is now an explicit re-point).
       void syncFunctionCard(cardId);
-    },
-
-    applyRepoint(cardId) {
-      const state = get();
-      const offers = state.repointOffers.filter((entry) => entry.cardId === cardId);
-      if (offers.length === 0) return;
-      const card = state.cards.find((c) => c.id === cardId);
-      if (!card || !isFormulaCard(card)) return;
-
-      // Re-point the envelope AND the dependency edge in one step: the offer is the only
-      // producer of this edit, so the target card id cannot change here (same data card).
-      // One offer per port: a script card may read two files of the same table.
-      const byPort = new Map(offers.map((offer) => [offer.portId, offer]));
-      const inputs = card.inputs.map((entry) => {
-        const offer = byPort.get(entry.portId);
-        if (!offer || entry.target.type !== 'matrix') return entry;
-        return { ...entry, target: { ...entry.target, matrixId: offer.toMatrixId } };
-      });
-      set({
-        cards: state.cards.map((entry) => (entry.id === cardId ? { ...card, inputs } : entry)),
-        repointOffers: state.repointOffers.filter((entry) => entry.cardId !== cardId),
-      });
-      // One PATCH: the node is told about its new input, exactly like an explicit re-wire.
-      // The old matrix is released only after that PATCH settles — the server refuses a
-      // DELETE while the node still reads it (and the browser logs the 409).
-      void (async () => {
-        try {
-          await syncFunctionCard(cardId);
-        } catch {
-          // The banner already carries an unreachable backend; the local prune below is
-          // still correct because nothing in the workspace reads the old matrix any more.
-        }
-        await waitForCardPushes();
-        for (const offer of offers) pruneMatrixIfUnreferenced(offer.fromMatrixId);
-      })();
-    },
-
-    applyRepointsForOwner(ownerCardId) {
-      const state = get();
-      const targets = state.repointOffers.filter((offer) => offer.ownerCardId === ownerCardId);
-      if (targets.length === 0) return;
-      const byCard = new Map<number, Map<string, RepointOffer>>();
-      for (const offer of targets) {
-        const ports = byCard.get(offer.cardId) ?? new Map<string, RepointOffer>();
-        ports.set(offer.portId, offer);
-        byCard.set(offer.cardId, ports);
-      }
-      const cards = state.cards.map((card) => {
-        const ports = byCard.get(card.id);
-        if (!ports || !isFormulaCard(card)) return card;
-        const inputs = card.inputs.map((entry) => {
-          const offer = ports.get(entry.portId);
-          if (!offer || entry.target.type !== 'matrix') return entry;
-          return { ...entry, target: { ...entry.target, matrixId: offer.toMatrixId } };
-        });
-        return { ...card, inputs };
-      });
-      set({
-        cards,
-        repointOffers: state.repointOffers.filter((offer) => offer.ownerCardId !== ownerCardId),
-      });
-      void (async () => {
-        try {
-          await Promise.all([...byCard.keys()].map((cardId) => syncFunctionCard(cardId)));
-        } catch {
-          // Same as above: freeing the old parses does not depend on the network.
-        }
-        await waitForCardPushes();
-        for (const offer of targets) pruneMatrixIfUnreferenced(offer.fromMatrixId);
-      })();
-    },
-
-    dismissRepoint(cardId) {
-      set((state) => ({
-        repointOffers: state.repointOffers.filter((offer) => offer.cardId !== cardId),
-      }));
     },
 
     renameOutputColumn(cardId, index, name) {
@@ -5398,8 +5220,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         dependencies: new DependencyGraph(),
         blockedCardId: null,
         blockNonce: 0,
-        repointOffers: [],
-        // Session-only panel state dies with the workspace (like the node map above, it
+            // Session-only panel state dies with the workspace (like the node map above, it
         // must never be answered for a card that inherits the same id).
         summaries: {},
         scriptRuns: {},

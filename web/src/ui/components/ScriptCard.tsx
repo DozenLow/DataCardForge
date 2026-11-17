@@ -45,7 +45,6 @@ import {
   outputMatrixId,
   useTranslator,
   useWorkspace,
-  type RepointOffer,
   type ScriptNameCheck,
   type ScriptNameProblem,
   type ScriptPreview,
@@ -761,14 +760,6 @@ export interface ScriptCardProps {
   onClose: () => void;
   onCloseBlocked: () => void;
   /**
-   * The data card whose displayed file changed while this script still reads the old one.
-   * Same offer the formula card shows; without it a switched table silently left the script
-   * on the previous file (the node stays `done`, so nothing looked stale).
-   */
-  repoint?: RepointOffer | null;
-  onApplyRepoint?: () => void;
-  onDismissRepoint?: () => void;
-  /**
    * Observer hook fired when a traceback line is clicked (the embedded editor is scrolled
    * first). Production passes nothing; a host that opens the script in a larger editor — or
    * the DOM test — can use it to see which line was asked for.
@@ -794,9 +785,6 @@ export function ScriptCard({
   onActivate,
   onClose,
   onCloseBlocked,
-  repoint = null,
-  onApplyRepoint,
-  onDismissRepoint,
   onJumpToLine,
 }: ScriptCardProps) {
   const { t, locale } = useTranslator();
@@ -1284,41 +1272,6 @@ export function ScriptCard({
           disabled rather than hidden — the card must still show what it would do, and one
           click here records the confirmation for this file.
         */}
-        {repoint ? (
-          <div
-            className="backend-banner script-card__repoint"
-            role="status"
-            data-script-repoint={repoint.portId}
-            style={{ flexShrink: 0 }}
-          >
-            <span className="script-card__repoint-text" title={repoint.portId}>
-              <strong>{labels.repointTitle}</strong>
-              {' — '}
-              {labels.repointBody
-                // The variable the script uses ("A"), not the technical `in:0` identity:
-                // "输入 in:0" is meaningless to the person looking at `result = A * 1.0`.
-                .replace(
-                  '{port}',
-                  portNames[card.inputs.findIndex((input) => input.portId === repoint.portId)] ??
-                    repoint.portId,
-                )
-                .replace('{from}', repoint.fromName)
-                .replace('{to}', repoint.toName)
-                .replace('{fromRows}', String(repoint.fromRows))
-                .replace('{toRows}', String(repoint.toRows))}
-              {repoint.sameColumns ? null : (
-                <span className="script-card__repoint-warn"> {labels.repointColumns}</span>
-              )}
-            </span>
-            <button type="button" className="card__control" onClick={onApplyRepoint}>
-              {labels.repointApply}
-            </button>
-            <button type="button" className="card__control" onClick={onDismissRepoint}>
-              {labels.repointDismiss}
-            </button>
-          </div>
-        ) : null}
-
         {!trusted ? (
           <div
             className="backend-banner script-card__locked"

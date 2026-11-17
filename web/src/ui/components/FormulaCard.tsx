@@ -24,7 +24,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useAccuracyHint } from '../useAccuracyHint.ts';
 import { MatrixData } from '../../core/MatrixData.ts';
-import { useTranslator, useWorkspace, type RepointOffer } from '../workspaceStore.ts';
+import { useTranslator, useWorkspace } from '../workspaceStore.ts';
 import { registerPort, unregisterPort, type AnchorSide } from '../cardMetrics.ts';
 import { flushOperations, settleOperation } from '../operationSettle.ts';
 import type { FunctionCardModel, NodeStatus } from '../types.ts';
@@ -84,12 +84,7 @@ interface FormulaCardProps {
   sourceColumnNames: string[];
   inputs: ResolvedInput[];
   /** Pending offer to re-point at the data card's newly active file (v2: never automatic). */
-  repoint: RepointOffer | null;
   /** How many cards would change if the user picks "apply to all". */
-  repointBatch: number;
-  onApplyRepoint: () => void;
-  onDismissRepoint: () => void;
-  onApplyAllRepoints: () => void;
   onRenameOutputColumn: (index: number, name: string) => void;
   onSetColumnContract: (columns: number | null) => void;
   /**
@@ -111,11 +106,6 @@ export function FormulaCard({
   resultMatrix,
   sourceColumnNames,
   inputs,
-  repoint,
-  repointBatch,
-  onApplyRepoint,
-  onDismissRepoint,
-  onApplyAllRepoints,
   onRenameOutputColumn,
   onSetColumnContract,
   onOpenChart,
@@ -412,55 +402,6 @@ export function FormulaCard({
       minHeight={360}
     >
       <div className="formula-card">
-              {repoint ? (
-                <div className="formula-card__repoint" role="status">
-                  <p className="formula-card__repoint-title">
-                    {t('formula.repoint.title', { name: repoint.toName })}
-                  </p>
-                  <p className="formula-card__repoint-diff">
-                    {repoint.sameColumns
-                      ? t('formula.repoint.sameColumns', {
-                          n: repoint.toCols,
-                          from: repoint.fromRows,
-                          to: repoint.toRows,
-                        })
-                      : t('formula.repoint.changedColumns', {
-                          added: repoint.addedLabels.join(', ') || '—',
-                          removed: repoint.removedLabels.join(', ') || '—',
-                          from: repoint.fromRows,
-                          to: repoint.toRows,
-                        })}
-                  </p>
-                  <div className="formula-card__repoint-actions">
-                    <button
-                      type="button"
-                      className="card__control formula-card__repoint-primary"
-                      onClick={onApplyRepoint}
-                    >
-                      {repoint.sameColumns
-                        ? t('formula.repoint.apply')
-                        : t('formula.repoint.applyAnyway')}
-                    </button>
-                    <button
-                      type="button"
-                      className="card__control"
-                      onClick={onDismissRepoint}
-                    >
-                      {t('formula.repoint.dismiss')}
-                    </button>
-                    {repointBatch > 1 ? (
-                      <button
-                        type="button"
-                        className="card__control"
-                        onClick={onApplyAllRepoints}
-                      >
-                        {t('formula.repoint.applyAll', { n: repointBatch })}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-
         <div className="formula-card__zones">
           {/* ── zone 1: inputs (the card's dependency list) ── */}
           <SidePanel

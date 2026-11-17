@@ -1138,8 +1138,8 @@ describe('formula-card compute authority (stage 3)', () => {
     });
   });
 
-  // ── re-point confirmation (v2: switching a file is an explicit graph edit) ──────
-  describe('re-point offers', () => {
+  // ── switching a file follows its readers (2026-11-17; supersedes the offer flow) ──
+  describe('file switching follows readers', () => {
     /** Two files in one data card: identical headers, and a third file with different ones. */
     function setup() {
       const srcId = store().addMatrixCard([
@@ -1151,79 +1151,32 @@ describe('formula-card compute authority (stage 3)', () => {
       return { srcId, matrices: card.sources.map((source) => source.matrixId) };
     }
 
-    it('offers the switch for a function card instead of re-pointing it', () => {
-      const { srcId, matrices } = setup();
-      const fId = store().addFormulaCard(srcId, matrices[0])!;
-      store().setActiveSource(srcId, 1);
-      const offers = store().repointOffers;
-      expect(offers).toHaveLength(1);
-      expect(offers[0]).toMatchObject({
-        cardId: fId,
-        ownerCardId: srcId,
-        fromMatrixId: matrices[0],
-        toMatrixId: matrices[1],
-        sameColumns: true,
-        addedLabels: [],
-        removedLabels: [],
-        toName: 'b.txt',
-      });
-      // Nothing changed yet — the card still reads its frozen matrix.
-      const fn = store().cards.find((c) => c.id === fId) as FunctionCardModel;
-      expect(fn.inputs[0].target).toMatchObject({ matrixId: matrices[0] });
-    });
-
-    it('applies the offer as one explicit edit (input + node)', () => {
-      const { srcId, matrices } = setup();
-      const fId = store().addFormulaCard(srcId, matrices[0])!;
-      store().setActiveSource(srcId, 1);
-      store().applyRepoint(fId);
-      const fn = store().cards.find((c) => c.id === fId) as FunctionCardModel;
-      expect(fn.inputs[0].target).toMatchObject({ matrixId: matrices[1] });
-      expect(store().repointOffers).toHaveLength(0);
-      // The dependency edge is unchanged (same data card), so close protection still holds.
-      expect(store().dependencies.getDependents(srcId)).toContain(fId);
-    });
-
-    it('flags a column change so the confirm cannot be a blind one', () => {
-      const { srcId, matrices } = setup();
-      store().addFormulaCard(srcId, matrices[0]);
-      store().setActiveSource(srcId, 2);
-      const offer = store().repointOffers[0];
-      expect(offer.sameColumns).toBe(false);
-      expect(offer.addedLabels).toEqual(['Z']);
-      expect(offer.removedLabels).toEqual(['A', 'B']);
-      expect(offer.toCols).toBe(1);
-    });
-
-    it('dismissing keeps the current input and clears the offer', () => {
-      const { srcId, matrices } = setup();
-      const fId = store().addFormulaCard(srcId, matrices[0])!;
-      store().setActiveSource(srcId, 1);
-      store().dismissRepoint(fId);
-      expect(store().repointOffers).toHaveLength(0);
-      const fn = store().cards.find((c) => c.id === fId) as FunctionCardModel;
-      expect(fn.inputs[0].target).toMatchObject({ matrixId: matrices[0] });
-    });
-
-    it('applies to every card reading the same data card in one go', () => {
+    it('re-points every function card that reads the table, without a confirmation', async () => {
       const { srcId, matrices } = setup();
       const a = store().addFormulaCard(srcId, matrices[0])!;
       const b = store().addFormulaCard(srcId, matrices[0])!;
       store().setActiveSource(srcId, 1);
-      expect(store().repointOffers).toHaveLength(2);
-      store().applyRepointsForOwner(srcId);
-      expect(store().repointOffers).toHaveLength(0);
+      await flush();
       for (const id of [a, b]) {
         const fn = store().cards.find((c) => c.id === id) as FunctionCardModel;
         expect(fn.inputs[0].target).toMatchObject({ matrixId: matrices[1] });
       }
+      // The dependency edge is unchanged (same data card), so close protection still holds.
+      expect(store().dependencies.getDependents(srcId)).toContain(a);
     });
 
-    it('offers nothing when the new file is already the card input', () => {
+    it('switches back with the table, and a column change is left to the contract/error', async () => {
       const { srcId, matrices } = setup();
-      store().addFormulaCard(srcId, matrices[1]);
-      store().setActiveSource(srcId, 1);
-      expect(store().repointOffers).toHaveLength(0);
+      const id = store().addFormulaCard(srcId, matrices[0])!;
+      store().setActiveSource(srcId, 2);
+      await flush();
+      const fn = store().cards.find((c) => c.id === id) as FunctionCardModel;
+      expect(fn.inputs[0].target).toMatchObject({ matrixId: matrices[2] });
+
+      store().setActiveSource(srcId, 0);
+      await flush();
+      const back = store().cards.find((c) => c.id === id) as FunctionCardModel;
+      expect(back.inputs[0].target).toMatchObject({ matrixId: matrices[0] });
     });
   });
 
@@ -1385,34 +1338,6 @@ describe('charts from a function card', () => {
     } finally {
       stub.restore();
     }
-  });
-});
-
-describe('offer hygiene', () => {
-  it('drops an offer whose card is closed', async () => {
-    const srcId = store().addMatrixCard([
-      { name: 'a.txt', matrix: matrix([[1], [2]], ['A']) },
-      { name: 'b.txt', matrix: matrix([[3], [4]], ['A']) },
-    ]);
-    const card = store().cards.find((c) => c.id === srcId) as MatrixCardModel;
-    const fId = store().addFormulaCard(srcId, card.sources[0].matrixId)!;
-    store().setActiveSource(srcId, 1);
-    expect(store().repointOffers).toHaveLength(1);
-    store().removeCard(fId);
-    expect(store().repointOffers).toHaveLength(0);
-  });
-
-  it('drops every offer when the workspace resets', () => {
-    const srcId = store().addMatrixCard([
-      { name: 'a.txt', matrix: matrix([[1], [2]], ['A']) },
-      { name: 'b.txt', matrix: matrix([[3], [4]], ['A']) },
-    ]);
-    const card = store().cards.find((c) => c.id === srcId) as MatrixCardModel;
-    store().addFormulaCard(srcId, card.sources[0].matrixId);
-    store().setActiveSource(srcId, 1);
-    expect(store().repointOffers.length).toBeGreaterThan(0);
-    store().reset();
-    expect(store().repointOffers).toHaveLength(0);
   });
 });
 
@@ -1859,8 +1784,6 @@ describe('replaceCardSources — a data card can change its file', () => {
     const newMatrixId = matrixCard(cardId).sources[0].matrixId;
     // The input follows the same slot, and the graph edge still names the same data card.
     expect(fn.inputs[0].target).toMatchObject({ cardId, matrixId: newMatrixId });
-    // A replacement is a data change: no yellow offer, no second confirmation.
-    expect(store().repointOffers).toHaveLength(0);
     // One PATCH, bound to the *server* id of the new content.
     const patch = backend!.patches.at(-1);
     const serverId = backend!.registrations.find((entry) => entry.name === 'b.txt')!.matrixId;
@@ -1912,33 +1835,6 @@ describe('replaceCardSources — a data card can change its file', () => {
       expect([...store().matrixIdByIdentity.values()]).not.toContain(oldId);
     }
     expect(store().matrices.size).toBe(2);
-  });
-
-  it('leaves a formula of another slot alone, and keeps the matrix it reads', async () => {
-    const cardId = store().addMatrixCard([
-      { name: 'a.txt', matrix: matrix([[1]]) },
-      { name: 'b.txt', matrix: matrix([[2]]) },
-    ]);
-    const aId = matrixCard(cardId).sources[0].matrixId;
-    const bId = matrixCard(cardId).sources[1].matrixId;
-    // A formula frozen to the *first* file while the card shows the second one.
-    const formulaId = store().addFormulaCard(cardId, aId)!;
-    store().setActiveSource(cardId, 1);
-    await tick();
-
-    expect(
-      store().replaceCardSources(cardId, [{ name: 'x.txt', matrix: matrix([[5]]) }], 1),
-    ).toBe(true);
-
-    const after = matrixCard(cardId);
-    expect(after.sources[0].matrixId).toBe(aId);
-    expect(after.sources[1].matrixId).not.toBe(bId);
-    // Only the replaced slot's readers move; slot 0 was not touched.
-    const fn = store().cards.find((card) => card.id === formulaId) as FunctionCardModel;
-    expect(fn.inputs[0].target.matrixId).toBe(aId);
-    // The replaced matrix is released; the one the formula still reads survives.
-    expect(store().matrices.has(bId)).toBe(false);
-    expect(store().matrices.has(aId)).toBe(true);
   });
 
   it('re-picking the same bytes is a no-op (same parse, new label)', async () => {

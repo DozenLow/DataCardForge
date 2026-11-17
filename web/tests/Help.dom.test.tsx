@@ -71,11 +71,6 @@ async function mountFormulaCard(
         resultMatrix={undefined}
         sourceColumnNames={sourceColumnNames}
         inputs={[]}
-        repoint={null}
-        repointBatch={0}
-        onApplyRepoint={() => {}}
-        onDismissRepoint={() => {}}
-        onApplyAllRepoints={() => {}}
         onRenameOutputColumn={() => {}}
         onSetColumnContract={() => {}}
         onOpenChart={() => null}

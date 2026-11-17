@@ -247,13 +247,6 @@ const dictionaries = {
     'formula.signature': '签名：{id}',
 
     // 重指向确认（切文件后的一次显式图编辑）
-    'formula.repoint.title': '数据卡已切换到「{name}」— 应用为新输入？',
-    'formula.repoint.sameColumns': '列一致（{n} 列），行数 {from} → {to}',
-    'formula.repoint.changedColumns': '列已变化：+{added} −{removed}（行数 {from} → {to}）',
-    'formula.repoint.apply': '应用',
-    'formula.repoint.applyAnyway': '仍然应用（列不匹配）',
-    'formula.repoint.dismiss': '暂不',
-    'formula.repoint.applyAll': '应用到全部 {n} 张',
 
     // 输出列重命名 + 列数契约
     'formula.rename': '重命名列',
@@ -626,13 +619,6 @@ const dictionaries = {
     'formula.signature': 'signature: {id}',
 
     // Re-point confirmation (one explicit graph edit after a file switch)
-    'formula.repoint.title': 'The data card switched to “{name}” — use it as the input?',
-    'formula.repoint.sameColumns': 'Columns match ({n}); rows {from} → {to}',
-    'formula.repoint.changedColumns': 'Columns changed: +{added} −{removed} (rows {from} → {to})',
-    'formula.repoint.apply': 'Apply',
-    'formula.repoint.applyAnyway': 'Apply anyway (columns differ)',
-    'formula.repoint.dismiss': 'Not now',
-    'formula.repoint.applyAll': 'Apply to all {n} cards',
 
     // Output column rename + column-count contract
     'formula.rename': 'Rename columns',
