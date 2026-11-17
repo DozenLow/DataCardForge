@@ -18,11 +18,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MatrixData } from '../src/core/MatrixData.ts';
-import { useWorkspace, emptyScriptRun } from '../src/ui/workspaceStore.ts';
+import { useWorkspace, emptyScriptRun, outputMatrixId } from '../src/ui/workspaceStore.ts';
 import {
   PINNED_WORKSPACE_ENV,
   PYTHON_SIGNATURE,
   isScriptCard,
+  type ChartCardModel,
   type FunctionCardModel,
   type MatrixCardModel,
 } from '../src/ui/types.ts';
@@ -1144,6 +1145,42 @@ describe('file switching', () => {
     expect(scriptCardOf(scriptId).inputs[0].target.matrixId).toBe(firstMatrix);
   });
 
+  it('keeps a chart of the output on the output slot, never on the script’s input', async () => {
+    // The dataflow contract: a chart may read a data card's file or a function card's
+    // declared output. A chart bound to a script card must never name the matrix that card
+    // *reads* — that would plot the input table as if it were the result.
+    const tableId = await twoFileTable();
+    const scriptId = await makeScriptCard([tableId]);
+    store().runScriptCard(scriptId);
+    await flush();
+    await flush();
+    await flush();
+    const script = scriptCardOf(scriptId);
+    const outputSlot = outputMatrixId(script, 'out:0')!;
+    expect(outputSlot).toBe(script.displayMatrixId);
+
+    const chartId = store().addChartCard(scriptId, 0, 'line', 'out:0')!;
+    expect(chartId).not.toBeNull();
+    await flush();
+
+    const chart = () => store().cards.find((entry) => entry.id === chartId) as ChartCardModel;
+    expect(chart().config.sources[0].matrixId).toBe(outputSlot);
+    expect(chart().inputs.every((input) => input.target.cardId === scriptId)).toBe(true);
+
+    // Switching the table's file moves the script's INPUT; the chart must keep reading the
+    // script's output slot, not the file the script now consumes.
+    store().setActiveSource(tableId, 1);
+    await flush();
+    await vi.waitFor(() => {
+      const next = scriptCardOf(scriptId);
+      expect(next.inputs[0].target.matrixId).not.toBe(outputSlot);
+    });
+    const inputMatrixId = scriptCardOf(scriptId).inputs[0].target.matrixId;
+    expect(chart().config.sources[0].matrixId).toBe(outputSlot);
+    expect(chart().config.sources[0].matrixId).not.toBe(inputMatrixId);
+    expect(chart().inputs.every((input) => input.target.cardId === scriptId)).toBe(true);
+  });
+
   it('leaves readers of another table alone', async () => {
     const tableId = await twoFileTable();
     const otherId = await loadSource('other.csv', [[7], [8]]);
@@ -1169,5 +1206,123 @@ describe('file switching', () => {
       .inputs[0].target.matrixId;
     expect(after).toBeDefined();
     expect(after).not.toBe(before);
+  });
+});
+
+
+// ── the card is "done" only when its numbers are in the browser (2026-11-17) ─────────────
+//
+// Reported: the python card turns green before the compute finished, and the chart is handed
+// a matrix that has not been computed yet (the 100-row preview that lands first).
+
+describe('done means the numbers landed', () => {
+  /** A window endpoint that only answers when the test releases it. */
+  function gatedWindow(): { release: () => void; calls: () => number } {
+    const queue: Array<() => void> = [];
+    let count = 0;
+    let open = false;
+    const answer = {
+      ok: true,
+      rows: 100,
+      columns: 1,
+      totalRows: 100,
+      totalCols: 1,
+      names: ['Pos.1'],
+      data: [new Float64Array([1, 2])],
+    };
+    client.window.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          count += 1;
+          if (open) resolve(answer);
+          else queue.push(() => resolve(answer));
+        }),
+    );
+    return {
+      release: () => {
+        open = true;
+        queue.splice(0).forEach((run) => run());
+      },
+      calls: () => count,
+    };
+  }
+
+  it('does not report done while the result is still being pulled', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    const gate = gatedWindow();
+
+    store().runScriptCard(cardId);
+    await flush();
+    await flush();
+    await flush();
+
+    // The compute returned, but the numbers have not arrived.
+    expect(client.computeNode).toHaveBeenCalledTimes(1);
+    expect(store().scriptRuns[cardId]?.status).toBe('running');
+    expect(store().scriptRuns[cardId]?.mode).toBe('clean');
+    expect(scriptCardOf(cardId).result).toBeNull();
+
+    gate.release();
+    for (let i = 0; i < 6; i += 1) await flush();
+    expect(store().scriptRuns[cardId]?.status).toBe('done');
+    expect(scriptCardOf(cardId).result?.totalRows).toBe(100);
+  });
+
+  it('does not hand a chart the 100-row preview of a big result', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    store().runScriptCard(cardId);
+    await flush();
+    await flush();
+    await flush();
+    expect(scriptCardOf(cardId).result?.complete).toBe(true);
+
+    const chartId = store().addChartCard(cardId, 0)!;
+    expect(chartId).not.toBeNull();
+    await flush();
+    const chart = () => store().cards.find((card) => card.id === chartId) as ChartCardModel;
+    const fullLength = chart().config.sources[0]?.raw?.length ?? 0;
+    expect(fullLength).toBeGreaterThan(0);
+
+    // A refresh lands while the slot holds only a preview of a much larger result: the chart
+    // must keep the numbers it already has instead of redrawing a 1-point curve.
+    client.window.mockImplementation(async () => ({
+      ok: true,
+      rows: 1,
+      columns: 1,
+      totalRows: 5000,
+      totalCols: 1,
+      names: ['Pos.1'],
+      data: [new Float64Array([7])],
+    }));
+    store().applyNodeEvent({
+      seq: 4242,
+      nodeId: scriptCardOf(cardId).node!.nodeId,
+      state: 'done',
+    });
+    await flush();
+    await flush();
+    await flush();
+    expect(scriptCardOf(cardId).result?.complete).toBe(false);
+    expect(chart().config.sources[0]?.raw?.length).toBe(fullLength);
+
+    // …and the completion pull is what refreshes it.
+    client.window.mockImplementation(async () => ({
+      ok: true,
+      rows: 5000,
+      columns: 1,
+      totalRows: 5000,
+      totalCols: 1,
+      names: ['Pos.1'],
+      data: [new Float64Array(Array.from({ length: 5000 }, (_, index) => index))],
+    }));
+    store().loadFullResult(cardId);
+    await flush();
+    await flush();
+    await flush();
+    expect(scriptCardOf(cardId).result?.complete).toBe(true);
+    // The chart is refreshed once the slot is complete, and never with the 1-point preview.
+    expect(chart().config.sources[0]?.raw?.length).toBeGreaterThan(fullLength);
   });
 });

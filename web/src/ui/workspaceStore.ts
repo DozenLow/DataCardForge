@@ -943,6 +943,12 @@ async function runScriptCardNow(cardId: number, mode: 'clean' | 'debug'): Promis
     );
     const previews = await collectScriptPreviews(cardId);
     if (!scriptCardStillCurrent(cardId, epoch)) return;
+    // A clean run publishes: pull the result into the display cache BEFORE reporting done.
+    // The run bar's light, the card badge and every dependent read this cache, so a `done`
+    // reported while the numbers are still in flight is exactly the reported "green light
+    // before it finished". Debug deliberately does not publish, so it skips this.
+    if (mode === 'clean') await pullResultIntoCache(cardId);
+    if (!scriptCardStillCurrent(cardId, epoch)) return;
     patchScriptRun(cardId, {
       status: 'done',
       mode,
@@ -2734,10 +2740,29 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         if (!dependentIds.has(card.id)) return card;
 
         if (isChartCard(card)) {
+          /**
+           * A chart may only be re-read from a slot the browser actually holds in full.
+           *
+           * A function card's result lands in two steps: a 100-row preview (what the card's
+           * own table shows) and then the whole column, which a chart needs. Handing the
+           * chart the preview in between draws a curve of the first 100 rows — the reported
+           * "the chart gets a matrix that is not computed yet". Keeping the previous values
+           * until the slot is complete is both honest (the curve is stale, not truncated)
+           * and stable; the completion pull refreshes it.
+           */
+          const slotComplete = (matrixId: number): boolean => {
+            if (!isFormulaCard(owner)) return true;
+            const index = owner.outputs.findIndex(
+              (_, i) => outputLocalMatrixId(owner, i) === matrixId,
+            );
+            if (index < 0) return true; // not this card's slot: nothing of ours to gate
+            return outputSlotComplete(owner, index);
+          };
           let changed = false;
           const sources = card.config.sources.map((source) => {
             // Only sources that actually read this card's data are re-pointed.
             if (!matrixIds.has(source.matrixId)) return source;
+            if (!slotComplete(source.matrixId)) return source;
             const target = refreshSource(source.matrixId);
             if (!target) return source;
             changed = true;
@@ -2748,7 +2773,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           // card's matrix. Leaving it alone made a file switch plot the *new* Y values
           // against the *previous* file's X values.
           let xAxisSource = card.config.xAxisSource;
-          if (xAxisSource && matrixIds.has(xAxisSource.matrixId)) {
+          if (xAxisSource && matrixIds.has(xAxisSource.matrixId) && slotComplete(xAxisSource.matrixId)) {
             const target = refreshSource(xAxisSource.matrixId);
             if (target) {
               changed = true;
