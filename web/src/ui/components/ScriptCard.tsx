@@ -52,6 +52,12 @@ import {
 } from '../workspaceStore.ts';
 import { portVarName } from '../bindings.ts';
 import {
+  invalidateLayout,
+  registerPort,
+  unregisterPort,
+  type AnchorSide,
+} from '../cardMetrics.ts';
+import {
   isFormulaCard,
   isMatrixCard,
   scriptParams,
@@ -546,11 +552,24 @@ function NameField({ value, ariaLabel, labels, check, occurrences, onCommit }: N
 function OutputPreview({
   preview,
   labels,
+  onLayoutChange,
 }: {
   preview: ScriptPreview | undefined;
   labels: ScriptLabels;
+  /** Fired after the toggle commits, because the row it lives in just changed height. */
+  onLayoutChange: () => void;
 }) {
   const [open, setOpen] = useState(false);
+
+  /**
+   * The preview grows INSIDE the row card, so expanding it moves every row below without a
+   * drag or a resize for anything else to notice. The effect (not the click handler) runs
+   * after the commit, which is the first moment the new height is measurable.
+   */
+  useEffect(() => {
+    onLayoutChange();
+  }, [open, onLayoutChange]);
+
   if (!preview || preview.head.length === 0) {
     return <span className="script-card__preview-empty">{labels.noPreview}</span>;
   }
@@ -1064,6 +1083,63 @@ export function ScriptCard({
   /** The name a "created chart" toast quotes: the user's label, or the identity if unnamed. */
   const buildMenuName = buildMenu ? outputNames[buildMenu.ordinal] || buildMenu.outputId : '';
 
+  // ── connection ports ──
+  //
+  // Every row is drawn as its own small card, and that card's head is what a wire anchors on
+  // (decision 2026-11-17-port-anchored-connections): an input is met at its LEFT edge and an
+  // output is left at its RIGHT edge, so a wire always meets the column it belongs to.
+  //
+  // The ref callbacks are memoized by port identity on purpose: this component re-renders on
+  // every keystroke, and a freshly created callback each render would make React detach and
+  // re-attach the ref, i.e. unregister + register, and every registration bumps the layout
+  // version — one wire re-measure per typed character.
+  const portRefFor = useMemo(() => {
+    const callbacks = new Map<
+      string,
+      (element: HTMLElement | null) => (() => void) | undefined
+    >();
+    return (portId: string, side: AnchorSide) => {
+      const key = `${side}:${portId}`;
+      const existing = callbacks.get(key);
+      if (existing) return existing;
+      const callback = (element: HTMLElement | null) => {
+        if (!element) return undefined;
+        registerPort(card.id, portId, element, side);
+        // The cleanup keeps the registry honest when the row leaves the list or the card
+        // closes: a stale rect would leave a wire pointing at nothing.
+        return () => unregisterPort(card.id, portId);
+      };
+      callbacks.set(key, callback);
+      return callback;
+    };
+  }, [card.id, card.inputs, card.outputs]);
+
+  // The row lists, so the observer below can watch them grow, shrink and reflow.
+  const inputsList = useRef<HTMLUListElement | null>(null);
+  const outputsList = useRef<HTMLUListElement | null>(null);
+
+  /**
+   * Row reflow is layout too.
+   *
+   * A preview expanding, a rename hint wrapping onto a second line or a row card growing all
+   * move the anchors below them, and none of those passes through a drag or a resize handler.
+   * The LISTS are observed rather than the rows, because a list also catches rows that did not
+   * exist when this effect first ran (a new output, a new port).
+   */
+  useEffect(() => {
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(() => invalidateLayout());
+    if (inputsList.current) observer.observe(inputsList.current);
+    if (outputsList.current) observer.observe(outputsList.current);
+    return () => observer.disconnect();
+  }, [card.inputs.length, card.outputs.length]);
+
+  /**
+   * Stable, so the preview's effect fires when the toggle commits rather than on every
+   * render of the row it lives in.
+   */
+  const invalidateOnLayoutChange = useCallback(() => invalidateLayout(), []);
+
   return (
     <CardShell
       card={card}
@@ -1076,6 +1152,10 @@ export function ScriptCard({
       onActivate={onActivate}
       onClose={onClose}
       onCloseBlocked={onCloseBlocked}
+      // Three columns need a floor of their own: below ~520px the 168px input column and the
+      // 184px output column would leave the editor nothing, and the editor is the card.
+      minWidth={520}
+      minHeight={320}
       onBounds={(bounds) =>
         useWorkspace.getState().setBounds(card.id, bounds)
       }
@@ -1142,35 +1222,53 @@ export function ScriptCard({
           </div>
         ) : null}
 
-        <div className="script-card__panels">
+        {/*
+          Three columns in one row: what the script reads, the script, what it produces. The
+          editor used to be a full-width band below the declaration panels; putting the panels
+          BESIDE it is what lets a wire enter a port row from the left and leave an output row
+          to the right, at the row's own height, instead of at the card's edges.
+        */}
+        <div className="script-card__body">
           {/* ── left: what the script reads ── */}
-          <section className="script-card__panel" aria-label={labels.ports}>
+          <section
+            className="script-card__panel script-card__panel--inputs"
+            aria-label={labels.ports}
+            // Scrolling a panel moves every row in it, so the anchors have to be re-measured.
+            onScroll={() => invalidateLayout()}
+          >
             <div className="script-card__panel-title">{labels.ports}</div>
             {ports.length === 0 ? (
               <p className="script-card__panel-empty">{labels.noPorts}</p>
             ) : (
-              <ul className="script-card__row-list">
+              <ul className="script-card__row-list" ref={inputsList}>
                 {ports.map((port, index) => (
                   <li className="script-card__row" key={port.portId}>
-                    <NameField
-                      value={port.varName}
-                      ariaLabel={`${labels.ports} ${index + 1}`}
-                      labels={labels}
-                      check={checkForPanel('port', index)}
-                      occurrences={countScriptOccurrences(scriptText, port.varName)}
-                      onCommit={(name) => renameScriptPort(card.id, port.portId, name)}
-                    />
-                    <span className="script-card__source" title={port.label}>
-                      ← {port.label}
-                    </span>
-                    <span
-                      className={`script-card__shape${port.missing ? ' script-card__shape--missing' : ''}`}
-                    >
-                      {port.missing ? '—' : `${port.rows}×${port.cols}`}
-                    </span>
-                    <span className="script-card__mode">{t(
-                      port.mode === 'cell' ? 'formula.modeCell' : 'formula.modeMatrix',
-                    )}</span>
+                    {/*
+                      The row HEAD is the connection endpoint; the preview (its sibling, on
+                      outputs) is not, so a wire never anchors on a row that has grown a table
+                      under it. A wire enters at this head's LEFT edge.
+                    */}
+                    <div className="script-card__row-head" ref={portRefFor(port.portId, 'left')}>
+                      <NameField
+                        value={port.varName}
+                        ariaLabel={`${labels.ports} ${index + 1}`}
+                        labels={labels}
+                        check={checkForPanel('port', index)}
+                        occurrences={countScriptOccurrences(scriptText, port.varName)}
+                        onCommit={(name) => renameScriptPort(card.id, port.portId, name)}
+                      />
+                      <span className="script-card__source" title={port.label}>
+                        ← {port.label}
+                      </span>
+                      <span
+                        className={`script-card__shape${port.missing ? ' script-card__shape--missing' : ''}`}
+                      >
+                        {port.missing ? '—' : `${port.rows}×${port.cols}`}
+                      </span>
+                      <span className="script-card__mode">
+                        {t(port.mode === 'cell' ? 'formula.modeCell' : 'formula.modeMatrix')}
+                      </span>
+                    </div>
                   </li>
                 ))}
               </ul>
@@ -1185,10 +1283,17 @@ export function ScriptCard({
             </button>
           </section>
 
+          {/* ── middle: the script itself ── */}
+          <div className="script-card__editor" ref={editorHost} data-script-editor={card.id} />
+
           {/* ── right: what the script produces ── */}
-          <section className="script-card__panel" aria-label={labels.outputs}>
+          <section
+            className="script-card__panel script-card__panel--outputs"
+            aria-label={labels.outputs}
+            onScroll={() => invalidateLayout()}
+          >
             <div className="script-card__panel-title">{labels.outputs}</div>
-            <ul className="script-card__row-list">
+            <ul className="script-card__row-list" ref={outputsList}>
               {card.outputs.map((output, ordinal) => {
                 const preview = run?.previews[output.outputId];
                 return (
@@ -1216,31 +1321,45 @@ export function ScriptCard({
                       });
                     }}
                   >
-                    <NameField
-                      value={outputNames[ordinal] ?? ''}
-                      ariaLabel={`${labels.outputs} ${ordinal + 1}`}
-                      labels={labels}
-                      check={checkForPanel('output', ordinal)}
-                      occurrences={countScriptOccurrences(scriptText, outputNames[ordinal] ?? '')}
-                      onCommit={(name) => renameScriptOutput(card.id, output.outputId, name)}
-                    />
-                    <span className="script-card__output-id" title={output.outputId}>
-                      {output.outputId}
-                    </span>
-                    <span className="script-card__shape">
-                      {preview && preview.rows > 0 ? `${preview.rows}×${preview.cols}` : '—'}
-                    </span>
-                    <OutputPreview preview={preview} labels={labels} />
-                    <button
-                      type="button"
-                      className="script-card__remove"
-                      title={labels.removeOutput}
-                      aria-label={`${labels.removeOutput} ${outputNames[ordinal] ?? ordinal + 1}`}
-                      disabled={ordinal === 0}
-                      onClick={() => removeScriptOutput(card.id, output.outputId)}
+                    {/* The head, not the whole row: this is where the wire leaves, at this
+                        row's height, from the RIGHT edge. */}
+                    <div
+                      className="script-card__row-head"
+                      ref={portRefFor(output.outputId, 'right')}
                     >
-                      ×
-                    </button>
+                      <NameField
+                        value={outputNames[ordinal] ?? ''}
+                        ariaLabel={`${labels.outputs} ${ordinal + 1}`}
+                        labels={labels}
+                        check={checkForPanel('output', ordinal)}
+                        occurrences={countScriptOccurrences(
+                          scriptText,
+                          outputNames[ordinal] ?? '',
+                        )}
+                        onCommit={(name) => renameScriptOutput(card.id, output.outputId, name)}
+                      />
+                      <span className="script-card__output-id" title={output.outputId}>
+                        {output.outputId}
+                      </span>
+                      <span className="script-card__shape">
+                        {preview && preview.rows > 0 ? `${preview.rows}×${preview.cols}` : '—'}
+                      </span>
+                      <button
+                        type="button"
+                        className="script-card__remove"
+                        title={labels.removeOutput}
+                        aria-label={`${labels.removeOutput} ${outputNames[ordinal] ?? ordinal + 1}`}
+                        disabled={ordinal === 0}
+                        onClick={() => removeScriptOutput(card.id, output.outputId)}
+                      >
+                        ×
+                      </button>
+                    </div>
+                    <OutputPreview
+                      preview={preview}
+                      labels={labels}
+                      onLayoutChange={invalidateOnLayoutChange}
+                    />
                   </li>
                 );
               })}
@@ -1254,8 +1373,6 @@ export function ScriptCard({
             </button>
           </section>
         </div>
-
-        <div className="script-card__editor" ref={editorHost} data-script-editor={card.id} />
 
         {/*
           One merged list, not two panels: the user cares about "the script is wrong at line

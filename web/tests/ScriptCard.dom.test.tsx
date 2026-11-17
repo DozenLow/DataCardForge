@@ -24,6 +24,7 @@ import { EditorView } from '@codemirror/view';
 
 import type { ScriptCheckResult } from '../src/backend/client.ts';
 import { MatrixData } from '../src/core/MatrixData.ts';
+import { portAnchor } from '../src/ui/cardMetrics.ts';
 import { useWorkspace, emptyScriptRun } from '../src/ui/workspaceStore.ts';
 import { isScriptCard, type FunctionCardModel } from '../src/ui/types.ts';
 import {
@@ -640,5 +641,169 @@ describe('two-layer diagnostics in the card', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+// ── three-column body and port endpoints ─────────────────────────────────────────────
+//
+// The body is one row of three columns, every row is drawn as a small card, and the row HEAD
+// is registered as a connection port: a wire enters an input at its left edge and leaves an
+// output at its right edge. These cases pin the DOM shape the connection layer measures, not
+// the painting — jsdom has no layout, so every rect involved is stubbed.
+
+/** Give an element the rectangle `portAnchor` will read (jsdom reports zeros otherwise). */
+function stubRect(
+  element: Element,
+  r: { left: number; top: number; width: number; height: number },
+): void {
+  element.getBoundingClientRect = () =>
+    ({
+      left: r.left,
+      top: r.top,
+      width: r.width,
+      height: r.height,
+      right: r.left + r.width,
+      bottom: r.top + r.height,
+      x: r.left,
+      y: r.top,
+      toJSON: () => ({}),
+    }) as DOMRect;
+}
+
+/** A finished run with one preview row, so the output row renders its preview control. */
+function withPreview(): void {
+  useWorkspace.setState((state) => ({
+    scriptRuns: {
+      ...state.scriptRuns,
+      [cardId]: {
+        ...emptyScriptRun(),
+        status: 'done',
+        mode: 'clean',
+        elapsedMs: 5,
+        previews: {
+          'out:0': { rows: 2, cols: 1, columns: ['value'], head: [[1], [2]] },
+        },
+      },
+    },
+  }));
+}
+
+function rowHead(host: HTMLElement, panel: 'inputs' | 'outputs'): HTMLElement {
+  const element = host.querySelector(`.script-card__panel--${panel} .script-card__row-head`);
+  if (!(element instanceof HTMLElement)) throw new Error(`no ${panel} row head`);
+  return element;
+}
+
+function cardRoot(host: HTMLElement): HTMLElement {
+  const element = host.querySelector(`.card--script[data-card-id="${cardId}"]`);
+  if (!(element instanceof HTMLElement)) throw new Error('no card root');
+  return element;
+}
+
+describe('three-column body', () => {
+  it('orders the columns inputs | editor | outputs and keeps exactly two panels', async () => {
+    const host = await mount(cardId);
+    const columns = [...host.querySelectorAll('.script-card__panel, .script-card__editor')];
+
+    expect(columns).toHaveLength(3);
+    expect(columns[0].classList.contains('script-card__panel--inputs')).toBe(true);
+    expect(columns[1].classList.contains('script-card__editor')).toBe(true);
+    expect(columns[2].classList.contains('script-card__panel--outputs')).toBe(true);
+
+    // Document order, asserted independently of querySelectorAll's own ordering.
+    expect(
+      columns[0].compareDocumentPosition(columns[1]) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(
+      columns[1].compareDocumentPosition(columns[2]) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+
+    // Still the same two labelled panels: the body is a row, not a third and fourth panel.
+    expect(
+      [...host.querySelectorAll('.script-card__panel')].map((panel) =>
+        panel.getAttribute('aria-label'),
+      ),
+    ).toEqual(['输入端口', '输出声明']);
+    // The old full-width band wrapper is gone.
+    expect(host.querySelector('.script-card__panels')).toBeNull();
+  });
+
+  it('wraps every row control in a head card and keeps the preview a sibling of it', async () => {
+    const host = await mount(cardId);
+
+    const inputRow = host.querySelector('.script-card__row:not(.script-card__row--output)');
+    const inputHead = inputRow?.querySelector('.script-card__row-head');
+    expect(inputHead).not.toBeNull();
+    // The declaration controls moved INTO the head; the head is the row's identity.
+    expect(inputHead!.querySelector('.script-card__source')?.textContent).toContain('a.csv');
+    expect(inputHead!.querySelector('.script-card__shape')?.textContent).toBe('2×1');
+    expect(inputHead!.querySelector('.script-card__mode')?.textContent).toBe('矩阵');
+
+    const outputRow = host.querySelector('.script-card__row--output')!;
+    const outputHead = outputRow.querySelector('.script-card__row-head');
+    expect(outputHead).not.toBeNull();
+    expect(outputHead!.querySelector('.script-card__output-id')?.textContent).toBe('out:0');
+    expect(outputHead!.querySelector('input')).toBe(nameInput(host, '输出声明 1'));
+    expect(outputHead!.querySelector('.script-card__remove')).not.toBeNull();
+
+    // Before a run the row still shows the "not run yet" placeholder — outside the head.
+    const empty = outputRow.querySelector('.script-card__preview-empty');
+    expect(empty).not.toBeNull();
+    expect(outputHead!.contains(empty!)).toBe(false);
+
+    await act(async () => {
+      withPreview();
+    });
+    await flush();
+
+    const preview = host.querySelector('.script-card__preview');
+    expect(preview).not.toBeNull();
+    expect(preview!.parentElement).toBe(outputRow);
+    expect(outputHead!.contains(preview!)).toBe(false);
+    // The head node itself survives: the preview opened beside it, not around it.
+    expect(outputRow.querySelector('.script-card__row-head')).toBe(outputHead);
+  });
+});
+
+describe('port endpoints', () => {
+  it('anchors an input on the LEFT edge and an output on the RIGHT edge of its row head', async () => {
+    const host = await mount(cardId);
+    const inputHead = rowHead(host, 'inputs');
+    const outputHead = rowHead(host, 'outputs');
+
+    // Card rect large enough to contain both heads, so the clamp cannot fake the geometry.
+    stubRect(cardRoot(host), { left: 100, top: 100, width: 760, height: 420 });
+    stubRect(inputHead, { left: 120, top: 220, width: 150, height: 40 });
+    stubRect(outputHead, { left: 640, top: 240, width: 160, height: 48 });
+
+    // Side edge, not element centre: the wire has to read as leaving the port sub-card.
+    expect(portAnchor(cardId, 'in:0')).toEqual({ x: 120, y: 240, side: 'left' });
+    expect(portAnchor(cardId, 'out:0')).toEqual({ x: 800, y: 264, side: 'right' });
+  });
+
+  it('keeps the output anchor at the head when the preview expands the row', async () => {
+    await act(async () => {
+      withPreview();
+    });
+    await flush();
+    const host = await mount(cardId);
+    const outputHead = rowHead(host, 'outputs');
+
+    stubRect(cardRoot(host), { left: 100, top: 100, width: 760, height: 640 });
+    stubRect(outputHead, { left: 640, top: 240, width: 160, height: 48 });
+    const before = portAnchor(cardId, 'out:0');
+    expect(before).toEqual({ x: 800, y: 264, side: 'right' });
+
+    const toggle = host.querySelector('.script-card__preview-toggle') as HTMLButtonElement;
+    await act(async () => {
+      toggle.click();
+    });
+    await flush();
+    expect(host.querySelector('.script-card__preview-table')).not.toBeNull();
+
+    // The registered element is the head, so a table opening under it does not move the
+    // anchor. (jsdom does not reflow, so the stub is what makes this meaningful: a row-level
+    // registration would measure the unstubbed row and land on the card's clamped edge.)
+    expect(portAnchor(cardId, 'out:0')).toEqual(before);
   });
 });

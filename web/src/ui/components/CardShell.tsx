@@ -34,6 +34,15 @@ interface CardShellProps {
   /** True when closing must be refused because other cards depend on this one. */
   closeBlocked: boolean;
   closeLabel: string;
+  /**
+   * Per-card resize floor, defaulting to the workspace-wide minimum.
+   *
+   * A card that lays its body out in columns needs more room than a plain one before the
+   * columns stop being readable, and the floor belongs to the card that knows its own
+   * content — not to the shared constant every other card is sized against.
+   */
+  minWidth?: number;
+  minHeight?: number;
   children: ReactNode;
 }
 
@@ -50,6 +59,8 @@ export function CardShell({
   onBounds,
   closeBlocked,
   closeLabel,
+  minWidth,
+  minHeight,
   children,
 }: CardShellProps) {
   const rndRef = useRef<Rnd | null>(null);
@@ -79,8 +90,8 @@ export function CardShell({
       style={{ zIndex: card.z }}
       size={{ width: card.width, height: card.height }}
       position={{ x: card.x, y: card.y }}
-      minWidth={MIN_CARD_WIDTH}
-      minHeight={MIN_CARD_HEIGHT}
+      minWidth={minWidth ?? MIN_CARD_WIDTH}
+      minHeight={minHeight ?? MIN_CARD_HEIGHT}
       scale={zoom}
       bounds="parent"
       dragHandleClassName="card__titlebar"

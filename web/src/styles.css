@@ -2605,11 +2605,12 @@ body {
 /* ── Script card (`builtin:python`) ───────────────────────────────────── */
 
 /*
- * Vertical stack: run bar / declaration panels / editor / debug panel.
+ * Vertical stack: run bar / three-column body / diagnostics / debug panel.
  *
- * The editor gets the whole width because it is where the work happens; the two declaration
- * panels sit above it as a band (inputs left, outputs right) so "what I read" and "what I
- * publish" stay side by side, which is the pair the rename rules constantly compare.
+ * The body is one row of three columns — inputs, editor, outputs — because a connection now
+ * anchors on the row CARD it is bound to: an input line has to reach the inputs column from
+ * the left, an output line has to leave the outputs column to the right. A full-width editor
+ * band below the panels left no edge for a wire to meet at the row's own height.
  */
 .card--script .card__body {
   display: flex;
@@ -2688,12 +2689,15 @@ body {
   background: var(--accent);
 }
 
-.script-card__panels {
+/* Inputs | editor | outputs. Fixed side columns, a flexible editor that can never collapse. */
+.script-card__body {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) minmax(170px, 1fr);
-  flex: 0 0 auto;
-  max-height: 42%;
-  border-bottom: 1px solid var(--border);
+  grid-template-columns: minmax(0, 168px) minmax(0, 1fr) minmax(0, 184px);
+  /* One row, pinned to the body's own height: the columns scroll INSIDE them, so diagnostics
+     and the debug panel keep their place instead of being pushed off the card. */
+  grid-template-rows: minmax(0, 1fr);
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .script-card__panel {
@@ -2703,9 +2707,15 @@ body {
   min-width: 0;
   padding: 4px 6px;
   overflow-y: auto;
+  background: var(--surface-alt);
 }
 
-.script-card__panel + .script-card__panel {
+/* The dividing edges belong to the side columns: the editor keeps its full width. */
+.script-card__panel--inputs {
+  border-right: 1px solid var(--border);
+}
+
+.script-card__panel--outputs {
   border-left: 1px solid var(--border);
 }
 
@@ -2732,13 +2742,35 @@ body {
   list-style: none;
 }
 
+/*
+ * One row is one small card: its HEAD is the connection endpoint, so the row has to read as
+ * a thing a wire can attach to rather than as a line of text inside a list.
+ */
 .script-card__row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 4px;
   min-width: 0;
   font-size: 11px;
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--surface);
+}
+
+.script-card__row--output {
+  background: var(--surface-alt);
+}
+
+/* The endpoint block: everything except the preview, so the wire ignores the expanded table. */
+.script-card__row-head {
+  display: flex;
   flex-wrap: wrap;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  width: 100%;
 }
 
 /* The name column: input + the hint that explains what a rename is about to do. */
@@ -2747,11 +2779,13 @@ body {
   flex-direction: column;
   gap: 1px;
   min-width: 0;
-  flex: 0 0 auto;
+  /* Full row of its own: the side columns are too narrow for a label beside a 92px box. */
+  flex: 1 1 100%;
 }
 
 .script-card__name {
-  width: 92px;
+  width: 100%;
+  min-width: 0;
   font-family: var(--mono);
   font-size: 11px;
   padding: 1px 5px;
@@ -2872,7 +2906,10 @@ body {
   flex-direction: column;
   gap: 2px;
   flex: 1 1 100%;
+  /* A preview table is as wide as the matrix; the column is not, so scroll inside the row. */
+  max-width: 100%;
   min-width: 0;
+  overflow-x: auto;
 }
 
 .script-card__preview-toggle {
@@ -2914,11 +2951,15 @@ body {
 }
 
 /* ── editor ── */
+/*
+ * The middle column, not a band: it takes the height the body gives it and keeps its own
+ * scroll, and it sheds the bottom border because the body no longer sits under it.
+ */
 .script-card__editor {
-  flex: 1 1 auto;
-  min-height: 90px;
+  min-width: 0;
+  min-height: 0;
   overflow: hidden;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 0;
 }
 
 .script-card__editor .cm-editor {
