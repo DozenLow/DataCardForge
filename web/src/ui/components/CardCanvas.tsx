@@ -541,6 +541,12 @@ export function CardCanvas({
               onActivate={() => bringToFront(card.id)}
               onClose={() => handleClose(card.id)}
               onCloseBlocked={() => reportBlocked(card.id)}
+              // Switching the data card's file offers every function card that reads it a
+              // re-point; a script card reads `in:N`, so it needs the same banner the
+              // formula card has (before this it was silently left on the old file).
+              repoint={repointOffers.find((entry) => entry.cardId === card.id) ?? null}
+              onApplyRepoint={() => applyRepoint(card.id)}
+              onDismissRepoint={() => dismissRepoint(card.id)}
             />
           );
         }

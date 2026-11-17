@@ -3377,3 +3377,18 @@ body {
   outline: 2px solid var(--danger);
   outline-offset: 1px;
 }
+
+/* File-switch offer on a script card: the same decision the formula card's banner asks,
+   phrased around the input port that would change. */
+.script-card__repoint {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  padding: 5px 8px;
+  font-size: 11px;
+}
+
+.script-card__repoint-warn {
+  color: var(--danger);
+}

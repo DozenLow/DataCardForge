@@ -45,6 +45,7 @@ import {
   outputMatrixId,
   useTranslator,
   useWorkspace,
+  type RepointOffer,
   type ScriptNameCheck,
   type ScriptNameProblem,
   type ScriptPreview,
@@ -118,6 +119,12 @@ interface ScriptLabels {
   autoOn: string;
   autoOff: string;
   autoHint: string;
+  /** File-switch offer (the same idea as the formula card's re-point banner). */
+  repointTitle: string;
+  repointBody: string;
+  repointApply: string;
+  repointDismiss: string;
+  repointColumns: string;
   /** The script came from a workspace file whose user has not confirmed it yet. */
   trustLocked: string;
   trustLockedHint: string;
@@ -167,6 +174,11 @@ const LABELS: Record<Locale, ScriptLabels> = {
     running: '运行中…',
     envPending: '运行后显示耗时',
     runtimeMissingTitle: '未检测到 Python 运行时',
+    repointTitle: '数据文件已切换',
+    repointBody: '输入 {port} 仍读取 {from}（{fromRows} 行）；当前显示 {to}（{toRows} 行）',
+    repointApply: '改读当前文件',
+    repointDismiss: '忽略',
+    repointColumns: '列已变化：重算可能失败',
     autoOn: '自动 ●',
     autoOff: '自动 ○',
     autoHint: '首次成功运行后，输入或定义变化时自动重跑；关闭后只在你点击时运行',
@@ -245,6 +257,12 @@ const LABELS: Record<Locale, ScriptLabels> = {
     running: 'Running…',
     envPending: 'duration appears after a run',
     runtimeMissingTitle: 'No Python runtime found',
+    repointTitle: 'The data file was switched',
+    repointBody:
+      'Input {port} still reads {from} ({fromRows} rows); the table now shows {to} ({toRows} rows)',
+    repointApply: 'Read the current file',
+    repointDismiss: 'Ignore',
+    repointColumns: 'Columns changed: the rerun may fail',
     autoOn: 'Auto ●',
     autoOff: 'Auto ○',
     autoHint:
@@ -743,6 +761,14 @@ export interface ScriptCardProps {
   onClose: () => void;
   onCloseBlocked: () => void;
   /**
+   * The data card whose displayed file changed while this script still reads the old one.
+   * Same offer the formula card shows; without it a switched table silently left the script
+   * on the previous file (the node stays `done`, so nothing looked stale).
+   */
+  repoint?: RepointOffer | null;
+  onApplyRepoint?: () => void;
+  onDismissRepoint?: () => void;
+  /**
    * Observer hook fired when a traceback line is clicked (the embedded editor is scrolled
    * first). Production passes nothing; a host that opens the script in a larger editor — or
    * the DOM test — can use it to see which line was asked for.
@@ -768,6 +794,9 @@ export function ScriptCard({
   onActivate,
   onClose,
   onCloseBlocked,
+  repoint = null,
+  onApplyRepoint,
+  onDismissRepoint,
   onJumpToLine,
 }: ScriptCardProps) {
   const { t, locale } = useTranslator();
@@ -1048,7 +1077,11 @@ export function ScriptCard({
 
   const running = run?.status === 'running';
   const state = running ? 'computing' : (card.node?.state ?? 'idle');
-  const displayRows = matrices.get(card.displayMatrixId)?.rowCount() ?? 0;
+  // `card.result.totalRows` is the backend's shape; the display cache may only hold the
+  // 100-row preview, and printing "100×6" for a 165 000-row result is a lie the user reads
+  // as the result's size.
+  const displayRows =
+    card.result?.totalRows ?? matrices.get(card.displayMatrixId)?.rowCount() ?? 0;
   const displayCols = matrices.get(card.displayMatrixId)?.columnCount() ?? 0;
   const badge = `${card.outputs.length} ${labels.outputs} · ${displayRows}×${displayCols}`;
   /**
@@ -1251,6 +1284,35 @@ export function ScriptCard({
           disabled rather than hidden — the card must still show what it would do, and one
           click here records the confirmation for this file.
         */}
+        {repoint ? (
+          <div
+            className="backend-banner script-card__repoint"
+            role="status"
+            data-script-repoint={repoint.portId}
+            style={{ flexShrink: 0 }}
+          >
+            <span className="script-card__repoint-text">
+              <strong>{labels.repointTitle}</strong>
+              {' — '}
+              {labels.repointBody
+                .replace('{port}', repoint.portId)
+                .replace('{from}', repoint.fromName)
+                .replace('{to}', repoint.toName)
+                .replace('{fromRows}', String(repoint.fromRows))
+                .replace('{toRows}', String(repoint.toRows))}
+              {repoint.sameColumns ? null : (
+                <span className="script-card__repoint-warn"> {labels.repointColumns}</span>
+              )}
+            </span>
+            <button type="button" className="card__control" onClick={onApplyRepoint}>
+              {labels.repointApply}
+            </button>
+            <button type="button" className="card__control" onClick={onDismissRepoint}>
+              {labels.repointDismiss}
+            </button>
+          </div>
+        ) : null}
+
         {!trusted ? (
           <div
             className="backend-banner script-card__locked"

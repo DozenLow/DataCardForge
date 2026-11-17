@@ -296,10 +296,17 @@ export interface Toast {
 export interface RepointOffer {
   /** The function card that could be re-pointed. */
   cardId: number;
+  /**
+   * Which input port of that card changes. Script cards declare `in:N` ports, so a card
+   * can have one offer per port; the legacy single-input formula card uses `source`.
+   */
+  portId: string;
   /** The data card whose active file changed. */
   ownerCardId: number;
   fromMatrixId: number;
   toMatrixId: number;
+  /** File name currently bound (for the banner text). */
+  fromName: string;
   /** Column headers identical (same labels, same order) ⇒ a plain one-click confirm. */
   sameColumns: boolean;
   /** Column labels present in the new file but not in the old one. */
@@ -3025,34 +3032,42 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     const offers: RepointOffer[] = [];
     for (const card of cards) {
       if (!isFormulaCard(card)) continue;
-      const input = card.inputs.find((entry) => entry.portId === INPUT_PORT_SOURCE);
-      if (!input || input.target.type !== 'matrix') continue;
-      if (!ownedMatrixIds.has(input.target.matrixId)) continue;
-      if (input.target.matrixId === newActiveMatrixId) continue;
-      const previous = labelSet(input.target.matrixId);
-      if (!previous) continue;
+      // EVERY matrix input is a candidate, not only the legacy single `source` port: a
+      // script card reads `in:0`, `in:1`, … and before this loop skipped it entirely, so
+      // switching a file silently left the script on the other one.
+      for (const input of card.inputs) {
+        if (input.target.type !== 'matrix') continue;
+        if (!ownedMatrixIds.has(input.target.matrixId)) continue;
+        if (input.target.matrixId === newActiveMatrixId) continue;
+        const previous = labelSet(input.target.matrixId);
+        if (!previous) continue;
 
-      const previousSet = new Set(previous.labels);
-      const nextSet = new Set(next.labels);
-      const sameColumns =
-        previous.labels.length === next.labels.length &&
-        previous.labels.every((label, index) => label === next.labels[index]);
-      offers.push({
-        cardId: card.id,
-        ownerCardId,
-        fromMatrixId: input.target.matrixId,
-        toMatrixId: newActiveMatrixId,
-        sameColumns,
-        addedLabels: next.labels.filter((label) => !previousSet.has(label)),
-        removedLabels: previous.labels.filter((label) => !nextSet.has(label)),
-        fromRows: previous.rows,
-        toRows: next.rows,
-        toCols: next.labels.length,
-        rowDelta: next.rows - previous.rows,
-        toName:
-          owner.sources.find((source) => source.matrixId === newActiveMatrixId)?.name ??
-          `#${newActiveMatrixId}`,
-      });
+        const previousSet = new Set(previous.labels);
+        const nextSet = new Set(next.labels);
+        const sameColumns =
+          previous.labels.length === next.labels.length &&
+          previous.labels.every((label, index) => label === next.labels[index]);
+        offers.push({
+          cardId: card.id,
+          portId: input.portId,
+          ownerCardId,
+          fromMatrixId: input.target.matrixId,
+          toMatrixId: newActiveMatrixId,
+          fromName:
+            owner.sources.find((source) => source.matrixId === input.target.matrixId)?.name ??
+            `#${input.target.matrixId}`,
+          sameColumns,
+          addedLabels: next.labels.filter((label) => !previousSet.has(label)),
+          removedLabels: previous.labels.filter((label) => !nextSet.has(label)),
+          fromRows: previous.rows,
+          toRows: next.rows,
+          toCols: next.labels.length,
+          rowDelta: next.rows - previous.rows,
+          toName:
+            owner.sources.find((source) => source.matrixId === newActiveMatrixId)?.name ??
+            `#${newActiveMatrixId}`,
+        });
+      }
     }
     void newMatrix;
     return offers;
@@ -4270,18 +4285,20 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
 
     applyRepoint(cardId) {
       const state = get();
-      const offer = state.repointOffers.find((entry) => entry.cardId === cardId);
-      if (!offer) return;
+      const offers = state.repointOffers.filter((entry) => entry.cardId === cardId);
+      if (offers.length === 0) return;
       const card = state.cards.find((c) => c.id === cardId);
       if (!card || !isFormulaCard(card)) return;
 
       // Re-point the envelope AND the dependency edge in one step: the offer is the only
       // producer of this edit, so the target card id cannot change here (same data card).
-      const inputs = card.inputs.map((entry) =>
-        entry.portId === INPUT_PORT_SOURCE && entry.target.type === 'matrix'
-          ? { ...entry, target: { ...entry.target, matrixId: offer.toMatrixId } }
-          : entry,
-      );
+      // One offer per port: a script card may read two files of the same table.
+      const byPort = new Map(offers.map((offer) => [offer.portId, offer]));
+      const inputs = card.inputs.map((entry) => {
+        const offer = byPort.get(entry.portId);
+        if (!offer || entry.target.type !== 'matrix') return entry;
+        return { ...entry, target: { ...entry.target, matrixId: offer.toMatrixId } };
+      });
       set({
         cards: state.cards.map((entry) => (entry.id === cardId ? { ...card, inputs } : entry)),
         repointOffers: state.repointOffers.filter((entry) => entry.cardId !== cardId),
@@ -4297,7 +4314,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           // still correct because nothing in the workspace reads the old matrix any more.
         }
         await waitForCardPushes();
-        pruneMatrixIfUnreferenced(offer.fromMatrixId);
+        for (const offer of offers) pruneMatrixIfUnreferenced(offer.fromMatrixId);
       })();
     },
 
@@ -4305,15 +4322,20 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       const state = get();
       const targets = state.repointOffers.filter((offer) => offer.ownerCardId === ownerCardId);
       if (targets.length === 0) return;
-      const byCard = new Map(targets.map((offer) => [offer.cardId, offer]));
+      const byCard = new Map<number, Map<string, RepointOffer>>();
+      for (const offer of targets) {
+        const ports = byCard.get(offer.cardId) ?? new Map<string, RepointOffer>();
+        ports.set(offer.portId, offer);
+        byCard.set(offer.cardId, ports);
+      }
       const cards = state.cards.map((card) => {
-        const offer = byCard.get(card.id);
-        if (!offer || !isFormulaCard(card)) return card;
-        const inputs = card.inputs.map((entry) =>
-          entry.portId === INPUT_PORT_SOURCE && entry.target.type === 'matrix'
-            ? { ...entry, target: { ...entry.target, matrixId: offer.toMatrixId } }
-            : entry,
-        );
+        const ports = byCard.get(card.id);
+        if (!ports || !isFormulaCard(card)) return card;
+        const inputs = card.inputs.map((entry) => {
+          const offer = ports.get(entry.portId);
+          if (!offer || entry.target.type !== 'matrix') return entry;
+          return { ...entry, target: { ...entry.target, matrixId: offer.toMatrixId } };
+        });
         return { ...card, inputs };
       });
       set({
@@ -5150,7 +5172,15 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       if (event.state === 'done') void pullResultIntoCache(cardId);
       // An armed script card treats "my input changed" exactly like a formula card's node
       // does: it runs again (the user asked for formula-like behaviour after the first run).
-      if (event.state === 'dirty') maybeAutoRunScript(cardId);
+      //
+      // ONLY `upstreamChanged`: a dirty event is also the echo of our own declaration PATCH
+      // (`notRequested` / `definitionChanged`), and that echo arrives while the run it
+      // belongs to is in flight — retriggering on it runs the card, whose PATCH emits the
+      // next echo, forever. Definition edits and bindings have their own trigger in
+      // `pushFunctionCard`; the event path exists for changes the frontend did not push.
+      if (event.state === 'dirty' && event.reason === 'upstreamChanged') {
+        maybeAutoRunScript(cardId);
+      }
     },
 
     startBackendEventLoop() {

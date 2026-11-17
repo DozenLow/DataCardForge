@@ -326,9 +326,11 @@ describe('function card zones', () => {
 describe('re-point banner', () => {
   const offer = (over: Partial<RepointOffer> = {}): RepointOffer => ({
     cardId: 1,
+    portId: 'source',
     ownerCardId: 2,
     fromMatrixId: 10,
     toMatrixId: 11,
+    fromName: 'a.csv',
     sameColumns: true,
     addedLabels: [],
     removedLabels: [],
