@@ -19,11 +19,13 @@ import {
 import { exportChart } from '../charts/export.ts';
 import { isChartCard, isMatrixCard, isScriptCard } from './types.ts';
 import { hashWorkspaceBytes } from './workspaceTrust.ts';
+import { armAlertAudio } from './alerts.ts';
 import { useWorkspace } from './workspaceStore.ts';
 import { CardCanvas } from './components/CardCanvas.tsx';
 import { HelpDialog } from './components/HelpDialog.tsx';
 import { MenuBar } from './components/MenuBar.tsx';
 import { StatusBar } from './components/StatusBar.tsx';
+import { BlockingGate } from './components/BlockingGate.tsx';
 import { TrustPanel } from './components/TrustPanel.tsx';
 import { WorkspaceEnvBanner } from './components/WorkspaceEnvBanner.tsx';
 
@@ -59,6 +61,9 @@ export default function App() {
     setStatus(t('status.ready'));
     document.title = t('app.title');
   }, [locale]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The alert sound needs an audio context created under a user gesture; arm it once.
+  useEffect(() => armAlertAudio(), []);
 
   // The first card needs real canvas dimensions, which are only known after mount.
   useEffect(() => {
@@ -375,6 +380,7 @@ export default function App() {
           sit beside the backend banner: same surface, same place, both read-only. */}
       <WorkspaceEnvBanner />
       <TrustPanel />
+      <BlockingGate />
       <CardCanvas
         onNewTable={() => void onNewTable()}
         onFilesDropped={(files: File[]) => void ingestFiles(files)}

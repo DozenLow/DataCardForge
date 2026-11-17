@@ -67,6 +67,8 @@ export function CardShell({
   // react-rnd computes drag/resize deltas from *screen* pointer movement, so at any zoom
   // other than 100% it has to be told the scale or cards would drift away from the cursor.
   const zoom = useWorkspace((s) => s.view.zoom);
+  /** Node-level blockers outline the card that cannot advance (workspace-level ones do not). */
+  const blocked = useWorkspace((s) => s.blockers.some((blocker) => blocker.cardId === card.id));
 
   // Publish this card's DOM element so the connection layer can measure anchors on it.
   useEffect(() => {
@@ -85,7 +87,7 @@ export function CardShell({
     <Rnd
       className={`card ${variant}${active ? ' card--active' : ''}${
         dropTarget ? ' card--drop-target' : ''
-      }`}
+      }${blocked ? ' card--blocked' : ''}`}
       data-card-id={card.id}
       style={{ zIndex: card.z }}
       size={{ width: card.width, height: card.height }}

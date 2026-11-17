@@ -924,6 +924,27 @@ describe('collapsible declaration columns', () => {
 // says why. The store's run path enforces the same predicate, so no other entry point (a
 // shortcut, a future automatic rerun) can execute it before the confirmation.
 
+describe('blocking outline', () => {
+  it('outlines the offending card while a node-level blocker is open', async () => {
+    const host = await mount(cardId);
+    useWorkspace.setState((state) => ({
+      cards: state.cards.map((card) =>
+        card.id === cardId ? { ...card, node: { nodeId: 11, state: 'error', code: 'cycle' } } : card,
+      ),
+    }));
+    await flush();
+    expect(host.querySelector('.card--script')?.className).toContain('card--blocked');
+
+    useWorkspace.setState((state) => ({
+      cards: state.cards.map((card) =>
+        card.id === cardId ? { ...card, node: { nodeId: 11, state: 'done' } } : card,
+      ),
+    }));
+    await flush();
+    expect(host.querySelector('.card--script')?.className).not.toContain('card--blocked');
+  });
+});
+
 describe('workspace trust lock', () => {
   it('locks a restored script until the user confirms it', async () => {
     useWorkspace.setState({

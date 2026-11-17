@@ -1029,6 +1029,27 @@ function maybeAutoRunScript(cardId: number): void {
   });
 }
 
+/**
+ * Blocking conditions (2026-11-17): an environment/structure problem that makes the graph
+ * unable to advance. A COMPUTE error is deliberately NOT one of these — a syntax mistake in
+ * one card must not freeze the workspace; it stays a red card with a diagnostics panel.
+ */
+export type BlockerKind =
+  | 'envMismatch'
+  | 'runtimeMissing'
+  | 'backendOffline'
+  | 'backendMismatch'
+  | 'cycle'
+  | 'columnContract';
+
+export interface Blocker {
+  kind: BlockerKind;
+  /** Node-level blockers carry the card; environment/backend ones do not (no red outline). */
+  cardId?: number;
+  /** Backend error code or transport detail, for the modal's second line. */
+  detail?: string;
+}
+
 interface WorkspaceState {
   cards: CardModel[];
   /** Parsed matrices by id. Kept outside the cards so charts can share them. */
@@ -1167,6 +1188,8 @@ interface WorkspaceState {
    * runs on its own.
    */
   propagationFrozen: boolean;
+  /** Currently open blocking conditions; empty means propagation may run. */
+  blockers: Blocker[];
   /**
    * Workspace trust (2026-11-17): which scripts of the opened FILE may execute.
    *
@@ -3090,6 +3113,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     // No file yet: nothing to trust, and a session-authored script never waits.
     trust: initialTrust(),
     propagationFrozen: false,
+    blockers: [],
     blockedCardId: null,
     blockNonce: 0,
     repointOffers: [],
@@ -5253,6 +5277,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // can never be treated as trusted by accident while that lookup is in flight.
         trust: initialTrust(),
         propagationFrozen: false,
+        blockers: [],
         // The stamp travels with the file, verbatim: a legacy file (no block — `migrate`
         // fills the pinned one) or a file from another machine both land here, and the
         // difference from this build's constants is REPORTED by the banner, never repaired.
@@ -5341,6 +5366,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         scriptRuns: {},
         trust: initialTrust(),
         propagationFrozen: false,
+        blockers: [],
         toast: null,
         // A reset returns the app to its initial state, including "no modal open".
         helpOpen: false,
@@ -5401,3 +5427,58 @@ export function useEnvMismatch(): boolean {
 export function useMatrix(matrixId: number): MatrixData | undefined {
   return useWorkspace((s) => s.matrices.get(matrixId));
 }
+
+/**
+ * The blocking conditions implied by the current state.
+ *
+ * Pure and cheap (a handful of fields + a card scan), so it can run on every store change.
+ * `envMismatch` stays regardless of the banner's acknowledgement: the acknowledgement closes
+ * the banner, it does not make the toolchain match.
+ */
+function computeBlockers(state: WorkspaceState): Blocker[] {
+  const out: Blocker[] = [];
+  if (!workspaceEnvIsPinned(state.workspaceEnv)) out.push({ kind: 'envMismatch' });
+  if (state.backend.state === 'offline') {
+    out.push({ kind: 'backendOffline', detail: state.backend.error });
+  } else if (state.backend.state === 'mismatch') {
+    out.push({ kind: 'backendMismatch', detail: state.backend.error });
+  }
+  for (const run of Object.values(state.scriptRuns)) {
+    if (run.code === 'runtimeMissing') {
+      out.push({ kind: 'runtimeMissing' });
+      break;
+    }
+  }
+  for (const card of state.cards) {
+    if (card.kind !== 'formula') continue;
+    const node = card.node;
+    if (!node || node.state !== 'error') continue;
+    if (node.code === 'cycle') out.push({ kind: 'cycle', cardId: card.id, detail: node.code });
+    else if (node.code === 'columnContractViolation') {
+      out.push({ kind: 'columnContract', cardId: card.id, detail: node.code });
+    }
+  }
+  return out;
+}
+
+function blockersEqual(a: readonly Blocker[], b: readonly Blocker[]): boolean {
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; ++i) {
+    if (a[i].kind !== b[i].kind || a[i].cardId !== b[i].cardId) return false;
+  }
+  return true;
+}
+
+/**
+ * Keep the blocker list (and the propagation latch) in step with the store.
+ *
+ * A subscription rather than calls at every mutation site: there are many writers (node
+ * events, run outcomes, restores, the backend banner) and missing one would silently leave
+ * automatic propagation running through a block. The equality check makes the nested
+ * `setState` terminate instead of looping.
+ */
+useWorkspace.subscribe((state) => {
+  const next = computeBlockers(state);
+  if (blockersEqual(state.blockers, next)) return;
+  useWorkspace.setState({ blockers: next, propagationFrozen: next.length > 0 });
+});

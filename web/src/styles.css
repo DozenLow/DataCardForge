@@ -3292,3 +3292,75 @@ body {
 .script-card__auto:hover {
   color: var(--text);
 }
+
+/* ── Blocking gate (2026-11-17) ───────────────────────────────────────── */
+
+/* An incident, not a toast: dim the workspace behind a single readable dialog. */
+.blocking-gate {
+  position: fixed;
+  inset: 0;
+  z-index: 6800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 18, 24, 0.42);
+  backdrop-filter: blur(1px);
+}
+
+.blocking-gate__panel {
+  width: min(580px, 100%);
+  max-height: min(80vh, 620px);
+  overflow-y: auto;
+  padding: 16px 18px;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  box-shadow: var(--shadow-active);
+}
+
+.blocking-gate__title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+.blocking-gate__hint,
+.blocking-gate__note {
+  margin: 0 0 10px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.blocking-gate__list {
+  margin: 0 0 12px;
+  padding-left: 18px;
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.blocking-gate__detail {
+  color: var(--text-dim);
+  font-family: var(--mono);
+  font-size: 11px;
+}
+
+.blocking-gate__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.blocking-gate__note {
+  margin-bottom: 0;
+}
+
+/* The offending card, outlined — only node-level blockers get a card to outline. */
+.card--blocked {
+  outline: 2px solid var(--danger);
+  outline-offset: 1px;
+}

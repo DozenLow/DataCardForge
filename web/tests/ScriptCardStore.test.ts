@@ -917,3 +917,92 @@ describe('automatic rerun', () => {
     expect(client.computeNode).toHaveBeenCalledTimes(1);
   });
 });
+
+
+// ── blocking gate state (2026-11-17) ─────────────────────────────────────────────────────
+//
+// Only environment/structure problems block propagation. A compute error stays a red card:
+// freezing the whole workspace on every typo would be the opposite of helpful.
+
+describe('blocking gate state', () => {
+  it('freezes propagation on an environment mismatch and releases when it is fixed', () => {
+    useWorkspace.setState({
+      workspaceEnv: { ...PINNED_WORKSPACE_ENV, python: 'cpython 0.0.0-foreign' },
+    });
+    expect(store().blockers.map((blocker) => blocker.kind)).toEqual(['envMismatch']);
+    expect(store().propagationFrozen).toBe(true);
+
+    useWorkspace.setState({ workspaceEnv: { ...PINNED_WORKSPACE_ENV } });
+    expect(store().blockers).toHaveLength(0);
+    expect(store().propagationFrozen).toBe(false);
+  });
+
+  it('makes a cycle-refused node a node-level blocker and clears it on recovery', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    useWorkspace.setState((state) => ({
+      cards: state.cards.map((card) =>
+        card.id === cardId && isScriptCard(card)
+          ? { ...card, node: { nodeId: 11, state: 'error', code: 'cycle' } }
+          : card,
+      ),
+    }));
+    expect(store().blockers).toContainEqual({ kind: 'cycle', cardId, detail: 'cycle' });
+
+    useWorkspace.setState((state) => ({
+      cards: state.cards.map((card) =>
+        card.id === cardId && isScriptCard(card)
+          ? { ...card, node: { nodeId: 11, state: 'done' } }
+          : card,
+      ),
+    }));
+    expect(store().blockers).toHaveLength(0);
+    expect(store().propagationFrozen).toBe(false);
+  });
+
+  it('does not block on an ordinary compute error', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    useWorkspace.setState((state) => ({
+      cards: state.cards.map((card) =>
+        card.id === cardId && isScriptCard(card)
+          ? { ...card, node: { nodeId: 11, state: 'error', code: 'divisionByZero' } }
+          : card,
+      ),
+    }));
+    expect(store().blockers).toHaveLength(0);
+  });
+
+  it('reports a missing Python runtime', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    useWorkspace.setState((state) => ({
+      scriptRuns: {
+        ...state.scriptRuns,
+        [cardId]: { ...emptyScriptRun(), code: 'runtimeMissing' },
+      },
+    }));
+    expect(store().blockers.map((blocker) => blocker.kind)).toEqual(['runtimeMissing']);
+  });
+
+  it('stops automatic reruns while the gate is frozen', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    store().runScriptCard(cardId);
+    await flush();
+    await flush();
+    expect(scriptCardOf(cardId).autoRun).toBe(true);
+
+    useWorkspace.setState({ backend: { state: 'offline', error: 'unreachable' } });
+    expect(store().propagationFrozen).toBe(true);
+    client.computeNode.mockClear();
+    store().applyNodeEvent({
+      seq: 77,
+      nodeId: scriptCardOf(cardId).node!.nodeId,
+      state: 'dirty',
+      reason: 'upstreamChanged',
+    });
+    await flush();
+    expect(client.computeNode).not.toHaveBeenCalled();
+  });
+});
