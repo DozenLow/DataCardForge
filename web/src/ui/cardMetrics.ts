@@ -7,8 +7,10 @@
  * place where that DOM measurement happens:
  *
  *   - a card registers its root element once,
- *   - the connection layer asks for `cardRect()` in canvas coordinates and never touches
- *     the DOM itself (it derives the wire endpoints from the rectangle's centre).
+ *   - a card that renders ports registers each one by `portId` (the measurement is looked
+ *     up by id, never by position),
+ *   - the connection layer asks for `cardRect()` / `portAnchor()` in canvas coordinates and
+ *     never touches the DOM itself.
  *
  * All measurements are in CSS pixels relative to the canvas container, so window
  * scroll and devicePixelRatio do not have to be handled twice.
@@ -186,10 +188,9 @@ export function cardRect(id: number): Rect | null {
  * sits below its source bend the line back over itself; a port on the left column and an
  * output on the right column left/entered horizontally.
  *
- * **Since 2026-10-29 nothing in the connection layer reads this**: wires own the whole
- * curve (`wireGeometry` in `connectionGeometry.ts`), endpoints are card centres, and the
- * arrowhead follows the curve's tangent. `AnchorSide` is kept only because the dormant
- * port anchors below still carry one.
+ * **Since 2026-11-17 the connection layer reads this again**: a wire leaves/enters on the
+ * registered side of the port it is bound to, so the side is once more part of the geometry
+ * (`wireGeometry(from, to, fromSide, toSide)`), not just a data attribute.
  */
 export type AnchorSide = 'top' | 'bottom' | 'left' | 'right';
 
@@ -206,14 +207,13 @@ const ports = new Map<number, Map<string, { element: HTMLElement; side: AnchorSi
  * Register one rendered port element as a line endpoint.
  *
  * `portId` — not its position — is the identity (port-semantics-v1 §已锁定 1). Cards call
- * this from a ref callback.
+ * this from a ref callback, with the side the wire has to leave from.
  *
- * **Since 2026-10-29 the connection layer does not read these anchors any more**: a wire
- * runs from one card centre to the other (see `connectionGeometry.ts` and the
- * `2026-10-29-connection-center-anchors` decision), and a `portId` survives only as data
- * identity in the edge and in the on-line label. The measurement is kept because the
- * "port marker dot" from the 08-07 subordination decision is still unimplemented, and it
- * is the only existing way to place a dot on a rendered port.
+ * Since 2026-11-17 the connection layer reads these anchors again
+ * (`docs/decisions/2026-11-17-port-anchored-connections.md`): a wire anchors on the port's
+ * window-side edge when the port is rendered, and falls back to the facing card edge when
+ * it is not. Identity is still `portId` (the edge carries it and the measurement is looked
+ * up by it); position is only the *geometry* that id happens to occupy today.
  */
 export function registerPort(
   cardId: number,
@@ -237,17 +237,51 @@ export function unregisterPort(cardId: number, portId: string): void {
   invalidateLayout();
 }
 
-/** Centre of the registered port element, in plane coordinates. */
+/**
+ * Midpoint of the registered SIDE of a port element, in plane coordinates.
+ *
+ * The side edge — not the element's centre — because the wire has to read as leaving the
+ * port sub-card: an input chip's line starts at its left edge, an output row's at its right
+ * edge. The card's own mask then hides whatever little stub is left between that edge and
+ * the window frame, so the visible line begins exactly on the frame at the port's height.
+ *
+ * The result is clamped into the owning card's rectangle: a row scrolled out of its panel
+ * still reports a layout rectangle (possibly outside the card), and an anchor outside its
+ * own card would make the wire appear from thin air. Clamping to the frame — not inside it —
+ * keeps a port that sits on the edge exactly where the card ends.
+ */
 export function portAnchor(cardId: number, portId: string): Anchor | null {
   const entry = ports.get(cardId)?.get(portId);
   if (!entry) return null;
   const r = entry.element.getBoundingClientRect();
   const origin = canvasRect();
-  return {
-    x: (r.left + r.width / 2 - origin.left) / worldScale,
-    y: (r.top + r.height / 2 - origin.top) / worldScale,
-    side: entry.side,
+  const x = r.left + r.width / 2;
+  const y = r.top + r.height / 2;
+  let point = { x, y };
+  switch (entry.side) {
+    case 'left':
+      point = { x: r.left, y };
+      break;
+    case 'right':
+      point = { x: r.right, y };
+      break;
+    case 'top':
+      point = { x, y: r.top };
+      break;
+    case 'bottom':
+      point = { x, y: r.bottom };
+      break;
+  }
+  const anchor = {
+    x: (point.x - origin.left) / worldScale,
+    y: (point.y - origin.top) / worldScale,
   };
+  const card = cardRect(cardId);
+  if (card) {
+    anchor.x = Math.min(Math.max(anchor.x, card.left), card.left + card.width);
+    anchor.y = Math.min(Math.max(anchor.y, card.top), card.top + card.height);
+  }
+  return { ...anchor, side: entry.side };
 }
 
 /** Anchor on one side of a card: top/bottom mid-point, or left/right mid-height. */

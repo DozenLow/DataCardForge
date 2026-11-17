@@ -1,23 +1,26 @@
 /**
  * Connection geometry — every number the connection layer draws with, as pure functions.
  *
- * Since 2026-10-29 a wire runs from the **centre of one card window to the centre of the
- * other**, and the card interior is punched out by the layer's mask (`ConnectionLayer`), so
- * only the stretch between the two cards is visible. That decision removes the old
- * side-based anchors (`portAnchor` / `cardAnchor`): a curve no longer "leaves the right
- * edge", it leaves the inside of the card and becomes visible where it crosses the frame.
+ * Since 2026-11-17 a wire runs between the two **rendered ports** an edge is bound to (or
+ * the facing card edges when a card renders no port), and the card interior is punched out
+ * by the layer's mask (`ConnectionLayer`), so only the stretch between the two cards is
+ * visible. The endpoints therefore carry a `side`: an input chip's wire starts at its left
+ * edge, an output row's at its right edge.
  *
- * A single cubic Bézier is the whole route: two fixed endpoints (the card centres) and two
- * control points. A cubic has at most two inflection points, which is the ceiling the
- * product asked for — more bends read as noise. The control points are *blended* between
- * the horizontal and the vertical solution by `w = |dx| / (|dx| + |dy|)`; without the blend
- * the curve would flip between the two solutions and snap when a drag crossed the
- * diagonal, which is exactly the "smooth trajectory" this module is here to protect.
+ * A single cubic Bézier is the whole route: two fixed endpoints and two control points. A
+ * cubic has at most two inflection points, which is the ceiling the product asked for —
+ * more bends read as noise. When no sides are given (the centre-anchor variant kept for
+ * callers that only have two points) the control points are *blended* between the
+ * horizontal and the vertical solution by `w = |dx| / (|dx| + |dy|)`; without the blend the
+ * curve would flip between the two solutions and snap when a drag crossed the diagonal,
+ * which is exactly the "smooth trajectory" this module is here to protect. With sides, the
+ * control points leave along each side's outward normal instead — that is what makes a
+ * wire read as coming out of the port rather than through it.
  *
  * Everything here is DOM-free so the interesting cases (bisection for the arrow, obstacle
  * detection for the transition) can be unit-tested without a layout engine.
  */
-import type { Rect } from './cardMetrics.ts';
+import type { AnchorSide, Rect } from './cardMetrics.ts';
 
 export interface Point {
   x: number;
@@ -78,20 +81,60 @@ export function distance(a: Point, b: Point): number {
   return Math.hypot(b.x - a.x, b.y - a.y);
 }
 
+/** Upper bound on a side anchor's control arm, in plane px (see `wireGeometry`). */
+const MAX_CONTROL_ARM = 400;
+
+/** Outward unit normal of a side: the direction a wire leaves that side. */
+export function sideNormal(side: AnchorSide): Point {
+  switch (side) {
+    case 'left':
+      return { x: -1, y: 0 };
+    case 'right':
+      return { x: 1, y: 0 };
+    case 'top':
+      return { x: 0, y: -1 };
+    case 'bottom':
+      return { x: 0, y: 1 };
+  }
+}
+
 /**
- * The cubic between two card centres.
+ * The cubic between two points.
  *
- * Horizontal solution: both control points sit on the line joining the endpoints
- * (`c1 = from + dx/2`, `c2 = to - dx/2`), so a horizontally aligned pair draws a straight
- * line — which is what "two cards side by side" should look like. Vertical solution is the
- * same rotated. The blend weight is 1 for a perfectly horizontal pair and 0 for a
- * perfectly vertical one, so the two solutions meet continuously and a diagonal pair is a
- * straight line too.
+ * Without sides this is the centre-anchor variant: horizontal solution (both control points
+ * on the chord) blended with the vertical one by `w`, so the two solutions meet continuously
+ * and a diagonal pair is a straight line too.
+ *
+ * With sides (2026-11-17) each control point leaves along its side's outward normal by half
+ * the endpoint distance (capped): a horizontally aligned pair still draws a straight line,
+ * a vertical or diagonal pair draws an S that leaves/enters perpendicular to the port edges,
+ * and a pair whose sides point away from each other draws the symmetric loop that "the
+ * output is physically on the right" implies. The cap keeps a screen-wide pair from growing
+ * control arms that overshoot the endpoints' order (which would make the drawn curve leave
+ * and re-enter the visible gap).
  */
-export function wireGeometry(from: Point, to: Point): WireGeometry {
+export function wireGeometry(
+  from: Point,
+  to: Point,
+  fromSide?: AnchorSide,
+  toSide?: AnchorSide,
+): WireGeometry {
   const dx = to.x - from.x;
   const dy = to.y - from.y;
   const span = Math.abs(dx) + Math.abs(dy);
+
+  if (fromSide !== undefined && toSide !== undefined) {
+    const half = Math.min(Math.hypot(dx, dy) * 0.5, MAX_CONTROL_ARM);
+    const n1 = sideNormal(fromSide);
+    const n2 = sideNormal(toSide);
+    return {
+      from,
+      to,
+      c1: { x: from.x + n1.x * half, y: from.y + n1.y * half },
+      c2: { x: to.x + n2.x * half, y: to.y + n2.y * half },
+    };
+  }
+
   // Coincident centres: no direction exists, so the curve collapses onto the endpoints
   // instead of producing NaN control points.
   const w = span < 1e-6 ? 0.5 : Math.abs(dx) / span;
@@ -178,14 +221,15 @@ const EXIT_BISECTIONS = 8;
 /**
  * Where the wire crosses the target card's frame.
  *
- * The endpoint is the card centre, so an arrow drawn there would be erased by the mask.
- * Walking the curve backwards from the centre finds the sample pair that straddles the
- * frame, and a short bisection parks the tip just outside it — visible, and still pointing
- * along the curve rather than along a side's normal.
+ * An anchor is a port's edge (or, without a port, the card's own edge), so the last stretch
+ * of the curve is drawn inside the target card and erased by the mask. Walking the curve
+ * backwards from the endpoint finds the sample pair that straddles the frame, and a short
+ * bisection parks the tip just outside it — visible, and still pointing along the curve
+ * rather than along a side's normal. The tip therefore lands at the port row's height.
  *
  * Returns `null` when the whole curve is inside the target card (two cards almost exactly
  * on top of each other). An arrow in the middle of a masked card would be invisible
- * anyway, and the alternative — floating one at the centre — would be a lie.
+ * anyway, and the alternative — floating one at the anchor — would be a lie.
  */
 export function arrowTip(geometry: WireGeometry, rect: Rect): ArrowPlacement | null {
   let inside: Point | null = null;
@@ -430,7 +474,7 @@ export function segmentHitsRect(a: Point, b: Point, rect: Rect, tolerance = HIT_
   return (t1 - t0) * Math.hypot(dx, dy) > tolerance;
 }
 
-/** The route a wire takes: one or more cubics, from the source centre to the target centre. */
+/** The route a wire takes: one or more cubics, from one endpoint anchor to the other. */
 export interface RouteGeometry {
   /** Waypoints including both endpoints; at most two are interior (i.e. at most two bends). */
   points: Point[];
@@ -453,8 +497,17 @@ const SMOOTH_TENSIONS = [1 / 6, 1 / 9, 1 / 12, 1 / 16, 1 / 24, 0];
 /** Samples per segment used when checking that the smoothed curve clears every card. */
 const SMOOTH_SAMPLES = 24;
 
+/** The two sides an edge leaves from and enters into (2026-11-17 port anchors). */
+export interface RouteSides {
+  from: AnchorSide;
+  to: AnchorSide;
+}
+
 /**
  * Route `from -> to` around `obstacles` (cards that are neither endpoint).
+ *
+ * `sides`, when given, is handed to the base curve (`wireGeometry`), so the fast path leaves
+ * and enters perpendicular to the port edges instead of at the blended angle.
  *
  * Fast path: when the single cubic does not enter any card, nothing is inserted — the
  * drawing stays byte-identical to the pre-detour geometry. Only when it does enter a card
@@ -473,9 +526,10 @@ export function routeGeometry(
   from: Point,
   to: Point,
   obstacles: Rect[],
+  sides?: RouteSides,
   padding = ROUTE_PADDING,
 ): RouteGeometry {
-  const base = wireGeometry(from, to);
+  const base = wireGeometry(from, to, sides?.from, sides?.to);
   const straight: RouteGeometry = { points: [from, to], segments: [base], detoured: false };
   if (obstacles.length === 0) return straight;
 

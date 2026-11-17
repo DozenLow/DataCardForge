@@ -100,12 +100,35 @@ describe('port anchors', () => {
     registerCard(1, root);
   });
 
-  it('measures the centre of the registered element', () => {
+  it('measures the midpoint of the registered side, not the element centre', () => {
     const chip = document.createElement('span');
     stubRect(chip, { left: 120, top: 600, width: 80, height: 20 });
     registerPort(1, 'src', chip, 'left');
 
-    expect(portAnchor(1, 'src')).toEqual({ x: 160, y: 610, side: 'left' });
+    // 2026-11-17: a wire leaves the port sub-card, so the anchor is the window-side edge.
+    expect(portAnchor(1, 'src')).toEqual({ x: 120, y: 610, side: 'left' });
+  });
+
+  it('resolves each side to its own edge midpoint', () => {
+    const chip = document.createElement('span');
+    stubRect(chip, { left: 500, top: 600, width: 60, height: 20 });
+    registerPort(1, 'result', chip, 'right');
+    registerPort(1, 'above', chip, 'top');
+    registerPort(1, 'below', chip, 'bottom');
+
+    expect(portAnchor(1, 'result')).toEqual({ x: 560, y: 610, side: 'right' });
+    expect(portAnchor(1, 'above')).toEqual({ x: 530, y: 600, side: 'top' });
+    expect(portAnchor(1, 'below')).toEqual({ x: 530, y: 620, side: 'bottom' });
+  });
+
+  it('clamps an anchor into its own card when the row scrolled out of the panel', () => {
+    // A row scrolled above the panel reports a layout rect outside the card; an anchor
+    // there would make the wire appear out of thin air above the frame.
+    const chip = document.createElement('span');
+    stubRect(chip, { left: 120, top: 200, width: 80, height: 20 });
+    registerPort(1, 'scrolled', chip, 'left');
+
+    expect(portAnchor(1, 'scrolled')).toEqual({ x: 120, y: 560, side: 'left' });
   });
 
   it('keeps the side that was registered, because the arrowhead depends on it', () => {

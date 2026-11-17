@@ -5,18 +5,20 @@
  * background visualization of data dependencies, they never intercept pointer
  * events, and they never take part in card layout.
  *
- * As of 2026-10-29 a wire runs **card centre → card centre** and is a single cubic Bézier
- * (see `connectionGeometry.ts`). The endpoints sit inside the two cards, so the layer's
- * mask — one black hole per card — is what turns "centre to centre" into "frame to frame":
- * the wire only becomes visible where it crosses a card's border. That is the whole trick,
- * and it is also why the arrowhead had to move: drawn on the anchor it would be erased.
+ * Since 2026-11-17 a wire runs **port edge → port edge** (or card edge → card edge when a
+ * card renders no port; see `connectionAnchors.ts`), and is a single cubic Bézier whose
+ * control points leave along each side's normal (see `connectionGeometry.ts`). The
+ * endpoints sit just inside the two cards — a port row is a sub-card, not the frame — so the
+ * layer's mask — one black hole per card — is what turns "port to port" into "frame to
+ * frame": the wire only becomes visible where it crosses a card's border, at the port's
+ * height. That is also why the arrowhead has to be parked on the frame: drawn on the anchor
+ * it would be erased.
  *
  * The layer still draws **every** dependency edge (2026-10-28): schema v2 made function
  * cards first-class graph nodes (`inputs[]` on the envelope), so a chain
  * `table → function → chart` is two edges and therefore two lines. A pair of cards is
- * exactly one line — a chart reading three columns of one table keeps one line and lists
- * its ports on the label. The label is now the *only* place a `portId` still shows up:
- * ports are data identity, not geometry.
+ * exactly one line — a chart reading three columns of one table keeps one line and its
+ * ports are averaged into one anchor and listed on the label.
  *
  * Layering reproduces the Qt two-overlay scheme with a single SVG using two groups:
  *   - `bg` group: thin grey lines for unselected cards, painted under the highlight
@@ -29,7 +31,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 
-import { cardRect, subscribeLayout, getLayoutVersion, type Rect } from './cardMetrics.ts';
+import {
+  cardRect,
+  subscribeLayout,
+  getLayoutVersion,
+  type AnchorSide,
+  type Rect,
+} from './cardMetrics.ts';
+import { resolveEdgeAnchors } from './connectionAnchors.ts';
 import {
   arrowPathAt,
   dashArray,
@@ -90,6 +99,9 @@ export interface Connection {
   targetRect: Rect;
   /** The curve as the layout currently says it should be (before any transition). */
   target: WireGeometry;
+  /** The side the wire leaves the source from, and the side it enters the target on. */
+  fromSide: AnchorSide;
+  toSide: AnchorSide;
   /** Target-side port ids carried by this edge, for the on-line label. */
   ports: string[];
   dependsOn: number;
@@ -100,15 +112,11 @@ export interface Connection {
   highlighted: boolean;
 }
 
-function centreOf(rect: Rect): Point {
-  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
-}
-
 /**
  * Canvas-relative rectangles of every card, keyed by card id, refreshed whenever the layout
  * could have changed. These become the holes in the connection mask — the lines belong to
  * the desktop *behind* the cards, so they must not be painted across a card's face — and
- * they are also the source of the centre endpoints.
+ * they also clamp the anchors a scrolled port reports (see `connectionAnchors`).
  */
 function useCardRects(cards: CardModel[]): Map<number, Rect> {
   const version = useSyncLayoutVersion();
@@ -128,9 +136,10 @@ function useCardRects(cards: CardModel[]): Map<number, Rect> {
 /**
  * Recompute every connection whenever the measured rects or the graph could have changed.
  *
- * Endpoints are the two card centres, resolved from `rects` — the layer never touches the
- * DOM itself (see `cardMetrics`). A card whose rectangle cannot be measured is skipped
- * instead of guessing a position.
+ * Endpoints come from `resolveEdgeAnchors`: the rendered port sub-cards when the edge's
+ * ports are on screen, otherwise the facing card edges. The layer never touches the DOM
+ * itself (see `cardMetrics`); a card whose rectangle cannot be measured is skipped instead
+ * of guessing a position.
  */
 export function useConnectionGeometry(
   cards: CardModel[],
@@ -142,16 +151,11 @@ export function useConnectionGeometry(
     const out: Connection[] = [];
 
     for (const edge of dependencies.edges()) {
-      const sourceCard = cards.find((card) => card.id === edge.dependsOn);
-      const targetCard = cards.find((card) => card.id === edge.dependent);
-      if (!sourceCard || !targetCard) continue;
+      const anchors = resolveEdgeAnchors(edge, cards, rects);
+      if (!anchors) continue;
 
-      const sourceRect = rects.get(edge.dependsOn);
       const targetRect = rects.get(edge.dependent);
-      if (!sourceRect || !targetRect) continue;
-
-      const from = centreOf(sourceRect);
-      const to = centreOf(targetRect);
+      if (!targetRect) continue;
 
       let color = COLOR_GREY;
       let direction: WireDirection = 'out';
@@ -169,7 +173,14 @@ export function useConnectionGeometry(
       out.push({
         key: `${edge.dependsOn}->${edge.dependent}`,
         targetRect,
-        target: wireGeometry(from, to),
+        target: wireGeometry(
+          anchors.from.point,
+          anchors.to.point,
+          anchors.from.side,
+          anchors.to.side,
+        ),
+        fromSide: anchors.from.side,
+        toSide: anchors.to.side,
         ports: edge.ports,
         dependsOn: edge.dependsOn,
         dependent: edge.dependent,
@@ -246,12 +257,12 @@ function prefersReducedMotion(): boolean {
 }
 
 /**
- * Drive the drawn wire from the *settled* layout, not from a tweened centre pair.
+ * Drive the drawn wire from the *settled* layout, not from a tweened endpoint pair.
  *
- * A wire has one shape to animate: its route. Interpolating the two card centres and then
+ * A wire has one shape to animate: its route. Interpolating the two anchors and then
  * re-routing (which is what the old `useTweenedGeometry` did) cannot animate a route whose
  * *topology* changed — when moving an obstacle flips the detour from above to below, the
- * centres barely move and the drawn path jumps anyway. So the whole route is sampled and
+ * anchors barely move and the drawn path jumps anyway. So the whole route is sampled and
  * interpolated here, and that covers a card jump as well as a detour flip.
  */
 
@@ -332,7 +343,10 @@ function useReflowedWires(
       for (const [id, rect] of rects) {
         if (id !== conn.dependsOn && id !== conn.dependent) obstacles.push(rect);
       }
-      const route = routeGeometry(conn.target.from, conn.target.to, obstacles);
+      const route = routeGeometry(conn.target.from, conn.target.to, obstacles, {
+        from: conn.fromSide,
+        to: conn.toSide,
+      });
       const target: WireFrame = {
         samples: sampleRoute(route, ROUTE_SAMPLES),
         d: routePathData(route),
@@ -435,7 +449,7 @@ export function ConnectionLayer({
 
   // One mask, reused by both line groups: white everywhere, a black hole per card. The
   // lines therefore stop at every card edge, exactly like lines drawn on the MDI desktop —
-  // and that is also what turns centre-to-centre endpoints into frame-to-frame wires.
+  // and that is also what turns port-to-port endpoints into frame-to-frame wires.
   const maskId = 'connection-card-cutout';
 
   const frames = useReflowedWires(connections, rects, rectList);

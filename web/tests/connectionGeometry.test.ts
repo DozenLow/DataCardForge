@@ -97,6 +97,55 @@ describe('wire geometry', () => {
   });
 });
 
+describe('side anchors (2026-11-17)', () => {
+  it('draws a horizontally aligned right→left pair as a straight line', () => {
+    const geometry = wireGeometry({ x: 740, y: 290 }, { x: 772, y: 290 }, 'right', 'left');
+    // Half the 32px gap on each side: both control points meet in the middle.
+    expect(geometry.c1).toEqual({ x: 756, y: 290 });
+    expect(geometry.c2).toEqual({ x: 756, y: 290 });
+    expect(pathData(geometry)).toBe('M 740 290 C 756 290, 756 290, 772 290');
+  });
+
+  it('draws a vertically aligned bottom→top pair as a straight line', () => {
+    const geometry = wireGeometry({ x: 100, y: 100 }, { x: 100, y: 500 }, 'bottom', 'top');
+    expect(pathData(geometry)).toBe('M 100 100 C 100 300, 100 300, 100 500');
+  });
+
+  it('grows both control arms outward when the sides face away from each other', () => {
+    // Target to the LEFT of the source: the source output is still physically on its right,
+    // so the curve has to leave right and come back — a symmetric loop, not an S.
+    const geometry = wireGeometry({ x: 740, y: 290 }, { x: 300, y: 400 }, 'right', 'left');
+    expect(geometry.c1.x).toBeGreaterThan(geometry.from.x);
+    expect(geometry.c2.x).toBeLessThan(geometry.to.x);
+    for (const point of [geometry.from, geometry.to, geometry.c1, geometry.c2]) {
+      expect(Number.isFinite(point.x)).toBe(true);
+      expect(Number.isFinite(point.y)).toBe(true);
+    }
+  });
+
+  it('caps the control arm so it cannot overshoot a screen-wide pair', () => {
+    const geometry = wireGeometry({ x: 0, y: 0 }, { x: 2000, y: 0 }, 'right', 'left');
+    expect(geometry.c1).toEqual({ x: 400, y: 0 });
+    expect(geometry.c2).toEqual({ x: 1600, y: 0 });
+  });
+
+  it('keeps the blended centre solution when only one side is given', () => {
+    const withSides = wireGeometry({ x: 0, y: 0 }, { x: 200, y: 100 }, 'right', 'left');
+    const oneSide = wireGeometry({ x: 0, y: 0 }, { x: 200, y: 100 }, 'right');
+    expect(withSides).not.toEqual(oneSide);
+    expect(oneSide).toEqual(wireGeometry({ x: 0, y: 0 }, { x: 200, y: 100 }));
+  });
+
+  it('routes a clear pair as one cubic even with sides', () => {
+    const from = { x: 740, y: 290 };
+    const to = { x: 772, y: 290 };
+    const route = routeGeometry(from, to, [], { from: 'right', to: 'left' });
+    expect(route.detoured).toBe(false);
+    expect(route.segments).toHaveLength(1);
+    expect(routePathData(route)).toBe(pathData(wireGeometry(from, to, 'right', 'left')));
+  });
+});
+
 describe('arrow placement', () => {
   const target: Rect = { left: 400, top: 50, width: 200, height: 100 };
 

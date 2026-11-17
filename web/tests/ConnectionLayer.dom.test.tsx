@@ -5,14 +5,15 @@
  *
  * The store's DependencyGraph is the source of truth: exactly one line per dependency
  * edge — every edge, not only the ones that end at a chart card (2026-10-28). Since
- * 2026-10-29 both endpoints are the two **card centres**, so the visible wire is whatever
- * the mask leaves uncovered between the two frames; the arrowhead parks on the target
- * frame (inside it, the mask would erase it) and the port label moves to the visible
- * stretch, because the exact midpoint is often under a card.
+ * 2026-11-17 both endpoints are the **port sub-cards** an edge is bound to, or the facing
+ * card edges when a card renders no port (see `connectionAnchors.ts`); the visible wire is
+ * whatever the mask leaves uncovered between the two frames. The arrowhead parks on the
+ * target frame (inside it, the mask would erase it) at the port's height, and the port
+ * label moves to the visible stretch.
  *
  * A pair of cards is still exactly one line: attaching a second column of the same matrix
- * card adds no line, and table scrolling cannot move anything (the geometry never reads
- * the table viewport).
+ * card adds no line, and table scrolling cannot move anything (the geometry never
+ * reads the table viewport).
  *
  * jsdom reports all-zero rectangles, so the card roots and the world layer are given
  * explicit geometry, exactly like InfiniteCanvas.dom.test.tsx does.
@@ -134,13 +135,16 @@ function stubRoot(box: Box): HTMLElement {
 
 const MATRIX_AT: Box = { x: 100, y: 80, width: 640, height: 420 };
 const CHART_AT: Box = { x: 772, y: 104, width: 560, height: 400 };
-const MATRIX_CENTRE: Point = { x: 420, y: 290 };
-const CHART_CENTRE: Point = { x: 1052, y: 304 };
+/** The matrix renders no port, so its wire leaves the facing (right) edge midpoint. */
+const MATRIX_RIGHT: Point = { x: 740, y: 290 };
+/** The chart renders no port, so its wire enters the facing (left) edge midpoint. */
+const CHART_LEFT: Point = { x: 772, y: 304 };
 
 /**
  * A matrix card at (100,80,640,420) and a chart card at (772,104,560,400), each with its
- * registered root rect. The wire therefore runs from the table's centre (420,290) to the
- * chart's centre (1052,304); only the 32px gap between the two frames shows it.
+ * registered root rect. Neither renders a port, so the wire runs from the table's right
+ * edge (740,290) to the chart's left edge (772,304); only the 32px gap between the two
+ * frames shows it.
  */
 function setupScene({
   chart = true,
@@ -263,24 +267,28 @@ afterEach(async () => {
 });
 
 describe('connection lines', () => {
-  it('draws one line per dependency edge, from card centre to card centre', async () => {
+  it('draws one line per dependency edge, from the source frame to the target frame', async () => {
     setupScene();
     const host = await mountLayer();
 
     const path = wirePaths(host);
-    expect(path).toEqual(['M 420 290 C 729.152 290.152, 742.848 303.848, 1052 304']);
-    expect(parsePath(path[0]).from).toEqual(MATRIX_CENTRE);
-    expect(parsePath(path[0]).to).toEqual(CHART_CENTRE);
+    // Neither card renders a port, so both ends are the facing card edges: the wire is the
+    // 32px gap between (740,290) and (772,304), with side-normal control points.
+    expect(path).toEqual(['M 740 290 C 757.464 290, 754.536 304, 772 304']);
+    expect(parsePath(path[0]).from).toEqual(MATRIX_RIGHT);
+    expect(parsePath(path[0]).to).toEqual(CHART_LEFT);
   });
 
   it('draws a horizontally aligned pair as a straight line', async () => {
     setupScene({
-      matrixAt: { x: 100, y: 100, width: 600, height: 400 },
+      // A 40px gap between the frames: the wire is the short straight stretch between the
+      // table's right edge (660) and the chart's left edge (700), both at y = 300.
+      matrixAt: { x: 100, y: 100, width: 560, height: 400 },
       chartAt: { x: 700, y: 100, width: 600, height: 400 },
     });
     const host = await mountLayer();
 
-    expect(wirePaths(host)).toEqual(['M 400 300 C 700 300, 700 300, 1000 300']);
+    expect(wirePaths(host)).toEqual(['M 660 300 C 680 300, 680 300, 700 300']);
   });
 
   it('parks exactly one arrowhead on the target frame, outside the mask', async () => {
@@ -410,7 +418,7 @@ describe('connection lines', () => {
     const host = await mountLayer();
 
     expect(host.querySelectorAll('.connection')).toHaveLength(1);
-    expect(wirePaths(host)[0]).toBe('M 420 290 C 729.152 290.152, 742.848 303.848, 1052 304');
+    expect(wirePaths(host)[0]).toBe('M 740 290 C 757.464 290, 754.536 304, 772 304');
   });
 
   // ── every edge is drawn, not only chart edges (2026-10-28) ──────────
@@ -430,10 +438,11 @@ describe('connection lines', () => {
 
     const host = await mountLayer();
 
-    // Table centre (420,290) -> function card centre (340,720).
+    // The card below the table: both ends fall back to the facing edges — the table's
+    // bottom midpoint (420,500) and the function card's top midpoint (340,560).
     const path = parsePath(wirePaths(host)[0]);
-    expect(path.from).toEqual(MATRIX_CENTRE);
-    expect(path.to).toEqual({ x: 340, y: 720 });
+    expect(path.from).toEqual({ x: 420, y: 500 });
+    expect(path.to).toEqual({ x: 340, y: 560 });
   });
 
   it('draws both hops of a table -> function -> function chain', async () => {
@@ -463,13 +472,15 @@ describe('connection lines', () => {
 
     const paths = wirePaths(host).map(parsePath);
     expect(paths).toHaveLength(2);
-    expect(paths[0].from).toEqual(MATRIX_CENTRE);
-    expect(paths[0].to).toEqual({ x: 340, y: 720 });
-    expect(paths[1].from).toEqual({ x: 340, y: 720 });
-    expect(paths[1].to).toEqual({ x: 340, y: 1120 });
+    // Table bottom (420,500) -> first card top (340,560); then first card bottom
+    // (340,880) -> second card top (340,960): a vertically stacked pair.
+    expect(paths[0].from).toEqual({ x: 420, y: 500 });
+    expect(paths[0].to).toEqual({ x: 340, y: 560 });
+    expect(paths[1].from).toEqual({ x: 340, y: 880 });
+    expect(paths[1].to).toEqual({ x: 340, y: 960 });
   });
 
-  it('ignores port registration — ports are identity, not geometry (2026-10-29)', async () => {
+  it('anchors the wire on the rendered port, not on the card centre (2026-11-17)', async () => {
     const { matrixCardId } = setupScene({ chart: false });
     const functionCard = addFunctionCard(
       [
@@ -482,7 +493,9 @@ describe('connection lines', () => {
     );
     store().dependencies.addDependency(functionCard.id, matrixCardId, 'src');
 
-    // The port chip the card would render, at (120,600) with 80x20 -> centre (160,610).
+    // The input chip the card renders, at (120,600) with 80x20 on its LEFT edge: the anchor
+    // is that edge's midpoint (120,610), not the chip centre (160,610) and not the card
+    // centre (340,720).
     const chip = document.createElement('span');
     stubRect(chip, { x: 120, y: 600, width: 80, height: 20 });
     await act(async () => {
@@ -491,8 +504,11 @@ describe('connection lines', () => {
 
     const host = await mountLayer();
 
-    // The endpoint is still the function card's centre: the chip no longer pulls the wire.
-    expect(parsePath(wirePaths(host)[0]).to).toEqual({ x: 340, y: 720 });
+    const path = parsePath(wirePaths(host)[0]);
+    expect(path.to).toEqual({ x: 120, y: 610 });
+    // The data card still renders no port: its end stays on the facing edge, at the port's
+    // height (the matrix bottom, x = 120).
+    expect(path.from).toEqual({ x: 120, y: 500 });
   });
 
   it('routes around a third card instead of letting the mask erase it', async () => {
@@ -512,14 +528,14 @@ describe('connection lines', () => {
     const host = await mountLayer();
     const d = wirePaths(host)[0];
 
-    // Table centre (420,290) -> chart centre (420,1050); a straight line would cross the
+    // Table bottom (420,500) -> chart top (420,900); a straight line would cross the
     // card at (100,540,640,320), so the wire must bend around it — as a smooth bezier
-    // chain (2026-10-29: at most two bends, no polyline corners).
-    expect(d.startsWith('M 420 290')).toBe(true);
+    // chain (at most two bends, no polyline corners).
+    expect(d.startsWith('M 420 500')).toBe(true);
     expect(d).not.toContain(' L ');
     expect(d).not.toContain(' Q ');
     expect((d.match(/C/g) ?? []).length).toBe(3);
-    expect(d.endsWith('420 1050')).toBe(true);
+    expect(d.endsWith('420 900')).toBe(true);
   });
 
   it('animates the wire when moving an obstacle flips its route', async () => {
@@ -552,7 +568,7 @@ describe('connection lines', () => {
 
     // Mid-reflow the wire is neither the old detour nor the settled curve: it is on its way.
     const during = wirePaths(host)[0];
-    const settledPath = 'M 420 290 C 420 670, 420 670, 420 1050';
+    const settledPath = 'M 420 500 C 420 700, 420 700, 420 900';
     expect(during).not.toBe(detoured);
     expect(during).not.toBe(settledPath);
     expect((during.match(/C/g) ?? []).length).toBeGreaterThan(1);
@@ -603,11 +619,12 @@ describe('connection lines', () => {
     });
     await flush();
 
-    // 5px is far below the jump threshold: the wire is where the card is, right away.
-    expect(parsePath(wirePaths(host)[0]).from).toEqual({ x: 425, y: 290 });
+    // 5px is far below the jump threshold: the wire is where the card is, right away —
+    // the source end is the moved card's right edge (745), not its centre.
+    expect(parsePath(wirePaths(host)[0]).from).toEqual({ x: 745, y: 290 });
   });
 
-  it('animates a layout jump and still lands on the new centre', async () => {
+  it('animates a layout jump and still lands on the new anchor', async () => {
     const { matrixCardId, matrixRoot } = setupScene();
     const host = await mountLayer();
     const before = wirePaths(host)[0];
@@ -626,7 +643,7 @@ describe('connection lines', () => {
 
     await settle(600);
     const after = parsePath(wirePaths(host)[0]);
-    expect(after.from).toEqual({ x: 420, y: 710 });
+    expect(after.from).toEqual({ x: 740, y: 710 });
     expect(wirePaths(host)[0]).not.toBe(before);
   });
 
@@ -644,7 +661,7 @@ describe('connection lines', () => {
     const grey = plain.querySelector('.connection--bg .connection__wire')!;
     expect(grey.getAttribute('stroke-width')).toBe('0.75');
     // Measured in plane coordinates: the zoom cannot move the endpoints.
-    expect(parsePath(wirePaths(plain)[0]).from).toEqual(MATRIX_CENTRE);
+    expect(parsePath(wirePaths(plain)[0]).from).toEqual(MATRIX_RIGHT);
 
     const host = await mountLayer(matrixCardId, 2);
     const wire = host.querySelector('.connection--fg .connection__wire')!;
