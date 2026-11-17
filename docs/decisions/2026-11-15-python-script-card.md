@@ -173,4 +173,4 @@ signatureId 分派）。门禁脚本 grep 违例并注册 ctest；脚本卡是�
 - 契约：[端口语义 v1](../architecture/port-semantics-v1.md)、
   [后端协议 v1](../architecture/backend-protocol-v1.md)、
   [函数卡的三个契约](./2026-10-27-card-contracts.md)、
-  [连线卡心锚点](./2026-10-29-connection-center-anchors.md)（端口只是数据身份，脚本卡不发明端口级连线）
+  [连线端口锚点](./2026-11-17-port-anchored-connections.md)（端口仍是数据身份；脚本卡的输入/输出行现在也是连线锚点，三栏布局见该决策）

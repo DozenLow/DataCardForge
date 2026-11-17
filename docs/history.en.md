@@ -4,7 +4,7 @@
 
 - **Nature**: the decisions, logs, lessons and audits chained into one causal history. This document
   creates no new decisions; every conclusion cites its source, and the source is authoritative.
-- **As of**: 2026-11-04. This document explains *why the project ended up here*; where it stands now is
+- **As of**: 2026-11-17. This document explains *why the project ended up here*; where it stands now is
   in the repository-root `STATE.md`.
 - **Tags**: `#history #navigation #evolution #decision`
 
@@ -73,6 +73,9 @@ there must be no wall in the worst case.
 | 2026-11-03 | 0.1.1 / 0.1.2: release archive becomes "binary + `web/`", the backend serves the UI itself; Windows build goes fully static | release | [CHANGELOG](../CHANGELOG.md) |
 | 2026-11-04 | 0.1.3 (untagged): the double-click launch chain — console subsystem assertion + `AllocConsole` + `ShellExecuteW` | release | [CHANGELOG](../CHANGELOG.md) · `STATE.md` |
 | 2026-11-04 | Precision audit: `dd_oracle` (double-double reference) + `matrix_invariants`; the table switches to shortest round-trip; `/accuracy` endpoint added | audit | `STATE.md` · [CHANGELOG](../CHANGELOG.md) |
+| 2026-11-15 | Python script card, stage 1: a card is a function, injection is name binding, outputs are declared first; clean-room runner, two-layer diagnostics, zero-special-case gate | decision/implementation | [decisions/2026-11-15-python-script-card](decisions/2026-11-15-python-script-card.md) |
+| 2026-11-16 | Every declared output becomes wireable (each `out:N` has its own slot); card creation moves to one right-click menu, charts into a submenu | implementation | `STATE.md` |
+| 2026-11-17 | Connection endpoints land on the port sub-cards: port first, facing card edge as fallback; the script card becomes three columns (inputs / code / outputs) | decision/implementation | [decisions/2026-11-17-port-anchored-connections](decisions/2026-11-17-port-anchored-connections.md) |
 
 ---
 

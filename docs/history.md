@@ -3,7 +3,7 @@
 中文 | [English](history.en.md)
 
 - **性质**：把决策、日志、踩坑、审计按因果链串成一条历史。本文不产生新决策，每条结论都带出处，出处才是权威。
-- **截至**：2026-11-04。本文解释"为什么走到这里"；"现在在哪"以仓库根 `STATE.md` 为准。
+- **截至**：2026-11-17。本文解释"为什么走到这里"；"现在在哪"以仓库根 `STATE.md` 为准。
 - **标签**：`#历史 #导航 #演进 #决策`
 
 > 阅读方式：§1 + §2 是概要；四次方向推翻的原因与代价见 §4，反复出现的问题见 §5，可复用的检查项见 §6。
@@ -67,6 +67,9 @@
 | 2026-11-03 | 0.1.1 / 0.1.2：发行包变成「二进制 + `web/`」，后端自己托管界面；Windows 包改全静态链接 | 发布 | [CHANGELOG](../CHANGELOG.md) |
 | 2026-11-04 | 0.1.3（未打 tag）：双击启动链——控制台子系统断言 + `AllocConsole` + `ShellExecuteW` | 发布 | [CHANGELOG](../CHANGELOG.md) · `STATE.md` |
 | 2026-11-04 | 精度审计：`dd_oracle`（double-double 参考）+ `matrix_invariants`；表格改最短往返显示；新增 `/accuracy` 端点 | 审计 | `STATE.md` · [CHANGELOG](../CHANGELOG.md) |
+| 2026-11-15 | Python 脚本卡阶段 1：卡是函数、注入是名字绑定、输出先声明；净室 runner、双层诊断、零特例门禁 | 决策/实现 | [decisions/2026-11-15-python-script-card](decisions/2026-11-15-python-script-card.md) |
+| 2026-11-16 | 每个声明输出可接线（`out:N` 各有一个槽位）；建卡统一走右键菜单，统计图收进二级菜单 | 实现 | `STATE.md` |
+| 2026-11-17 | 连线端点落端口子卡片：端口优先、缺端口回退朝向卡边；脚本卡改三栏（输入 / 代码 / 输出） | 决策/实现 | [decisions/2026-11-17-port-anchored-connections](decisions/2026-11-17-port-anchored-connections.md) |
 
 ---
 

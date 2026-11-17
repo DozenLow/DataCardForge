@@ -149,7 +149,9 @@ Vega-Lite）在这两类图型上并无更好覆盖，且包体更大、SVG 导�
 - `ui/`
   - `App.tsx` — 根组件：菜单动作、文件摄取、导入导出
   - `workspaceStore.ts` — 卡片状态 + 依赖图 + 关闭规则
-  - `cardMetrics.ts` — 卡片矩形测量（连线端点 = 卡片顶部中心）
+  - `cardMetrics.ts` — 卡片矩形与端口锚点测量（连线端点 = 端口子卡片靠窗口一侧的边中点）
+  - `connectionAnchors.ts` — 一条边的两端解析：端口优先、缺端口回退朝向对方的卡边
+  - `connectionGeometry.ts` — 连线几何：单条三次贝塞尔、侧法向控制点、贴边绕行（纯函数）
   - `ConnectionLayer.tsx` — SVG 卡片级连线层（一条依赖边一条线）
   - `i18n.ts` — 中英词典
   - `fileActions.ts` — 文件选择 / 下载 / 工作区读写
