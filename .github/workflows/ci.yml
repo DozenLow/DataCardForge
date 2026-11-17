@@ -84,6 +84,53 @@ jobs:
       - name: Run cross-tier fixtures + node registry tests
         run: ctest --test-dir backend/build --output-on-failure
 
+  # A change that only compiles on Linux is not a verified change. `build-release.yml` compiles
+  # macOS and Windows on tags only, so the first time the other two platforms see new code is
+  # after the version has been cut — which is how 0.1.4 shipped a `std::filesystem::path` →
+  # `std::string` conversion that does not exist on Windows (path::string_type is wstring).
+  #
+  # These jobs build and stop. The test suite needs a POSIX-provisioned Python runtime
+  # (third_party/ is git-ignored and `scripts/fetch-python-runtime.sh` is bash + a linux wheel);
+  # what was missing here is the compile, and a compile gate is what these two are.
+  windows-compile:
+    runs-on: windows-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install cmake and ninja
+        run: choco install cmake ninja -y
+
+      - name: Install Eigen
+        run: |
+          vcpkg install eigen3:x64-windows
+          $vcpkgRoot = $env:VCPKG_INSTALLATION_ROOT
+          if (-not $vcpkgRoot) { $vcpkgRoot = $env:VCPKG_ROOT }
+          if (-not $vcpkgRoot) { $vcpkgRoot = Split-Path -Parent (Get-Command vcpkg).Source }
+          echo "CMAKE_TOOLCHAIN_FILE=$vcpkgRoot\scripts\buildsystems\vcpkg.cmake" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Configure & build
+        # Same generator, toolchain and build type as build-windows-* in build-release.yml, so a
+        # green gate here predicts a green release build rather than merely "some compiler".
+        run: |
+          cmake -S backend -B backend/build -G "Ninja" -DCMAKE_BUILD_TYPE=Release -DCMAKE_TOOLCHAIN_FILE="${{ env.CMAKE_TOOLCHAIN_FILE }}"
+          cmake --build backend/build --config Release
+
+  macos-compile:
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install dependencies
+        run: brew install cmake ninja eigen@3
+
+      - name: Configure & build
+        run: |
+          cmake -S backend -B backend/build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_PREFIX_PATH="$(brew --prefix eigen@3)"
+          cmake --build backend/build --config Release
+
   e2e-smoke:
     runs-on: ubuntu-24.04
     needs: typecheck-and-test
