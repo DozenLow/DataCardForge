@@ -51,6 +51,7 @@ import {
   type ScriptRunState,
 } from '../workspaceStore.ts';
 import { portVarName } from '../bindings.ts';
+import { scriptTrusted } from '../workspaceTrust.ts';
 import {
   invalidateLayout,
   registerPort,
@@ -113,6 +114,10 @@ interface ScriptLabels {
   /** Red-state band: the backend could not find a Python runtime at all. */
   runtimeMissingTitle: string;
   runtimeMissingHint: string;
+  /** The script came from a workspace file whose user has not confirmed it yet. */
+  trustLocked: string;
+  trustLockedHint: string;
+  trustConfirm: string;
   warnings: Record<'caseTwin' | 'keyword', string>;
   errors: Record<string, string>;
   status: Record<ScriptNameProblem['code'], string>;
@@ -158,6 +163,9 @@ const LABELS: Record<Locale, ScriptLabels> = {
     running: '运行中…',
     envPending: '运行后显示耗时',
     runtimeMissingTitle: '未检测到 Python 运行时',
+    trustLocked: '此脚本来自未信任的工作区',
+    trustLockedHint: '确认前不会运行（自动运行也不会）',
+    trustConfirm: '信任此脚本',
     runtimeMissingHint:
       '后端找不到钉死的 Python 解释器或运行器。请先执行 scripts/fetch-python-runtime.sh 取回运行时，再回来手动运行本卡；卡片其余部分仍可编辑，本次不会自动重试。',
     warnings: {
@@ -170,6 +178,7 @@ const LABELS: Record<Locale, ScriptLabels> = {
       invalidOutput: '输出取值不合法',
       scriptTimeout: '运行超时',
       runtimeMissing: '未找到 Python 运行时',
+      untrusted: '脚本来自未信任的工作区：先确认信任',
       upstreamPending: '上游还没有可读的结果，等一下再运行',
       backendUnavailable: '计算后端不可达',
       internalError: '内部错误',
@@ -229,6 +238,9 @@ const LABELS: Record<Locale, ScriptLabels> = {
     running: 'Running…',
     envPending: 'duration appears after a run',
     runtimeMissingTitle: 'No Python runtime found',
+    trustLocked: 'This script came from an untrusted workspace',
+    trustLockedHint: 'It runs only after you confirm (never automatically)',
+    trustConfirm: 'Trust this script',
     runtimeMissingHint:
       'The backend cannot locate the pinned Python interpreter or the runner. Run scripts/fetch-python-runtime.sh to fetch the runtime, then run this card by hand; the rest of the card stays editable and nothing is retried automatically.',
     warnings: {
@@ -241,6 +253,7 @@ const LABELS: Record<Locale, ScriptLabels> = {
       invalidOutput: 'An output value is not acceptable',
       scriptTimeout: 'The run timed out',
       runtimeMissing: 'No Python runtime found',
+      untrusted: 'The script came from an untrusted workspace: confirm it first',
       upstreamPending: 'The upstream has no readable result yet — try again in a moment',
       backendUnavailable: 'The compute backend is unreachable',
       internalError: 'Internal error',
@@ -776,6 +789,12 @@ export function ScriptCard({
   const addFormulaCard = useWorkspace((state) => state.addFormulaCard);
   const addScriptCard = useWorkspace((state) => state.addScriptCard);
   const setFunctionPanelOpen = useWorkspace((state) => state.setFunctionPanelOpen);
+  const trust = useWorkspace((state) => state.trust);
+  const confirmTrustedScript = useWorkspace((state) => state.confirmTrustedScript);
+  /** A script restored from an untrusted file runs nothing until the user confirms it. */
+  const trusted = scriptTrusted(trust, card.id);
+  const trustedRef = useRef(trusted);
+  trustedRef.current = trusted;
   /**
    * Anchor of the open build menu, in VIEWPORT coordinates.
    *
@@ -927,6 +946,9 @@ export function ScriptCard({
               key: 'Ctrl-Enter',
               mac: 'Cmd-Enter',
               run: () => {
+                // An untrusted script has no shortcut either: the gate is the same one the
+                // buttons sit behind.
+                if (!trustedRef.current) return true;
                 // Ctrl+Enter is the run the user is inspecting with, so it is the DEBUG run:
                 // inspecting must never publish into the graph. Flush the pending text first:
                 // a shortcut is a finished operation, not a pause.
@@ -1154,8 +1176,8 @@ export function ScriptCard({
           <button
             type="button"
             className="script-card__run"
-            title={labels.runTitle}
-            disabled={running}
+            title={trusted ? labels.runTitle : labels.trustLockedHint}
+            disabled={running || !trusted}
             onClick={() => {
               // A click means "the user finished": commit the editor's pending text first so
               // the run operates on exactly what is on screen.
@@ -1168,8 +1190,8 @@ export function ScriptCard({
           <button
             type="button"
             className="script-card__run script-card__run--debug"
-            title={labels.debugTitle}
-            disabled={running}
+            title={trusted ? labels.debugTitle : labels.trustLockedHint}
+            disabled={running || !trusted}
             onClick={() => {
               flushOperations();
               debugScriptCard(card.id);
@@ -1189,6 +1211,33 @@ export function ScriptCard({
             py
           </span>
         </div>
+
+        {/*
+          Locked script: the file it came from is not trusted (yet). The run buttons above are
+          disabled rather than hidden — the card must still show what it would do, and one
+          click here records the confirmation for this file.
+        */}
+        {!trusted ? (
+          <div
+            className="backend-banner script-card__locked"
+            role="alert"
+            data-script-locked={card.id}
+            style={{ flexShrink: 0 }}
+          >
+            <span>
+              <strong className="script-card__locked-title">{labels.trustLocked}</strong>
+              {' — '}
+              <span>{labels.trustLockedHint}</span>
+            </span>
+            <button
+              type="button"
+              className="card__control"
+              onClick={() => confirmTrustedScript(card.id)}
+            >
+              {labels.trustConfirm}
+            </button>
+          </div>
+        ) : null}
 
         {/*
           The red band sits between the run bar and the declaration panels: it must be

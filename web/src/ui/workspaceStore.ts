@@ -73,6 +73,7 @@ import {
   REGRESSION_PORT_Y,
 } from './bindings.ts';
 import { translatorFor, detectLocale, type Locale } from './i18n.ts';
+import { initialTrust, scriptTrusted, type WorkspaceTrust } from './workspaceTrust.ts';
 // Type-only: the store owns *whether* the reference is open, the content module owns what
 // is in it. Importing the type alone keeps the catalogue out of the store's runtime.
 import type { HelpSection } from './formulaHelp.ts';
@@ -858,6 +859,12 @@ async function runScriptCardNow(cardId: number, mode: 'clean' | 'debug'): Promis
   const state = useWorkspace.getState();
   const card = state.cards.find((entry) => entry.id === cardId);
   if (!card || !isScriptCard(card)) return;
+  // Nothing from an unconfirmed file executes, not even through a direct call. The button is
+  // already gated; this is the same rule at the seam that actually spawns the interpreter.
+  if (!scriptTrusted(state.trust, cardId)) {
+    patchScriptRun(cardId, { status: 'idle', mode, code: 'untrusted', elapsedMs: null });
+    return;
+  }
   // One run per card at a time: two overlapping clicks would spawn two interpreters and
   // race their answers into the same panel.
   if (scriptRunsInFlight.has(cardId)) return;
@@ -1102,6 +1109,27 @@ interface WorkspaceState {
    * (see docs/decisions/2026-11-17-port-anchored-connections.md).
    */
   setFunctionPanelOpen: (cardId: number, panel: 'inputs' | 'outputs', open: boolean) => void;
+  /**
+   * Workspace trust (2026-11-17): which scripts of the opened FILE may execute.
+   *
+   * The hash of the file's bytes is the key; the backend owns the record, the client owns the
+   * session's confirmations. `beginWorkspaceTrust` is called once, right after a file is
+   * restored; a workspace with no file stays `hash: null` and every script is the user's own.
+   */
+  trust: WorkspaceTrust;
+  beginWorkspaceTrust: (hash: string, restoredScriptIds: number[]) => void;
+  /**
+   * The workspace was just saved: its new bytes are the user's own file, so every script in
+   * it is trusted under the new hash. Session state follows, so the UI stops asking about a
+   * workspace the user just wrote.
+   */
+  recordSavedWorkspace: (hash: string, scriptIds: number[]) => void;
+  /** Answer the first-run question; a failed persist falls back to session-only. */
+  setTrustPersistence: (persist: boolean) => void;
+  confirmTrustedScript: (cardId: number) => void;
+  /** The bulk action the UI only offers after the user confirmed three scripts by hand. */
+  confirmAllTrustedScripts: () => void;
+  revokeWorkspaceTrust: () => void;
 
   // ── function card behaviour ─────────────────────────────────────────
   /**
@@ -2990,6 +3018,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     matrixIdByIdentity: new Map(),
     selectedId: null,
     dependencies: new DependencyGraph(),
+    // No file yet: nothing to trust, and a session-authored script never waits.
+    trust: initialTrust(),
     blockedCardId: null,
     blockNonce: 0,
     repointOffers: [],
@@ -3724,6 +3754,123 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           };
         }),
       }));
+    },
+
+    // ── workspace trust (2026-11-17) ───────────────────────────────────
+
+    beginWorkspaceTrust(hash, restoredScriptIds) {
+      const epoch = workspaceEpoch;
+      set({ trust: { ...initialTrust(), hash, restoredScriptIds, loading: true } });
+      void (async () => {
+        const status = await backendClient.trustStatus();
+        if (epoch !== workspaceEpoch) return;
+        if (!status) {
+          // An unreachable trust service is NOT permission: stay untrusted and say so.
+          set((state) => ({
+            trust: { ...state.trust, loading: false, error: 'backendUnavailable' },
+          }));
+          return;
+        }
+        const lookup = await backendClient.trustLookup(hash);
+        if (epoch !== workspaceEpoch) return;
+        set((state) => ({
+          trust: {
+            ...state.trust,
+            persistence: status.persistence,
+            location: status.location === '' ? null : status.location,
+            envChanged: status.envChanged,
+            confirmed:
+              lookup && lookup.known
+                ? lookup.scripts.map(Number).filter((id) => Number.isFinite(id))
+                : [],
+            loading: false,
+            error: null,
+          },
+        }));
+      })();
+    },
+
+    recordSavedWorkspace(hash, scriptIds) {
+      const state = get();
+      set({
+        trust: {
+          ...state.trust,
+          hash,
+          restoredScriptIds: scriptIds,
+          confirmed: [...new Set([...state.trust.confirmed, ...scriptIds])],
+        },
+      });
+      // Persist only after the user has decided to keep records; before that the save is
+      // still trusted for this session, it just has nowhere to be written.
+      if (state.trust.persistence === 'persistent' && scriptIds.length > 0) {
+        void backendClient.trustRecord(hash, scriptIds.map(String));
+      }
+    },
+
+    setTrustPersistence(persist) {
+      const epoch = workspaceEpoch;
+      const hash = get().trust.hash;
+      void (async () => {
+        let status = await backendClient.trustDecidePersistence(persist);
+        if (!status && persist) {
+          // Persistence was requested but cannot be provided (read-only install, foreign
+          // environment): fall back to session-only instead of staying undecided, which
+          // would keep every script unconfirmed forever.
+          status = await backendClient.trustDecidePersistence(false);
+        }
+        if (epoch !== workspaceEpoch) return;
+        set((state) => ({
+          trust: {
+            ...state.trust,
+            persistence: status ? status.persistence : 'unavailable',
+            location: status && status.location !== '' ? status.location : null,
+            envChanged: status ? status.envChanged : false,
+            error: status ? null : 'backendUnavailable',
+          },
+        }));
+        if (hash === null) return;
+        const lookup = await backendClient.trustLookup(hash);
+        if (epoch !== workspaceEpoch || !lookup) return;
+        set((state) => ({
+          trust: {
+            ...state.trust,
+            confirmed: lookup.known
+              ? lookup.scripts.map(Number).filter((id) => Number.isFinite(id))
+              : [],
+          },
+        }));
+      })();
+    },
+
+    confirmTrustedScript(cardId) {
+      const state = get();
+      const hash = state.trust.hash;
+      if (hash === null) return;
+      if (state.trust.confirmed.includes(cardId)) return;
+      set({ trust: { ...state.trust, confirmed: [...state.trust.confirmed, cardId] } });
+      void backendClient.trustRecord(hash, [String(cardId)]);
+    },
+
+    confirmAllTrustedScripts() {
+      const state = get();
+      const hash = state.trust.hash;
+      if (hash === null) return;
+      const remaining = state.trust.restoredScriptIds.filter(
+        (id) => !state.trust.confirmed.includes(id),
+      );
+      if (remaining.length === 0) return;
+      set({
+        trust: { ...state.trust, confirmed: [...state.trust.confirmed, ...remaining] },
+      });
+      void backendClient.trustRecord(hash, remaining.map(String));
+    },
+
+    revokeWorkspaceTrust() {
+      const state = get();
+      const hash = state.trust.hash;
+      if (hash === null) return;
+      set({ trust: { ...state.trust, confirmed: [] } });
+      void backendClient.trustRevoke(hash);
     },
 
     // ── function card behaviour ───────────────────────────────────────
@@ -5015,6 +5162,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // A restored script card has no run of its own: the traceback, duration and previews
         // belonged to a node that no longer exists.
         scriptRuns: {},
+        // The caller knows the file's hash (it read the bytes); trust starts empty so a file
+        // can never be treated as trusted by accident while that lookup is in flight.
+        trust: initialTrust(),
         // The stamp travels with the file, verbatim: a legacy file (no block — `migrate`
         // fills the pinned one) or a file from another machine both land here, and the
         // difference from this build's constants is REPORTED by the banner, never repaired.
@@ -5100,6 +5250,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // must never be answered for a card that inherits the same id).
         summaries: {},
         scriptRuns: {},
+        trust: initialTrust(),
         toast: null,
         // A reset returns the app to its initial state, including "no modal open".
         helpOpen: false,

@@ -10,6 +10,7 @@ import { MatrixData } from '../core/MatrixData.ts';
 import { FILE_ACCEPT, loadMatrixFile } from '../loaders/FileLoaderFactory.ts';
 import { migrateWorkspace, WorkspaceFormatError } from './migrate.ts';
 import type { WorkspaceSnapshot } from './types.ts';
+import { hashWorkspaceBytes } from './workspaceTrust.ts';
 
 /** Open the native picker and resolve with the chosen files (empty when cancelled). */
 export function pickFiles(multiple: boolean, accept = FILE_ACCEPT): Promise<File[]> {
@@ -174,8 +175,18 @@ export function downloadText(
  * see docs/decisions/2026-10-26-card-schema-v2.md). Writing is always v2, so a saved file
  * only ever needs one migration pass in a user's lifetime.
  */
-export async function readWorkspace(file: File): Promise<WorkspaceSnapshot> {
-  const text = await file.text();
+export interface LoadedWorkspace {
+  snapshot: WorkspaceSnapshot;
+  /** SHA-256 of the exact bytes parsed — the key the trust record is stored under. */
+  hash: string;
+}
+
+export async function readWorkspace(file: File): Promise<LoadedWorkspace> {
+  // One read for both jobs: the hash must describe the bytes the snapshot was parsed from,
+  // otherwise a file changed on disk mid-open could be blessed under the wrong identity.
+  const bytes = await file.arrayBuffer();
+  const hash = await hashWorkspaceBytes(bytes);
+  const text = new TextDecoder().decode(bytes);
   let parsed: unknown;
   try {
     parsed = JSON.parse(text);
@@ -184,5 +195,5 @@ export async function readWorkspace(file: File): Promise<WorkspaceSnapshot> {
       `Workspace file is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
-  return migrateWorkspace(parsed);
+  return { snapshot: migrateWorkspace(parsed), hash };
 }

@@ -69,6 +69,28 @@ export interface SignatureDto {
   compute?: 'auto' | 'explicit';
 }
 
+export type TrustPersistenceName = 'undecided' | 'persistent' | 'session' | 'unavailable';
+
+/** `GET /api/trust/status` — persistence state, record location and the environment id. */
+export interface TrustStatusDto {
+  ok: boolean;
+  persistence: TrustPersistenceName;
+  location: string;
+  envId: string;
+  envChanged: boolean;
+  entries: number;
+}
+
+/** `GET /api/trust/{hash}` — is this workspace file known, and which scripts were confirmed. */
+export interface TrustLookupDto {
+  ok: boolean;
+  hash: string;
+  known: boolean;
+  envMatch: boolean;
+  scripts: string[];
+  persistence: TrustPersistenceName;
+}
+
 export interface NodeStatusDto {
   nodeId: number;
   state: NodeStateName;
@@ -361,6 +383,64 @@ export class BackendClient {
       return await jsonRequest<NodeStatusDto>(this.base, `/nodes/${nodeId}`);
     } catch {
       return null;
+    }
+  }
+
+  // ── workspace trust (2026-11-17) ──────────────────────────────────────
+  //
+  // The browser hashes the workspace FILE and asks whether that hash is known. The backend
+  // only stores the answer; it never reads the file. Every method resolves to `null`/`false`
+  // on transport failure so the UI can fall back to "untrusted, offer confirmation" instead
+  // of treating an unreachable trust service as permission.
+
+  /** Persistence state and the local environment id. */
+  async trustStatus(): Promise<TrustStatusDto | null> {
+    try {
+      return await jsonRequest<TrustStatusDto>(this.base, '/trust/status');
+    } catch {
+      return null;
+    }
+  }
+
+  /** Answer the first-run question: keep records on disk, or this session only? */
+  async trustDecidePersistence(persist: boolean): Promise<TrustStatusDto | null> {
+    try {
+      return await jsonRequest<TrustStatusDto>(this.base, '/trust/persistence', {
+        method: 'POST',
+        body: JSON.stringify({ persist }),
+      });
+    } catch {
+      return null;
+    }
+  }
+
+  async trustLookup(hash: string): Promise<TrustLookupDto | null> {
+    try {
+      return await jsonRequest<TrustLookupDto>(this.base, `/trust/${hash}`);
+    } catch {
+      return null;
+    }
+  }
+
+  /** Record confirmed script card ids for one workspace hash. */
+  async trustRecord(hash: string, scripts: string[]): Promise<boolean> {
+    try {
+      await jsonRequest(this.base, '/trust', {
+        method: 'POST',
+        body: JSON.stringify({ hash, scripts }),
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async trustRevoke(hash: string): Promise<boolean> {
+    try {
+      await jsonRequest(this.base, `/trust/${hash}`, { method: 'DELETE' });
+      return true;
+    } catch {
+      return false;
     }
   }
 

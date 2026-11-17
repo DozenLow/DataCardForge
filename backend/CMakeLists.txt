@@ -92,7 +92,7 @@ target_link_libraries(dc_core PUBLIC Eigen3::Eigen)
 add_library(dc_static STATIC src/static_files.cpp)
 target_include_directories(dc_static PUBLIC src)
 
-add_executable(dc_backend src/http_server.cpp src/main.cpp src/ui_launch.cpp ${DC_SHA_HEADER})
+add_executable(dc_backend src/http_server.cpp src/main.cpp src/ui_launch.cpp src/trust_store.cpp ${DC_SHA_HEADER})
 target_include_directories(dc_backend PRIVATE ${CMAKE_BINARY_DIR}/generated)
 add_dependencies(dc_backend dc_build_sha)
 target_link_libraries(dc_backend PRIVATE dc_core dc_static Threads::Threads)
@@ -140,7 +140,7 @@ add_test(NAME python_node COMMAND dc_python_node_test)
 # was never created. src/http_server.cpp is compiled in directly (same reason as origin_gate):
 # the endpoint is reached through the real router and the real one-send response writer.
 # SKIP (exit 0) when third_party/pyruntime is not provisioned.
-add_executable(dc_script_check_test tests/script_check_test.cpp src/http_server.cpp ${DC_SHA_HEADER})
+add_executable(dc_script_check_test tests/script_check_test.cpp src/http_server.cpp src/trust_store.cpp ${DC_SHA_HEADER})
 target_include_directories(dc_script_check_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
 add_dependencies(dc_script_check_test dc_build_sha)
 target_link_libraries(dc_script_check_test PRIVATE dc_core dc_static Threads::Threads)
@@ -161,7 +161,7 @@ add_test(NAME script_check COMMAND dc_script_check_test)
 # The node layer is its own binary rather than a shelled-out script because the seams it
 # judges (DCM2 framing on the upload route, params validation of a JSON request, the compute
 # trigger, the result/window encoders) only exist inside the server process.
-add_executable(dc_xlayer_fixture_node_test tests/xlayer_fixture_node_test.cpp src/http_server.cpp ${DC_SHA_HEADER})
+add_executable(dc_xlayer_fixture_node_test tests/xlayer_fixture_node_test.cpp src/http_server.cpp src/trust_store.cpp ${DC_SHA_HEADER})
 target_include_directories(dc_xlayer_fixture_node_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
 add_dependencies(dc_xlayer_fixture_node_test dc_build_sha)
 target_link_libraries(dc_xlayer_fixture_node_test PRIVATE dc_core dc_static Threads::Threads)
@@ -194,6 +194,11 @@ add_test(NAME zero_special_case
   COMMAND bash ${CMAKE_SOURCE_DIR}/../scripts/check-zero-special-case.sh)
 
 # Path rules for the packaged UI: traversal, allow-listed extensions, SPA fallback.
+add_executable(dc_trust_store_test tests/trust_store_test.cpp src/trust_store.cpp)
+target_include_directories(dc_trust_store_test PRIVATE src)
+target_link_libraries(dc_trust_store_test PRIVATE dc_core)
+add_test(NAME trust_store COMMAND dc_trust_store_test)
+
 add_executable(dc_static_test tests/static_path_test.cpp)
 target_link_libraries(dc_static_test PRIVATE dc_static)
 add_test(NAME static_paths COMMAND dc_static_test)
@@ -203,7 +208,7 @@ add_test(NAME static_paths COMMAND dc_static_test)
 # response unchanged (curl and scripts), loopback Origin → echoed, anything else → 403. The
 # test runs the real server on an ephemeral port; src/http_server.cpp is compiled into it
 # directly because the decision lives in the connection loop, not in a header worth faking.
-add_executable(dc_origin_gate_test tests/origin_gate_test.cpp src/http_server.cpp ${DC_SHA_HEADER})
+add_executable(dc_origin_gate_test tests/origin_gate_test.cpp src/http_server.cpp src/trust_store.cpp ${DC_SHA_HEADER})
 target_include_directories(dc_origin_gate_test PRIVATE ${CMAKE_BINARY_DIR}/generated)
 add_dependencies(dc_origin_gate_test dc_build_sha)
 target_link_libraries(dc_origin_gate_test PRIVATE dc_core dc_static Threads::Threads)

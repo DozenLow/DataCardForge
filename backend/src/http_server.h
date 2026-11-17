@@ -11,6 +11,7 @@
 #include "json.h"
 #include "matrix_store.h"
 #include "nodes.h"
+#include "trust_store.h"
 
 namespace dc {
 
@@ -41,8 +42,13 @@ class HttpServer {
   using Handler = std::function<HttpResponse(const HttpRequest&)>;
 
   HttpServer(int port, MatrixStore* store, NodeRegistry* nodes, EventBus* bus,
-             std::string webRoot = std::string())
-      : port_(port), store_(store), nodes_(nodes), bus_(bus), webRoot_(std::move(webRoot)) {}
+             std::string webRoot = std::string(), TrustStore* trust = nullptr)
+      : port_(port),
+        store_(store),
+        nodes_(nodes),
+        bus_(bus),
+        webRoot_(std::move(webRoot)),
+        trust_(trust) {}
 
   // Blocks forever. Returns false with an error string logged if bind fails.
   bool serve();
@@ -61,6 +67,7 @@ class HttpServer {
   NodeRegistry* nodes_;
   EventBus* bus_;
   std::string webRoot_;                 // empty = API only
+  TrustStore* trust_ = nullptr;         // workspace trust records (null = unavailable)
   std::function<void()> onReady_;
 };
 

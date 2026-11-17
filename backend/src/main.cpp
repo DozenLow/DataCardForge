@@ -11,6 +11,7 @@
 #include "matrix_store.h"
 #include "nodes.h"
 #include "static_files.h"
+#include "trust_store.h"
 #include "ui_launch.h"
 
 namespace {
@@ -115,7 +116,10 @@ int main(int argc, char** argv) {
   dc::MatrixStore store;
   dc::EventBus bus;
   dc::NodeRegistry nodes(&store, &bus);
-  dc::HttpServer server(port, &store, &nodes, &bus, webRoot);
+  // Trust records default to the executable's own directory (a packaged release stays
+  // portable); DC_TRUST_DIR overrides it for tests and unusual installs.
+  dc::TrustStore trust(argc > 0 && argv[0] != nullptr ? argv[0] : "");
+  dc::HttpServer server(port, &store, &nodes, &bus, webRoot, &trust);
 
   // ASCII only: an existing console may still be a legacy code page, and a mojibake banner is
   // worse than a plain one.

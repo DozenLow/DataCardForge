@@ -852,6 +852,100 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
                                 {"limits", std::move(limits)}}));
   }
 
+  // ── workspace trust (2026-11-17) ──────────────────────────────────────────────
+  // The browser hashes the workspace FILE because it is the side that holds the bytes; this
+  // store only records which hashes were blessed and which scripts inside were confirmed.
+  // Nothing here executes anything: a record is permission, not a trigger.
+  if (req.path.rfind("/api/trust", 0) == 0) {
+    const std::string rest = req.path.substr(sizeof("/api/trust") - 1);
+    if (trust_ == nullptr) return jsonError(503, "trustUnavailable");
+
+    const auto statusBody = [&]() {
+      const TrustStatus status = trust_->status();
+      return Json::object({{"ok", Json(true)},
+                           {"persistence", Json(status.persistence)},
+                           {"location", Json(status.location)},
+                           {"envId", Json(status.envId)},
+                           {"envChanged", Json(status.envChanged)},
+                           {"entries", Json(static_cast<int64_t>(status.entries))}});
+    };
+    const auto isHash = [](const std::string& text) {
+      if (text.size() != 64) return false;
+      for (const char c : text) {
+        const bool hex = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+        if (!hex) return false;
+      }
+      return true;
+    };
+
+    if (rest.empty() && req.method == "GET") return jsonOk(statusBody());
+    if (rest == "/status" && req.method == "GET") return jsonOk(statusBody());
+    if (rest == "/persistence" && req.method == "POST") {
+      Json parsed;
+      std::string error;
+      if (!Json::parse(req.body, &parsed, &error)) {
+        return jsonError(400, "unexpectedToken", Json::object({{"detail", Json(error)}}));
+      }
+      const Json* persist = parsed.find("persist");
+      if (persist == nullptr || (!persist->isBool() && !persist->isNumber())) {
+        return jsonError(400, "unexpectedToken", Json::object({{"detail", Json("persist")}}));
+      }
+      const bool wanted = persist->isBool() ? persist->asBool() : persist->asNumber() != 0.0;
+      if (!trust_->decidePersistence(wanted)) return jsonError(409, "trustUnavailable");
+      return jsonOk(statusBody());
+    }
+    if (rest.empty() && req.method == "POST") {
+      Json parsed;
+      std::string error;
+      if (!Json::parse(req.body, &parsed, &error)) {
+        return jsonError(400, "unexpectedToken", Json::object({{"detail", Json(error)}}));
+      }
+      const Json* hashJson = parsed.find("hash");
+      if (hashJson == nullptr || !hashJson->isString() || !isHash(hashJson->asString())) {
+        return jsonError(400, "badHash");
+      }
+      // Permission needs a decision first: recording without one would silently mean
+      // "session only", which is exactly the ambiguity the first-run prompt exists to remove.
+      if (trust_->status().persistence == "undecided") {
+        return jsonError(409, "persistenceUndecided");
+      }
+      std::vector<std::string> scripts;
+      const Json* scriptsJson = parsed.find("scripts");
+      if (scriptsJson != nullptr && scriptsJson->isArray()) {
+        for (const Json& script : scriptsJson->items()) {
+          if (script.isString() && !script.asString().empty()) scripts.push_back(script.asString());
+        }
+      }
+      if (!trust_->record(hashJson->asString(), scripts)) return jsonError(409, "trustUnavailable");
+      Json recorded = Json::array();
+      for (const auto& script : scripts) recorded.push(Json(script));
+      return jsonOk(Json::object({{"ok", Json(true)},
+                                  {"hash", Json(hashJson->asString())},
+                                  {"scripts", std::move(recorded)}}));
+    }
+    if (rest.size() > 1) {
+      const std::string hash = rest.substr(1);
+      if (!isHash(hash)) return jsonError(400, "badHash");
+      if (req.method == "GET") {
+        const TrustLookup found = trust_->lookup(hash);
+        Json scripts = Json::array();
+        for (const auto& script : found.scripts) scripts.push(Json(script));
+        return jsonOk(Json::object({{"ok", Json(true)},
+                                    {"hash", Json(hash)},
+                                    {"known", Json(found.known)},
+                                    {"envMatch", Json(found.envMatch)},
+                                    {"scripts", std::move(scripts)},
+                                    {"persistence", Json(trust_->status().persistence)}}));
+      }
+      if (req.method == "DELETE") {
+        return jsonOk(Json::object({{"ok", Json(true)},
+                                    {"hash", Json(hash)},
+                                    {"revoked", Json(trust_->revoke(hash))}}));
+      }
+    }
+    return jsonError(404, "notFound");
+  }
+
   if (req.path == "/api/matrices" && req.method == "POST") {
     Json parsed;
     std::string err;

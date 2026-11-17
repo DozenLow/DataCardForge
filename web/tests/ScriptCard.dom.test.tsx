@@ -27,6 +27,7 @@ import { MatrixData } from '../src/core/MatrixData.ts';
 import { portAnchor } from '../src/ui/cardMetrics.ts';
 import { useWorkspace, emptyScriptRun } from '../src/ui/workspaceStore.ts';
 import { isScriptCard, type FunctionCardModel } from '../src/ui/types.ts';
+import { initialTrust } from '../src/ui/workspaceTrust.ts';
 import {
   ScriptCard,
   localSyntaxDiagnostic,
@@ -63,6 +64,32 @@ const client = vi.hoisted(() => ({
   listNodes: vi.fn(async () => []),
   nodeResult: vi.fn(async () => ({ ok: false })),
   events: vi.fn(async () => []),
+  trustStatus: vi.fn(async () => ({
+    ok: true,
+    persistence: 'persistent',
+    location: '/tmp/trust.json',
+    envId: 'v1-test',
+    envChanged: false,
+    entries: 0,
+  })),
+  trustDecidePersistence: vi.fn(async () => ({
+    ok: true,
+    persistence: 'persistent',
+    location: '/tmp/trust.json',
+    envId: 'v1-test',
+    envChanged: false,
+    entries: 0,
+  })),
+  trustLookup: vi.fn(async () => ({
+    ok: true,
+    hash: '',
+    known: false,
+    envMatch: true,
+    scripts: [],
+    persistence: 'persistent',
+  })),
+  trustRecord: vi.fn(async () => true),
+  trustRevoke: vi.fn(async () => true),
   window: vi.fn(async () => ({
     ok: true,
     rows: 2,
@@ -887,5 +914,57 @@ describe('collapsible declaration columns', () => {
     stubRect(cardRoot(host), { left: 100, top: 100, width: 800, height: 500 });
     stubRect(head, { left: 120, top: 220, width: 150, height: 40 });
     expect(portAnchor(cardId, 'in:0')).toEqual({ x: 120, y: 240, side: 'left' });
+  });
+});
+
+
+// ── workspace trust (2026-11-17) ───────────────────────────────────────────────────────
+//
+// A script restored from an untrusted file is locked: the buttons are disabled and the card
+// says why. The store's run path enforces the same predicate, so no other entry point (a
+// shortcut, a future automatic rerun) can execute it before the confirmation.
+
+describe('workspace trust lock', () => {
+  it('locks a restored script until the user confirms it', async () => {
+    useWorkspace.setState({
+      trust: {
+        ...initialTrust(),
+        hash: 'a'.repeat(64),
+        persistence: 'persistent',
+        restoredScriptIds: [cardId],
+      },
+    });
+    const host = await mount(cardId);
+
+    const locked = host.querySelector('.script-card__locked');
+    expect(locked).not.toBeNull();
+    expect(locked!.textContent).toContain('未信任');
+    expect(host.querySelector<HTMLButtonElement>('.script-card__run')!.disabled).toBe(true);
+
+    await act(async () => {
+      locked!.querySelector<HTMLButtonElement>('button')!.click();
+    });
+    await flush();
+
+    expect(host.querySelector('.script-card__locked')).toBeNull();
+    expect(host.querySelector<HTMLButtonElement>('.script-card__run')!.disabled).toBe(false);
+  });
+
+  it('refuses a run through the store while the script is untrusted', async () => {
+    useWorkspace.setState({
+      trust: {
+        ...initialTrust(),
+        hash: 'a'.repeat(64),
+        persistence: 'persistent',
+        restoredScriptIds: [cardId],
+      },
+    });
+    client.computeNode.mockClear();
+
+    store().runScriptCard(cardId);
+    await flush();
+
+    expect(client.computeNode).not.toHaveBeenCalled();
+    expect(store().scriptRuns[cardId]?.code).toBe('untrusted');
   });
 });

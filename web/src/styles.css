@@ -3216,3 +3216,57 @@ body {
   background: var(--accent-soft);
   border-radius: 3px;
 }
+
+/* ── Workspace trust (2026-11-17) ─────────────────────────────────────── */
+
+/* One banner above the canvas: the first-run question, the untrusted list and the bulk
+   action. It wraps instead of truncating — a trust question is not a status line. */
+.trust-panel {
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 6px 10px;
+  font-size: 11px;
+}
+
+.trust-panel__title {
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.trust-panel__hint {
+  color: var(--text-dim);
+}
+
+.trust-panel__list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.trust-panel__item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+/* Locked script card: the same banner shape, but it must not read as "broken". */
+.script-card__locked {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 8px;
+}
+
+.script-card__locked-title {
+  font-weight: 600;
+}

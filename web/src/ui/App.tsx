@@ -17,12 +17,14 @@ import {
   readWorkspace,
 } from './fileActions.ts';
 import { exportChart } from '../charts/export.ts';
-import { isChartCard, isMatrixCard } from './types.ts';
+import { isChartCard, isMatrixCard, isScriptCard } from './types.ts';
+import { hashWorkspaceBytes } from './workspaceTrust.ts';
 import { useWorkspace } from './workspaceStore.ts';
 import { CardCanvas } from './components/CardCanvas.tsx';
 import { HelpDialog } from './components/HelpDialog.tsx';
 import { MenuBar } from './components/MenuBar.tsx';
 import { StatusBar } from './components/StatusBar.tsx';
+import { TrustPanel } from './components/TrustPanel.tsx';
 import { WorkspaceEnvBanner } from './components/WorkspaceEnvBanner.tsx';
 
 const WORKSPACE_ACCEPT = '.json,application/json';
@@ -189,8 +191,20 @@ export default function App() {
       const snapshot = toSnapshot();
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
       const name = `datacardforge-${stamp}.json`;
-      const bytes = downloadText(name, JSON.stringify(snapshot), 'application/json');
+      const text = JSON.stringify(snapshot);
+      const bytes = downloadText(name, text, 'application/json');
       setStatus(t('status.exported', { name, size: formatBytes(bytes) }));
+      // The save is the user's own action on their own work: the file just written is
+      // trusted by definition, so reopening it does not ask again. The hash is of the exact
+      // UTF-8 bytes the Blob got (the download helper wraps this text verbatim).
+      const scriptIds = snapshot.cards
+        .filter((card) => isScriptCard(card))
+        .map((card) => card.id);
+      if (scriptIds.length > 0) {
+        void hashWorkspaceBytes(new TextEncoder().encode(text).buffer).then((hash) =>
+          useWorkspace.getState().recordSavedWorkspace(hash, scriptIds),
+        );
+      }
     } catch (error) {
       showToast('error', t('status.saveFailed', {
         error: error instanceof Error ? error.message : String(error),
@@ -202,8 +216,14 @@ export default function App() {
     const files = await pickFiles(false, WORKSPACE_ACCEPT);
     if (files.length === 0) return;
     try {
-      const snapshot = await readWorkspace(files[0]);
+      const { snapshot, hash } = await readWorkspace(files[0]);
       loadSnapshot(snapshot);
+      // Trust is asked AFTER the restore: the record is keyed by the file's bytes, and the
+      // script cards that need confirming are the ones the restore just created.
+      const scriptIds = snapshot.cards
+        .filter((card) => isScriptCard(card))
+        .map((card) => card.id);
+      useWorkspace.getState().beginWorkspaceTrust(hash, scriptIds);
       setStatus(t('status.workspace', {
         name: files[0].name,
         cards: snapshot.cards.length,
@@ -354,6 +374,7 @@ export default function App() {
       {/* The workspace's own notices (environment stamp mismatch, "N scripts, none run")
           sit beside the backend banner: same surface, same place, both read-only. */}
       <WorkspaceEnvBanner />
+      <TrustPanel />
       <CardCanvas
         onNewTable={() => void onNewTable()}
         onFilesDropped={(files: File[]) => void ingestFiles(files)}

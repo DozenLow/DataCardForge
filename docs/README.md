@@ -27,7 +27,8 @@
 - 🧭 **项目演进史**（`history.md`）— 把决策/日志/踩坑/审计按因果链串成一条历史：四个时代、四条螺旋线、教训清单与现状
   - [项目演进史（DataCardForge）](history.md) · [EN](history.en.md) ← **先读这篇再进各分册**
 - 📌 **决策记录**（`decisions/`）— 已经拍板、影响后续的方向性结论
-  - [连线端点落在输入/输出小卡片：端口优先、缺端口回退朝向卡边](decisions/2026-11-17-port-anchored-connections.md) ← **最新：脚本卡三栏后，线从端口行的高度进出**
+  - [工作区信任：按文件哈希记录、逐脚本确认、绑定本机环境](decisions/2026-11-17-workspace-trust.md) ← **最新：未确认的脚本不跑，自动运行的前置闸门**
+  - [连线端点落在输入/输出小卡片：端口优先、缺端口回退朝向卡边](decisions/2026-11-17-port-anchored-connections.md) ← 脚本卡三栏后，线从端口行的高度进出
   - [Python 脚本卡：卡是函数、注入是名字绑定、输出先声明](decisions/2026-11-15-python-script-card.md) ← 算法完备性的 O(1) 逃生舱；阶段 1 已合入，K 个输出全部可接线
   - [回归卡改名「关系枚举」——选列变成端口绑定，列头带上 X : Y](decisions/2026-10-31-relation-enum-card.md) ← 卡片能选列了，表格横向滚动对齐也修了
   - [数据卡可以换文件：换数据自动跟随，切文件仍显式重指向](decisions/2026-10-31-file-replacement.md) ← 保存的工作区可以当模板复用
