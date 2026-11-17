@@ -32,6 +32,7 @@ import type { MessageKey } from '../i18n.ts';
 import type { ChartTypeId } from '../../charts/chartTypes.ts';
 import { REGRESSION_SIGNATURE } from '../migrate.ts';
 import { CardShell } from './CardShell.tsx';
+import { SidePanel } from './SidePanel.tsx';
 import {
   ChartTypeItems,
   ContextMenu,
@@ -127,6 +128,10 @@ export function FormulaCard({
 }: FormulaCardProps) {
   const { t } = useTranslator();
   const setBounds = useWorkspace((s) => s.setBounds);
+  const setFunctionPanelOpen = useWorkspace((s) => s.setFunctionPanelOpen);
+  /** Fold state is presentation, persisted with the card (absent = expanded). */
+  const inputsOpen = card.inputsPanelOpen ?? true;
+  const outputsOpen = card.outputsPanelOpen ?? true;
   const setFormula = useWorkspace((s) => s.setFormula);
   const removeFormula = useWorkspace((s) => s.removeFormula);
   // The reference dialog is store-owned: the Help menu opens the same one, and this card
@@ -402,15 +407,90 @@ export function FormulaCard({
       onClose={onClose}
       onCloseBlocked={onCloseBlocked}
       onBounds={(bounds) => setBounds(card.id, bounds)}
+      // Three columns (inputs | expressions+result | outputs) need a floor of their own.
+      minWidth={520}
+      minHeight={360}
     >
       <div className="formula-card">
+              {repoint ? (
+                <div className="formula-card__repoint" role="status">
+                  <p className="formula-card__repoint-title">
+                    {t('formula.repoint.title', { name: repoint.toName })}
+                  </p>
+                  <p className="formula-card__repoint-diff">
+                    {repoint.sameColumns
+                      ? t('formula.repoint.sameColumns', {
+                          n: repoint.toCols,
+                          from: repoint.fromRows,
+                          to: repoint.toRows,
+                        })
+                      : t('formula.repoint.changedColumns', {
+                          added: repoint.addedLabels.join(', ') || '—',
+                          removed: repoint.removedLabels.join(', ') || '—',
+                          from: repoint.fromRows,
+                          to: repoint.toRows,
+                        })}
+                  </p>
+                  <div className="formula-card__repoint-actions">
+                    <button
+                      type="button"
+                      className="card__control formula-card__repoint-primary"
+                      onClick={onApplyRepoint}
+                    >
+                      {repoint.sameColumns
+                        ? t('formula.repoint.apply')
+                        : t('formula.repoint.applyAnyway')}
+                    </button>
+                    <button
+                      type="button"
+                      className="card__control"
+                      onClick={onDismissRepoint}
+                    >
+                      {t('formula.repoint.dismiss')}
+                    </button>
+                    {repointBatch > 1 ? (
+                      <button
+                        type="button"
+                        className="card__control"
+                        onClick={onApplyAllRepoints}
+                      >
+                        {t('formula.repoint.applyAll', { n: repointBatch })}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+
         <div className="formula-card__zones">
           {/* ── zone 1: inputs (the card's dependency list) ── */}
-          <section className="formula-card__inputs" aria-label={t('formula.zoneInputs')}>
-            <div className="formula-card__zone-title">
-              {t('formula.zoneInputs')}
-              <span className={`node-light node-light--${state}`} aria-hidden />
-            </div>
+          <SidePanel
+            side="left"
+            open={inputsOpen}
+            onToggle={(open) => setFunctionPanelOpen(card.id, 'inputs', open)}
+            title={t('formula.zoneInputs')}
+            panelId={`formula-inputs-${card.id}`}
+            className="formula-card__inputs"
+            headExtra={<span className={`node-light node-light--${state}`} aria-hidden />}
+            rail={
+              inputs.length === 0 ? (
+                <span className="side-panel__rail-empty">—</span>
+              ) : (
+                inputs.map((input) => (
+                  <button
+                    type="button"
+                    className="rail-port"
+                    key={input.portId}
+                    // The rail item IS the port element while folded (same id, same side).
+                    ref={portRef(input.portId, 'left')}
+                    title={`${input.portId} · ${input.label}`}
+                    onClick={() => setFunctionPanelOpen(card.id, 'inputs', true)}
+                  >
+                    {input.portId}
+                  </button>
+                ))
+              )
+            }
+          >
             {inputs.length === 0 ? (
               <p className="formula-card__zone-empty">{t('formula.noInput')}</p>
             ) : (
@@ -504,9 +584,9 @@ export function FormulaCard({
                 {columnsHover.tooltip}
               </div>
             ) : null}
-          </section>
+          </SidePanel>
 
-          {/* ── zone 2 + 3: formulas above, outputs below ── */}
+          {/* ── zone 2: expressions above, the result grid below ── */}
           <div className="formula-card__main">
             <section className="formula-card__formulas" aria-label={t('formula.zoneFormulas')}>
               <div className="formula-card__zone-title">
@@ -651,131 +731,8 @@ export function FormulaCard({
               ) : null}
             </section>
 
-            <section className="formula-card__outputs" aria-label={t('formula.zoneOutputs')}>
-              <div className="formula-card__zone-title">
-                <span>{t('formula.zoneOutputs')}</span>
-                <span className="formula-card__zone-tools">
-                  {cols > 0 ? (
-                    <span className="formula-card__output-shape">
-                      {t('formula.outputColumns', { n: cols, rows: totalRows })}
-                    </span>
-                  ) : null}
-                  {expressionShaped ? (
-                    <button
-                      type="button"
-                      className={`card__control formula-card__rename${renaming ? ' is-open' : ''}`}
-                      aria-pressed={renaming}
-                      onClick={() => setRenaming((open) => !open)}
-                    >
-                      {renaming ? t('formula.renameDone') : t('formula.rename')}
-                    </button>
-                  ) : null}
-                </span>
-              </div>
-              {renaming ? (
-                <ul className="formula-card__rename-list">
-                  {(formulas ?? []).map((_formula, index) => (
-                    <li key={index} className="formula-card__rename-item">
-                      <span className="formula-card__rename-index">{index + 1}</span>
-                      <input
-                        type="text"
-                        className="formula-card__rename-input card__control"
-                        value={nameDraft[index] ?? ''}
-                        placeholder={t('formula.renamePlaceholder', { n: index + 1 })}
-                        aria-label={t('formula.renamePlaceholder', { n: index + 1 })}
-                        onChange={(e) =>
-                          setNameDraft((names) =>
-                            names.map((name, i) => (i === index ? e.target.value : name)),
-                          )
-                        }
-                        onBlur={() => commitName(index)}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            e.currentTarget.blur();
-                          }
-                        }}
-                      />
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
-              {repoint ? (
-                <div className="formula-card__repoint" role="status">
-                  <p className="formula-card__repoint-title">
-                    {t('formula.repoint.title', { name: repoint.toName })}
-                  </p>
-                  <p className="formula-card__repoint-diff">
-                    {repoint.sameColumns
-                      ? t('formula.repoint.sameColumns', {
-                          n: repoint.toCols,
-                          from: repoint.fromRows,
-                          to: repoint.toRows,
-                        })
-                      : t('formula.repoint.changedColumns', {
-                          added: repoint.addedLabels.join(', ') || '—',
-                          removed: repoint.removedLabels.join(', ') || '—',
-                          from: repoint.fromRows,
-                          to: repoint.toRows,
-                        })}
-                  </p>
-                  <div className="formula-card__repoint-actions">
-                    <button
-                      type="button"
-                      className="card__control formula-card__repoint-primary"
-                      onClick={onApplyRepoint}
-                    >
-                      {repoint.sameColumns
-                        ? t('formula.repoint.apply')
-                        : t('formula.repoint.applyAnyway')}
-                    </button>
-                    <button
-                      type="button"
-                      className="card__control"
-                      onClick={onDismissRepoint}
-                    >
-                      {t('formula.repoint.dismiss')}
-                    </button>
-                    {repointBatch > 1 ? (
-                      <button
-                        type="button"
-                        className="card__control"
-                        onClick={onApplyAllRepoints}
-                      >
-                        {t('formula.repoint.applyAll', { n: repointBatch })}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
-              ) : null}
-              <ul className="formula-card__output-list">
-                {card.outputs.map((output, index) => (
-                  <li
-                    key={output.outputId}
-                    className="formula-card__output-item"
-                    ref={portRef(output.outputId, 'right')}
-                  >
-                    <span className="formula-card__output-id">
-                      {index === 0 ? t('formula.outputName') : output.outputId}
-                    </span>
-                    <span className="formula-card__output-cols">
-                      {cols > 0
-                        ? t('formula.outputColumns', { n: cols, rows })
-                        : t('formula.outputEmpty')}
-                    </span>
-                    {index === 0 && accuracyHint.kind === 'ok' ? (
-                      <span className="formula-card__accuracy" aria-live="polite">
-                        未检出抖动 · no jitter detected
-                      </span>
-                    ) : null}
-                    {index === 0 && accuracyHint.kind === 'degraded' ? (
-                      <span className="formula-card__accuracy is-degraded" aria-live="polite">
-                        ⚠ 抖动 {accuracyHint.gap.toExponential(0)} — 约剩{' '}
-                        {accuracyHint.digits.toFixed(0)} 位有效数字
-                      </span>
-                    ) : null}
-                  </li>
-                ))}
-              </ul>
+            {/* The result grid: always the middle column, under the expressions. */}
+            <section className="formula-card__result" aria-label={t('formula.zoneOutputs')}>
               {resultMatrix && cols > 0 ? (
                 <div className="formula-card__grid">
                   <VirtualTable
@@ -857,7 +814,106 @@ export function FormulaCard({
                 </div>
               )}
             </section>
+
+
           </div>
+            <SidePanel
+              side="right"
+              open={outputsOpen}
+              onToggle={(open) => setFunctionPanelOpen(card.id, 'outputs', open)}
+              title={t('formula.zoneOutputs')}
+              panelId={`formula-outputs-${card.id}`}
+              className="formula-card__outputs"
+              headExtra={
+                <span className="formula-card__zone-tools">
+                  {cols > 0 ? (
+                    <span className="formula-card__output-shape">
+                      {t('formula.outputColumns', { n: cols, rows: totalRows })}
+                    </span>
+                  ) : null}
+                  {expressionShaped ? (
+                    <button
+                      type="button"
+                      className={`card__control formula-card__rename${renaming ? ' is-open' : ''}`}
+                      aria-pressed={renaming}
+                      onClick={() => setRenaming((open) => !open)}
+                    >
+                      {renaming ? t('formula.renameDone') : t('formula.rename')}
+                    </button>
+                  ) : null}
+                </span>
+              }
+              rail={card.outputs.map((output, index) => (
+                <button
+                  type="button"
+                  className="rail-port"
+                  key={output.outputId}
+                  // The rail item IS the output port while folded (same id, same side).
+                  ref={portRef(output.outputId, 'right')}
+                  title={index === 0 ? t('formula.outputName') : output.outputId}
+                  onClick={() => setFunctionPanelOpen(card.id, 'outputs', true)}
+                >
+                  {index === 0 ? t('formula.outputName') : output.outputId}
+                </button>
+              ))}
+            >
+              {renaming ? (
+                <ul className="formula-card__rename-list">
+                  {(formulas ?? []).map((_formula, index) => (
+                    <li key={index} className="formula-card__rename-item">
+                      <span className="formula-card__rename-index">{index + 1}</span>
+                      <input
+                        type="text"
+                        className="formula-card__rename-input card__control"
+                        value={nameDraft[index] ?? ''}
+                        placeholder={t('formula.renamePlaceholder', { n: index + 1 })}
+                        aria-label={t('formula.renamePlaceholder', { n: index + 1 })}
+                        onChange={(e) =>
+                          setNameDraft((names) =>
+                            names.map((name, i) => (i === index ? e.target.value : name)),
+                          )
+                        }
+                        onBlur={() => commitName(index)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            e.currentTarget.blur();
+                          }
+                        }}
+                      />
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+              <ul className="formula-card__output-list">
+                {card.outputs.map((output, index) => (
+                  <li
+                    key={output.outputId}
+                    className="formula-card__output-item"
+                    ref={portRef(output.outputId, 'right')}
+                  >
+                    <span className="formula-card__output-id">
+                      {index === 0 ? t('formula.outputName') : output.outputId}
+                    </span>
+                    <span className="formula-card__output-cols">
+                      {cols > 0
+                        ? t('formula.outputColumns', { n: cols, rows })
+                        : t('formula.outputEmpty')}
+                    </span>
+                    {index === 0 && accuracyHint.kind === 'ok' ? (
+                      <span className="formula-card__accuracy" aria-live="polite">
+                        未检出抖动 · no jitter detected
+                      </span>
+                    ) : null}
+                    {index === 0 && accuracyHint.kind === 'degraded' ? (
+                      <span className="formula-card__accuracy is-degraded" aria-live="polite">
+                        ⚠ 抖动 {accuracyHint.gap.toExponential(0)} — 约剩{' '}
+                        {accuracyHint.digits.toFixed(0)} 位有效数字
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </SidePanel>
         </div>
 
         {/* Bottom hint bar: the column contract in words, plus the way out of a violation.

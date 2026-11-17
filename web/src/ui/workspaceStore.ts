@@ -4033,7 +4033,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // Roomy on purpose: the three-zone card is the thing users cannot find their way
       // around, and at 520×380 the formula rows, the result grid and the help affordances
       // fought over ~350 px of body. 640×480 also gives the 可用列 rail a second column.
-      const formulaSize = { width: 640, height: 480 };
+      // Three columns need more room than the old two-column card: the result grid must
+      // keep a readable width between the two declaration columns.
+      const formulaSize = { width: 760, height: 520 };
       const formulaSpot = placeOnPlane(
         { x: sourceCard.x + 40, y: sourceCard.y + sourceCard.height + 32 },
         formulaSize,

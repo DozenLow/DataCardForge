@@ -866,10 +866,12 @@ try {
   await page.waitForTimeout(800);
   const zones = await page.evaluate(() => {
     const formulas = document.querySelector('.formula-card__formulas');
-    const outputs = document.querySelector('.formula-card__outputs');
+    // Since 2026-11-17 the grid lives in the middle column's result section; the declaration
+    // columns sit beside it, so the old "outputs" rect is no longer below the expressions.
+    const result = document.querySelector('.formula-card__result');
     const expr = document.querySelector('.formula-card__expr');
     const f = formulas.getBoundingClientRect();
-    const o = outputs.getBoundingClientRect();
+    const o = result.getBoundingClientRect();
     return {
       formulasH: Math.round(f.height),
       overlap: Math.round(f.bottom - o.top),

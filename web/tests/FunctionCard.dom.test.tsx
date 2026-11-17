@@ -18,6 +18,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MatrixData } from '../src/core/MatrixData.ts';
 import { useWorkspace } from '../src/ui/workspaceStore.ts';
+import { portAnchor } from '../src/ui/cardMetrics.ts';
 import type { FunctionCardModel } from '../src/ui/types.ts';
 import { FormulaCard, type ResolvedInput } from '../src/ui/components/FormulaCard.tsx';
 import type { RepointOffer } from '../src/ui/workspaceStore.ts';
@@ -160,6 +161,70 @@ describe('function card zones', () => {
     expect(host.querySelector('.formula-card__inputs')?.textContent).toContain('输入');
     expect(host.querySelector('.formula-card__formulas')?.textContent).toContain('计算公式');
     expect(host.querySelector('.formula-card__outputs')?.textContent).toContain('输出');
+  });
+
+  it('lays the card out in three columns with the result grid in the middle', async () => {
+    const host = await mount(makeCard(), {
+      resultMatrix: matrix(3),
+      inputs: [
+        { portId: 'src', mode: 'matrix', label: 'b.csv', rows: 4, cols: 3, missing: false },
+      ],
+    });
+    const zones = host.querySelector('.formula-card__zones')!;
+    // The side panels carry their card class next to the shared `side-panel` ones.
+    const names = ['formula-card__inputs', 'formula-card__main', 'formula-card__outputs'];
+    const columns = [...zones.children]
+      .map((child) => names.find((name) => child.classList.contains(name)))
+      .filter((name): name is string => name !== undefined);
+    expect(columns).toEqual([
+      'formula-card__inputs',
+      'formula-card__main',
+      'formula-card__outputs',
+    ]);
+    // Expressions above the result grid, both in the middle column.
+    const main = host.querySelector('.formula-card__main')!;
+    expect([...main.children].map((child) => child.className.split(' ')[0])).toEqual([
+      'formula-card__formulas',
+      'formula-card__result',
+    ]);
+    expect(host.querySelector('.formula-card__result .formula-card__grid')).not.toBeNull();
+  });
+
+  it('folds the inputs into a rail that keeps the port registered', async () => {
+    const host = await mount(makeCard({ inputsPanelOpen: false }), {
+      inputs: [
+        { portId: 'src', mode: 'matrix', label: 'b.csv', rows: 4, cols: 3, missing: false },
+      ],
+    });
+    const rail = host.querySelector<HTMLElement>('.formula-card__inputs[data-open="false"]');
+    expect(rail).not.toBeNull();
+    const chip = rail!.querySelector<HTMLElement>('.rail-port');
+    expect(chip).not.toBeNull();
+    expect(chip!.textContent).toBe('src');
+
+    // The folded chip is the endpoint, exactly like the script card's rail.
+    const root = host.querySelector<HTMLElement>('.card--formula')!;
+    const stub = (element: HTMLElement, r: { left: number; top: number; width: number; height: number }) => {
+      element.getBoundingClientRect = () =>
+        ({
+          left: r.left,
+          top: r.top,
+          width: r.width,
+          height: r.height,
+          right: r.left + r.width,
+          bottom: r.top + r.height,
+          x: r.left,
+          y: r.top,
+          toJSON: () => ({}),
+        }) as DOMRect;
+    };
+    stub(root, { left: 100, top: 100, width: 760, height: 520 });
+    stub(chip!, { left: 104, top: 200, width: 26, height: 60 });
+    expect(portAnchor(Number(root.getAttribute('data-card-id')), 'src')).toEqual({
+      x: 104,
+      y: 230,
+      side: 'left',
+    });
   });
 
   it('names the explicit matrix an input reads, with its shape', async () => {

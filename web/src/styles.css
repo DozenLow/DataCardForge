@@ -1260,22 +1260,33 @@ body {
   overflow: hidden;
 }
 
+/*
+ * Three columns, the script card's shape: inputs | expressions + result grid | outputs.
+ * The side columns are collapsible; the middle one is the work area and never folds.
+ */
 .formula-card__zones {
   display: grid;
-  grid-template-columns: minmax(104px, 30%) minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
   flex: 1 1 auto;
   min-height: 0;
 }
 
+/* Width carriers: the SidePanel container keeps these classes in BOTH fold states. */
 .formula-card__inputs {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+  width: 168px;
   min-width: 0;
-  padding: 5px 6px;
-  overflow-y: auto;
   background: var(--surface-alt);
-  border-right: 1px solid var(--border);
+}
+
+.formula-card__outputs {
+  width: 184px;
+  min-width: 0;
+  background: var(--surface-alt);
+}
+
+.formula-card__inputs.side-panel--rail,
+.formula-card__outputs.side-panel--rail {
+  width: 30px;
 }
 
 .formula-card__zone-title {
@@ -1640,15 +1651,13 @@ body {
   color: var(--text-dim);
 }
 
-.formula-card__outputs {
+/* The result grid lives in the middle column, under the expressions. */
+.formula-card__result {
   display: flex;
   flex-direction: column;
-  gap: 3px;
-  /* Basis 0 so the result grid fills only the space the formula zone leaves, instead of
-     pushing it out with its own content height. */
   flex: 1 1 0;
   min-height: 0;
-  padding: 5px 6px 0;
+  padding: 0 6px 6px;
 }
 
 .formula-card__zone-tools {
@@ -1774,6 +1783,7 @@ body {
    motion. `--warn-*` is a third colour family on purpose: accent = "yours", danger =
    "broken", amber = "answer me". */
 .formula-card__repoint {
+  margin: 4px 6px;
   display: flex;
   flex-direction: column;
   gap: 4px;
@@ -1904,7 +1914,6 @@ body {
   flex-direction: column;
   flex: 1 1 auto;
   min-height: 0;
-  margin: 0 -6px;
 }
 
 /* The table keeps the height; the "show more" strip is a footer under it. */
@@ -2829,7 +2838,8 @@ body {
 }
 
 /* A rail chip IS the port element while folded, so it must stay legible (and clickable). */
-.script-card__rail-port {
+.script-card__rail-port,
+.rail-port {
   font: inherit;
   font-family: var(--mono);
   font-size: 11px;
@@ -2847,19 +2857,22 @@ body {
   text-overflow: ellipsis;
 }
 
-.script-card__rail-port:hover {
+.script-card__rail-port:hover,
+.rail-port:hover {
   border-color: var(--accent);
   color: var(--accent);
 }
 
-.script-card__rail-port--output {
+.script-card__rail-port--output,
+.rail-port--output {
   background: var(--surface-alt);
 }
 
 /* Older engines: a readable upright fallback beats a broken rail. */
 @supports not (text-orientation: sideways) {
   .side-panel__rail-title,
-  .script-card__rail-port {
+  .script-card__rail-port,
+  .rail-port {
     text-orientation: mixed;
   }
 }

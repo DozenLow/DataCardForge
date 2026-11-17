@@ -29,6 +29,8 @@ export interface SidePanelProps {
   children: ReactNode;
   /** Collapsed content — for a card with ports, one registered chip per port. */
   rail: ReactNode;
+  /** Extra controls in the head, after the title and before the collapse button. */
+  headExtra?: ReactNode;
 }
 
 export function SidePanel({
@@ -41,6 +43,7 @@ export function SidePanel({
   onScroll,
   children,
   rail,
+  headExtra,
 }: SidePanelProps) {
   const bodyId = `${panelId}-body`;
   const classes = [
@@ -88,6 +91,7 @@ export function SidePanel({
     >
       <div className="side-panel__head">
         <span className="side-panel__title">{title}</span>
+        {headExtra}
         <button
           type="button"
           className="side-panel__collapse card__control"
