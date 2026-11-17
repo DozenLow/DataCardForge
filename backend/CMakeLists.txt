@@ -173,14 +173,20 @@ add_test(NAME xlayer_fixture_node COMMAND dc_xlayer_fixture_node_test)
 # The runner layer of the same fixtures: no server, no registry — just the interpreter the
 # script card spawns, replaying each case's --in directory and comparing its output files
 # with expected/ byte for byte. Same SKIP rule as py_runner below: no runtime, no run.
+#
+# `cmake -P` rather than `bash -c`: the test surface must not require a POSIX shell, and on
+# a Windows runner `bash` is the WSL launcher more often than a shell (see
+# tests/run_py_suite.cmake).
 add_test(NAME py_fixtures
-  COMMAND bash -c "cd '${CMAKE_SOURCE_DIR}/..' && if [ -x third_party/pyruntime/bin/python3 ]; then PYTHONPATH=\"$PWD/third_party/pylib:$PWD/backend/runner\" third_party/pyruntime/bin/python3 backend/tests/py/test_fixtures.py; else echo 'SKIP: py_fixtures (no third_party/pyruntime; run scripts/fetch-python-runtime.sh)'; fi")
+  COMMAND ${CMAKE_COMMAND} -DSUITE=test_fixtures.py
+          -P ${CMAKE_SOURCE_DIR}/tests/run_py_suite.cmake)
 
 # The runner's own 37-case suite (backend/tests/py/test_runner.py), registered so CI runs the
 # Python half of the data channel too — it is the only oracle for the frame codec on that
 # side. Same SKIP rule as above: no runtime, no run, no failure.
 add_test(NAME py_runner
-  COMMAND bash -c "cd '${CMAKE_SOURCE_DIR}/..' && if [ -x third_party/pyruntime/bin/python3 ]; then PYTHONPATH=\"$PWD/third_party/pylib:$PWD/backend/runner\" third_party/pyruntime/bin/python3 backend/tests/py/test_runner.py; else echo 'SKIP: py_runner (no third_party/pyruntime; run scripts/fetch-python-runtime.sh)'; fi")
+  COMMAND ${CMAKE_COMMAND} -DSUITE=test_runner.py
+          -P ${CMAKE_SOURCE_DIR}/tests/run_py_suite.cmake)
 
 # Zero-special-case gate (scripts/check-zero-special-case.sh): the script card is one
 # ordinary function card, so the generic web infrastructure (bindings, dependency graph,
@@ -190,8 +196,18 @@ add_test(NAME py_runner
 # here rather than in the web job because CI's test surface is ctest + vitest, and this is a
 # cross-file invariant, not a front-end unit test. The script also self-tests its scanner
 # against synthetic files first, so "clean" can be told apart from "the scanner broke".
-add_test(NAME zero_special_case
-  COMMAND bash ${CMAKE_SOURCE_DIR}/../scripts/check-zero-special-case.sh)
+#
+# The gate is a bash script (grep + synthetic fixtures), so it is POSIX-only. On Windows the
+# test is still registered and prints SKIP: letting `bash` resolve to the WSL launcher would
+# fail with "no installed distributions", a red that says nothing about the code.
+if(UNIX)
+  add_test(NAME zero_special_case
+    COMMAND bash ${CMAKE_SOURCE_DIR}/../scripts/check-zero-special-case.sh)
+else()
+  add_test(NAME zero_special_case
+    COMMAND ${CMAKE_COMMAND} -E echo
+            "SKIP: zero_special_case (POSIX-shell gate; run scripts/check-zero-special-case.sh on Linux/macOS)")
+endif()
 
 # Path rules for the packaged UI: traversal, allow-listed extensions, SPA fallback.
 add_executable(dc_trust_store_test tests/trust_store_test.cpp src/trust_store.cpp)

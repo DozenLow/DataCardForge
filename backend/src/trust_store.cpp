@@ -124,20 +124,24 @@ std::string resolveDir(const std::string& canonicalExe) {
   if (!canonicalExe.empty()) {
     candidates.push_back(std::filesystem::path(canonicalExe).parent_path().string());
   }
+// `path` deliberately never converts to `std::string` implicitly: on Windows its native
+// string type is `wstring`, so `.string()` is the only spelling that compiles on all three
+// platforms (and the one that decides the encoding).
 #if defined(_WIN32)
   if (const char* appdata = std::getenv("APPDATA"); appdata != nullptr) {
-    candidates.emplace_back(std::filesystem::path(appdata) / "DataCardForge");
+    candidates.emplace_back((std::filesystem::path(appdata) / "DataCardForge").string());
   }
 #elif defined(__APPLE__)
   if (const char* home = std::getenv("HOME"); home != nullptr) {
-    candidates.emplace_back(std::filesystem::path(home) / "Library" / "Application Support" /
-                            "DataCardForge");
+    candidates.emplace_back((std::filesystem::path(home) / "Library" / "Application Support" /
+                             "DataCardForge")
+                                .string());
   }
 #else
   if (const char* xdg = std::getenv("XDG_CONFIG_HOME"); xdg != nullptr && xdg[0] != '\0') {
-    candidates.emplace_back(std::filesystem::path(xdg) / "datacardforge");
+    candidates.emplace_back((std::filesystem::path(xdg) / "datacardforge").string());
   } else if (const char* home = std::getenv("HOME"); home != nullptr) {
-    candidates.emplace_back(std::filesystem::path(home) / ".config" / "datacardforge");
+    candidates.emplace_back((std::filesystem::path(home) / ".config" / "datacardforge").string());
   }
 #endif
   for (const auto& candidate : candidates) {

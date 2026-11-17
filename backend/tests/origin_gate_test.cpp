@@ -271,7 +271,11 @@ int main() {
     return 1;
   }
 #else
+  // SIGPIPE exists on POSIX only: on Windows a peer closing early surfaces as a failed
+  // send()/recv(), which the CHECK already catches.
+#ifdef SIGPIPE
   std::signal(SIGPIPE, SIG_IGN);  // a peer closing early must fail the CHECK, not the process
+#endif
 #endif
   const int port = pickEphemeralPort();
   if (port == 0) {

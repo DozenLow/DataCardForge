@@ -921,7 +921,10 @@ int main() {
     return 1;
   }
 #else
+  // POSIX-only: on Windows the closed peer shows up as a failed send()/recv() instead.
+#ifdef SIGPIPE
   std::signal(SIGPIPE, SIG_IGN);  // a peer closing early must fail a CHECK, not the process
+#endif
 #endif
 
   // Before anything that can SKIP: the comparison rule itself is verified here, so a
