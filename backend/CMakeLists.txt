@@ -233,6 +233,32 @@ if(WIN32)
 endif()
 add_test(NAME origin_gate COMMAND dc_origin_gate_test)
 
+# /api/trust route contract (tests/trust_route_test.cpp): trust_store_test covers the record,
+# the panel test covers the UI against a mock — neither executes this route. Status codes, the
+# "decide before recording" rule, bad-hash shape, verb allow-list, the Origin gate on a write,
+# a corrupt record (trust nothing) and a store-less backend (503) are all decided in route().
+add_executable(dc_trust_route_test tests/trust_route_test.cpp src/http_server.cpp src/trust_store.cpp ${DC_SHA_HEADER})
+target_include_directories(dc_trust_route_test PRIVATE ${CMAKE_BINARY_DIR}/generated tests)
+add_dependencies(dc_trust_route_test dc_build_sha)
+target_link_libraries(dc_trust_route_test PRIVATE dc_core dc_static Threads::Threads)
+if(WIN32)
+  target_link_libraries(dc_trust_route_test PRIVATE ws2_32)
+endif()
+add_test(NAME trust_route COMMAND dc_trust_route_test)
+
+# Event stream contract (tests/events_stream_test.cpp): the log the front end keys automatic
+# runs on. Ordering (computing → done | error), the monotonic `since` cursor, and the dedupe
+# that stops a repeated upstream change from re-announcing an already-dirty card — the source
+# of the auto-run feedback loop — plus the HTTP route that exposes it.
+add_executable(dc_events_stream_test tests/events_stream_test.cpp src/http_server.cpp src/trust_store.cpp ${DC_SHA_HEADER})
+target_include_directories(dc_events_stream_test PRIVATE ${CMAKE_BINARY_DIR}/generated tests)
+add_dependencies(dc_events_stream_test dc_build_sha)
+target_link_libraries(dc_events_stream_test PRIVATE dc_core dc_static Threads::Threads)
+if(WIN32)
+  target_link_libraries(dc_events_stream_test PRIVATE ws2_32)
+endif()
+add_test(NAME events_stream COMMAND dc_events_stream_test)
+
 # The console/browser launch rule (ui_launch.h). Header-only decision, so no platform code is
 # involved: this is the half of "double-click opens nothing" that a Linux CI can actually judge.
 # What it protects: the old rule required `isatty(stdout)`, and a launcher-started process has
