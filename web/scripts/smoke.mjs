@@ -10,9 +10,10 @@
  *   4. right-clicking a column header offers "draw line chart"
  *   5. the chart card renders an SVG (the vector-export capability)
  *   6. one card-level connection line appears between the table and the chart, colours
- *      the active card (red = source table, blue = target chart), runs centre to centre
- *      with the arrow on the target frame, flows as a dashed line that survives a zoom,
- *      ignores table scrolling, and the chart's left column dock adds/removes columns
+ *      the active card (red = source table, blue = target chart), runs port edge to port
+ *      edge (card edge when a card renders no port) with the arrow on the target frame,
+ *      flows as a dashed line that survives a zoom, ignores table scrolling, and the
+ *      chart's left column dock adds/removes columns
  *   7. closing a depended-on table is refused, then allowed after the chart closes
  *   8. a multi-file card exposes a selector and switching updates dependents
  *   9. the UI switches language at runtime
@@ -83,6 +84,26 @@ async function dropFilesOnCanvas(page, absolutePaths) {
     canvas.dispatchEvent(new DragEvent('dragover', base));
     canvas.dispatchEvent(new DragEvent('drop', base));
   }, payload);
+}
+
+/**
+ * Pick 「Draw chart ▸ Line」 from the already-open column-header context menu.
+ *
+ * Since 2026-11-16 the nine chart types live one level down: the first level also builds
+ * formula/script cards, so the chart entry opens a submenu (on hover or click) instead of
+ * building a chart itself.
+ */
+async function pickLineChartFromContextMenu(page) {
+  await page
+    .locator('.context-menu__item')
+    .filter({ hasText: /Draw chart|绘制图表/ })
+    .first()
+    .hover();
+  await page
+    .locator('.context-menu__item')
+    .filter({ hasText: /^Line$|^折线图$/ })
+    .first()
+    .click();
 }
 
 const browser = await chromium.launch();
@@ -187,7 +208,7 @@ try {
   const menuText = await page.locator('.context-menu').innerText();
   check('context menu offers a line chart for that column', /Pos\.3/.test(menuText), menuText);
 
-  await page.locator('.context-menu').click();
+  await pickLineChartFromContextMenu(page);
   await page.waitForSelector('.card--chart', { timeout: 15_000 });
   check('chart card is created', (await page.locator('.card--chart').count()) === 1);
 
@@ -235,10 +256,12 @@ try {
     .getAttribute('stroke');
   check('active table highlights the line in red', redStroke === 'rgb(200, 50, 50)', String(redStroke));
 
-  // ── 6a. centre-to-centre wire, frame-parked arrow, flowing dashes (2026-10-29) ──
-  // Since 2026-10-29 both endpoints are the card *centres* (the mask hides the part inside
-  // each card), the arrowhead parks on the target frame, and the selected wires are
-  // flowing dashes: red draws long, blue draws short, so colour is not the only cue.
+  // ── 6a. port/frame wire, frame-parked arrow, flowing dashes (2026-11-17) ──
+  // Since 2026-11-17 both endpoints are the port sub-cards an edge is bound to, or the
+  // facing card edge when a card renders no port (the mask hides the part inside each
+  // card). These two cards render no port, so the wire runs from the table's right edge to
+  // the chart's left edge. The arrowhead parks on the target frame, and the selected wires
+  // are flowing dashes: red draws long, blue draws short, so colour is not the only cue.
   const geometry = await page.evaluate(() => {
     const svg = document.querySelector('.connection-layer');
     const transform = svg.querySelector('g').getAttribute('transform');
@@ -247,9 +270,13 @@ try {
     const box = svg.getBoundingClientRect();
     // Plane point -> screen point, the same conversion the world layer performs.
     const toScreen = (x, y) => ({ x: box.left + x * scale - tx, y: box.top + y * scale - ty });
-    const centre = (el) => {
+    /** Frame edge the fallback anchor uses, in screen px: (right|left, own centre y). */
+    const frameAnchor = (el, side) => {
       const r = el.getBoundingClientRect();
-      return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      return {
+        x: side === 'right' ? r.right : r.left,
+        y: r.top + r.height / 2,
+      };
     };
     const nums = (d) => (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
 
@@ -263,8 +290,8 @@ try {
     return {
       start: toScreen(wireNumbers[0], wireNumbers[1]),
       end: toScreen(wireNumbers[6], wireNumbers[7]),
-      tableCentre: centre(document.querySelector('.card--matrix')),
-      chartCentre: centre(chart),
+      tableRight: frameAnchor(document.querySelector('.card--matrix'), 'right'),
+      chartLeft: frameAnchor(chart, 'left'),
       tip: arrowNumbers.length ? toScreen(arrowNumbers[0], arrowNumbers[1]) : null,
       chartFrame: { left: chartRect.left, top: chartRect.top, right: chartRect.right, bottom: chartRect.bottom },
       dash: wire.getAttribute('stroke-dasharray'),
@@ -276,16 +303,16 @@ try {
 
   const near = (a, b) => Math.abs(a - b) <= 2;
   check(
-    'the wire runs from the table centre to the chart centre',
-    near(geometry.start.x, geometry.tableCentre.x) &&
-      near(geometry.start.y, geometry.tableCentre.y) &&
-      near(geometry.end.x, geometry.chartCentre.x) &&
-      near(geometry.end.y, geometry.chartCentre.y),
+    'the wire runs from the table frame to the chart frame (neither renders a port)',
+    near(geometry.start.x, geometry.tableRight.x) &&
+      near(geometry.start.y, geometry.tableRight.y) &&
+      near(geometry.end.x, geometry.chartLeft.x) &&
+      near(geometry.end.y, geometry.chartLeft.y),
     JSON.stringify({
       start: geometry.start,
-      table: geometry.tableCentre,
+      tableRight: geometry.tableRight,
       end: geometry.end,
-      chart: geometry.chartCentre,
+      chartLeft: geometry.chartLeft,
     }),
   );
 
@@ -349,8 +376,9 @@ try {
   await page.waitForTimeout(300);
 
   // ── 6b. the line is card-level: table scrolling must NOT move it ──
-  // Both endpoints are the card centres. The line used to be glued to a column header,
-  // so scrolling the table moved it — that coupling is exactly what this guards against.
+  // Both endpoints are card/port anchors now, and neither is derived from the table's own
+  // scroll viewport. The line used to be glued to a column header, so scrolling the table
+  // moved it — that coupling is exactly what this guards against.
   const lineStartBefore = await page
     .locator('.connection-layer .connection--fg path')
     .first()
@@ -475,7 +503,7 @@ try {
   // Chart column 0 of file 1, then switch to file 2 and confirm the line follows.
   await page.locator('.vtable__colhead').first().click({ button: 'right' });
   await page.waitForSelector('.context-menu', { timeout: 5_000 });
-  await page.locator('.context-menu').click();
+  await pickLineChartFromContextMenu(page);
   await page.waitForSelector('.card--chart svg', { timeout: 25_000 });
 
   const firstY = await readFirstSeriesPoint(page);
@@ -864,11 +892,7 @@ try {
   const chartCountBefore = await page.locator('.card--chart').count();
   await page.locator('.card--formula .vtable__colhead').first().click({ button: 'right' });
   await page.waitForSelector('.context-menu', { timeout: 5_000 });
-  await page
-    .locator('.context-menu__item')
-    .filter({ hasText: /^Line$|^折线图$/ })
-    .first()
-    .click();
+  await pickLineChartFromContextMenu(page);
   await page.waitForTimeout(800);
   check(
     'a chart is created from the function card result',
@@ -938,11 +962,7 @@ try {
 
   await page.locator('.card--formula .vtable__colhead').first().click({ button: 'right' });
   await page.waitForSelector('.context-menu', { timeout: 5_000 });
-  await page
-    .locator('.context-menu__item')
-    .filter({ hasText: /^Line$|^折线图$/ })
-    .first()
-    .click();
+  await pickLineChartFromContextMenu(page);
   await page.waitForSelector('.card--chart svg', { timeout: 25_000 });
   await page.waitForTimeout(1_000);
 
@@ -1123,6 +1143,98 @@ try {
       summaryLines[1].startsWith('n,') &&
       summaryLines[12].startsWith('sem,'),
     `lines=${summaryLines.length} header=${summaryLines[0] ?? ''}`,
+  );
+
+  // ── 12c. python card: three columns, wires anchored on the port rows (2026-11-17) ──
+  // The script card's body is one row of three columns (inputs | editor | outputs), each
+  // row is a small card, and the connection layer anchors on the row HEAD's window-side
+  // edge: a wire enters an input at its LEFT edge, at that row's height.
+  await page.locator('.card--matrix').first().locator('.vtable__colhead').first().click({ button: 'right' });
+  await page
+    .locator('.context-menu__item')
+    .filter({ hasText: /New Script Card|新建脚本卡/ })
+    .first()
+    .click();
+  await page.waitForSelector('.card--script', { timeout: 20_000 });
+  await page.waitForTimeout(500);
+
+  const scriptLayout = await page.evaluate(() => {
+    const body = document.querySelector('.script-card__body');
+    const panels = [...document.querySelectorAll('.script-card__panel')];
+    const editor = document.querySelector('.script-card__editor');
+    return {
+      columns: body ? getComputedStyle(body).gridTemplateColumns : '',
+      panels: panels.length,
+      editorBetween:
+        panels.length === 2 && editor
+          ? Boolean(panels[0].compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING)
+          : false,
+      heads: document.querySelectorAll('.script-card__row-head').length,
+      rows: document.querySelectorAll('.script-card__row').length,
+    };
+  });
+  check(
+    'python card body is three columns',
+    scriptLayout.columns.trim().split(/\s+/).length === 3,
+    scriptLayout.columns,
+  );
+  check(
+    'python card keeps two declaration panels with the editor between them',
+    scriptLayout.panels === 2 && scriptLayout.editorBetween,
+    `${scriptLayout.panels} panels`,
+  );
+  check(
+    'every python-card row exposes a connection head',
+    scriptLayout.rows > 0 && scriptLayout.heads === scriptLayout.rows,
+    `${scriptLayout.heads}/${scriptLayout.rows}`,
+  );
+
+  const portGeometry = await page.evaluate(() => {
+    const svg = document.querySelector('.connection-layer');
+    const transform = svg.querySelector('g').getAttribute('transform');
+    const m = transform.match(/translate\(([-\d.]+), ([-\d.]+)\) scale\(([-\d.]+)\)/);
+    const [tx, ty, zoom] = [Number(m[1]), Number(m[2]), Number(m[3])];
+    const box = svg.getBoundingClientRect();
+    // The layer's group is `translate(-view.x, -view.y) scale(zoom)`, so a screen point
+    // maps back with MINUS the captured translate (the 6a helper does the forward form).
+    const toPlane = (x, y) => ({ x: (x - box.left - tx) / zoom, y: (y - box.top - ty) / zoom });
+    const rectPlane = (el) => {
+      const r = el.getBoundingClientRect();
+      const topLeft = toPlane(r.left, r.top);
+      const bottomRight = toPlane(r.right, r.bottom);
+      return {
+        left: topLeft.x,
+        top: topLeft.y,
+        right: bottomRight.x,
+        bottom: bottomRight.y,
+        midY: (topLeft.y + bottomRight.y) / 2,
+      };
+    };
+    const frame = rectPlane(document.querySelector('.card--script'));
+    const head = rectPlane(
+      document.querySelector('.script-card__panel--inputs .script-card__row-head'),
+    );
+    const nums = (d) => (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+    const ends = [];
+    for (const wire of document.querySelectorAll('.connection__wire')) {
+      const values = nums(wire.getAttribute('d'));
+      // A detoured route is a chain of cubics, so the endpoint is the LAST coordinate
+      // pair, not the 4th (values[6..7] is the first segment's second control point).
+      const end = { x: values[values.length - 2], y: values[values.length - 1] };
+      ends.push(end);
+      // The wire that belongs to the python card is the one whose end sits on the input
+      // row head's LEFT edge, at that row's height (the mask makes it visible from the
+      // card frame, but the geometry endpoint is the port sub-card's edge).
+      if (Math.abs(end.x - head.left) <= 2 && Math.abs(end.y - head.midY) <= 2) {
+        return { frame, head, end };
+      }
+    }
+    return { frame, head, end: null, wireEnds: ends };
+  });
+  check(
+    "the python card's wire ends on its input row's left edge, at the row height",
+    portGeometry.end !== null,
+    JSON.stringify(portGeometry),
   );
 
   // ── 13. no runtime errors ───────────────────────────────────────────
