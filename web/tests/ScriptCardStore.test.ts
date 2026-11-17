@@ -897,6 +897,59 @@ describe('automatic rerun', () => {
     expect(scriptCardOf(cardId).node?.state).toBe('error');
   });
 
+  it('does not lose a change that lands while the card is computing', async () => {
+    // The reported symptom: a heavy script (hundreds of ms) is running while the user swaps
+    // the input file; the backend finishes the old run, the node reads `done`, and a retrigger
+    // gated on `dirty` would silently drop the swap.
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    await armCard(cardId);
+    client.computeNode.mockClear();
+
+    let finishFirst!: (value: {
+      ok: boolean;
+      nodeId: number;
+      state: 'done';
+      resultMatrixIds: number[];
+    }) => void;
+    const hanging = new Promise<{
+      ok: boolean;
+      nodeId: number;
+      state: 'done';
+      resultMatrixIds: number[];
+    }>((resolve) => {
+      finishFirst = resolve;
+    });
+    client.computeNode.mockReturnValueOnce(hanging);
+
+    // First change starts a run that stays in flight…
+    store().applyNodeEvent({
+      seq: 61,
+      nodeId: nodeOf(cardId),
+      state: 'dirty',
+      reason: 'upstreamChanged',
+    });
+    await flush();
+    expect(client.computeNode).toHaveBeenCalledTimes(1);
+
+    // …second change lands while it is still computing.
+    store().applyNodeEvent({
+      seq: 62,
+      nodeId: nodeOf(cardId),
+      state: 'dirty',
+      reason: 'upstreamChanged',
+    });
+    await flush();
+    expect(client.computeNode).toHaveBeenCalledTimes(1);
+
+    // The first run completes after the second change arrived: it must rerun once more.
+    finishFirst({ ok: true, nodeId: nodeOf(cardId), state: 'done', resultMatrixIds: [111] });
+    await flush();
+    await flush();
+    await flush();
+    expect(client.computeNode).toHaveBeenCalledTimes(2);
+  });
+
   it('keeps the arm through a save file and reruns after reopening', async () => {
     const source = await loadSource('a.csv', [[1], [2]]);
     const cardId = await makeScriptCard([source]);

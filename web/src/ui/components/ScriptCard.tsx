@@ -1061,9 +1061,20 @@ export function ScriptCard({
     numpyVersion === ''
       ? `python ${workspaceEnv.python}`
       : `python ${workspaceEnv.python} · numpy ${numpyVersion}`;
+  // When the numbers were made, not just how long they took: after swapping an input file
+  // the first question is "did this card compute again?", and an elapsed time alone cannot
+  // answer it.
+  const computedClock =
+    run?.computedAt !== null && run?.computedAt !== undefined
+      ? new Date(run.computedAt).toLocaleTimeString(undefined, {
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        })
+      : null;
   const env =
     run?.elapsedMs !== null && run?.elapsedMs !== undefined
-      ? `${stamp} · ${run.elapsedMs} ms`
+      ? `${stamp} · ${run.elapsedMs} ms${computedClock ? ` · ${computedClock}` : ''}`
       : stamp;
   /**
    * The backend reached the compute path and found no usable interpreter

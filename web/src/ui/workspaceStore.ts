@@ -1004,7 +1004,7 @@ async function runScriptCardNow(cardId: number, mode: 'clean' | 'debug'): Promis
  * and once it fired the graph must advance immediately — an automatic rerun must not add a
  * second wait of its own.
  */
-function maybeAutoRunScript(cardId: number): void {
+function maybeAutoRunScript(cardId: number, retrigger = false): void {
   const state = useWorkspace.getState();
   const card = state.cards.find((entry) => entry.id === cardId);
   if (!card || !isScriptCard(card)) return;
@@ -1018,14 +1018,21 @@ function maybeAutoRunScript(cardId: number): void {
   const previous = state.scriptRuns[cardId];
   if (previous && previous.code === 'runtimeMissing') return;
   if (scriptRunsInFlight.has(cardId)) {
-    // A run already carries the newest definition; remember that another change landed so
-    // completion re-checks the node instead of silently dropping it.
+    // A run is already under way; remember that another change landed so completion runs
+    // again instead of silently dropping it.
     autoRunQueued.add(cardId);
     return;
   }
-  if (!card.node || card.node.state !== 'dirty') return;
+  if (!card.node) return;
+  // A normal trigger only fires on a dirty node. A RETRIGGER is different: a change arrived
+  // while the previous run was computing, and that run ends by writing `done` — the node is
+  // no longer dirty even though the change may postdate the numbers it computed (a heavy
+  // script is exactly when a user swaps the input). Gating the retrigger on `dirty` would
+  // silently lose the swap, so it runs once regardless; the queued flag is cleared, so this
+  // cannot loop.
+  if (!retrigger && card.node.state !== 'dirty') return;
   void runScriptCardNow(cardId, 'clean').finally(() => {
-    if (autoRunQueued.delete(cardId)) maybeAutoRunScript(cardId);
+    if (autoRunQueued.delete(cardId)) maybeAutoRunScript(cardId, true);
   });
 }
 
