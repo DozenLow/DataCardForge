@@ -265,6 +265,15 @@ export interface FunctionCardModel extends CardBase {
    */
   inputsPanelOpen?: boolean;
   outputsPanelOpen?: boolean;
+  /**
+   * Automatic rerun after a first successful clean run (2026-11-17).
+   *
+   * Tri-state on purpose: `undefined` = never armed (the first run is always manual),
+   * `true` = armed (behaves like a formula card: recomputes whenever its definition or its
+   * inputs change, and on reopen), `false` = the user switched it off explicitly — a later
+   * manual run must NOT silently re-arm it. Persisted with the card; never in `params`.
+   */
+  autoRun?: boolean;
   /** The single backend compute node; null while registration is pending/offline. */
   node: NodeStatus | null;
   /**

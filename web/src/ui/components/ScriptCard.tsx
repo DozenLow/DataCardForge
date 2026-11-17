@@ -114,6 +114,10 @@ interface ScriptLabels {
   /** Red-state band: the backend could not find a Python runtime at all. */
   runtimeMissingTitle: string;
   runtimeMissingHint: string;
+  /** Auto-rerun toggle (tri-state: hidden until the first clean run arms the card). */
+  autoOn: string;
+  autoOff: string;
+  autoHint: string;
   /** The script came from a workspace file whose user has not confirmed it yet. */
   trustLocked: string;
   trustLockedHint: string;
@@ -163,6 +167,9 @@ const LABELS: Record<Locale, ScriptLabels> = {
     running: '运行中…',
     envPending: '运行后显示耗时',
     runtimeMissingTitle: '未检测到 Python 运行时',
+    autoOn: '自动 ●',
+    autoOff: '自动 ○',
+    autoHint: '首次成功运行后，输入或定义变化时自动重跑；关闭后只在你点击时运行',
     trustLocked: '此脚本来自未信任的工作区',
     trustLockedHint: '确认前不会运行（自动运行也不会）',
     trustConfirm: '信任此脚本',
@@ -238,6 +245,10 @@ const LABELS: Record<Locale, ScriptLabels> = {
     running: 'Running…',
     envPending: 'duration appears after a run',
     runtimeMissingTitle: 'No Python runtime found',
+    autoOn: 'Auto ●',
+    autoOff: 'Auto ○',
+    autoHint:
+      'After the first successful run, rerun whenever the inputs or the definition change; off means manual only',
     trustLocked: 'This script came from an untrusted workspace',
     trustLockedHint: 'It runs only after you confirm (never automatically)',
     trustConfirm: 'Trust this script',
@@ -789,6 +800,7 @@ export function ScriptCard({
   const addFormulaCard = useWorkspace((state) => state.addFormulaCard);
   const addScriptCard = useWorkspace((state) => state.addScriptCard);
   const setFunctionPanelOpen = useWorkspace((state) => state.setFunctionPanelOpen);
+  const setScriptAutoRun = useWorkspace((state) => state.setScriptAutoRun);
   const trust = useWorkspace((state) => state.trust);
   const confirmTrustedScript = useWorkspace((state) => state.confirmTrustedScript);
   /** A script restored from an untrusted file runs nothing until the user confirms it. */
@@ -1207,6 +1219,17 @@ export function ScriptCard({
               {env}
             </span>
           )}
+          {card.autoRun !== undefined ? (
+            <button
+              type="button"
+              className={`script-card__auto${card.autoRun ? ' is-on' : ''}`}
+              aria-pressed={card.autoRun === true}
+              title={labels.autoHint}
+              onClick={() => setScriptAutoRun(card.id, card.autoRun !== true)}
+            >
+              {card.autoRun ? labels.autoOn : labels.autoOff}
+            </button>
+          ) : null}
           <span className="script-card__lang" aria-hidden>
             py
           </span>

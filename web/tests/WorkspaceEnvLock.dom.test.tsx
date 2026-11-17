@@ -242,7 +242,7 @@ describe('“this workspace contains N scripts” notice', () => {
     const notices = host.querySelectorAll('[data-banner="script-notice"]');
     expect(notices).toHaveLength(1);
     expect(notices[0].getAttribute('role')).toBe('status');
-    expect(notices[0].textContent).toContain('本工作区包含 2 段用户脚本，均未自动执行');
+    expect(notices[0].textContent).toContain('本工作区包含 2 段用户脚本');
     // The count is a count of cards — nothing was executed to produce it.
     expect(client.computeNode).not.toHaveBeenCalled();
   });

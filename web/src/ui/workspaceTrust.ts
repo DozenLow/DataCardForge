@@ -50,6 +50,9 @@ export function initialTrust(): WorkspaceTrust {
  * restored from a file is trusted only after the file was known or the card was confirmed.
  */
 export function scriptTrusted(trust: WorkspaceTrust, cardId: number): boolean {
+  // While the file's record is being looked up, nothing may run automatically: an unknown
+  // answer must not be read as consent.
+  if (trust.loading) return false;
   if (trust.hash === null) return true;
   if (!trust.restoredScriptIds.includes(cardId)) return true;
   return trust.confirmed.includes(cardId);

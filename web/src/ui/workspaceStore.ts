@@ -664,6 +664,10 @@ interface ScriptComputeAnswer {
 
 /** Cards with a run on the wire: a second click must not spawn a second interpreter. */
 const scriptRunsInFlight = new Set<number>();
+/** Last declaration successfully pushed per card, so an identical re-push is a no-op. */
+const lastPushedSignature = new Map<number, string>();
+/** An automatic rerun was requested while a run was already in flight. */
+const autoRunQueued = new Set<number>();
 
 /** Patch one card's session run state (never persisted, never on the card model). */
 function patchScriptRun(cardId: number, patch: Partial<ScriptRunState>): void {
@@ -971,6 +975,16 @@ async function runScriptCardNow(cardId: number, mode: 'clean' | 'debug'): Promis
       previews,
     });
     if (mode === 'clean') {
+      // A successful clean run is the user's consent for automatic reruns. `undefined` only:
+      // an explicit "off" must survive the next manual run, otherwise the toggle would be
+      // decorative.
+      if (card.autoRun === undefined) {
+        useWorkspace.setState((state) => ({
+          cards: state.cards.map((entry) =>
+            entry.id === cardId && isFormulaCard(entry) ? { ...entry, autoRun: true } : entry,
+          ),
+        }));
+      }
       // The ordinary result-cache path: display matrix + `card.result` + every dependent
       // refreshed. Debug deliberately skips this whole line.
       await pullResultIntoCache(cardId);
@@ -978,6 +992,41 @@ async function runScriptCardNow(cardId: number, mode: 'clean' | 'debug'): Promis
   } finally {
     scriptRunsInFlight.delete(cardId);
   }
+}
+
+/**
+ * Automatic rerun of an armed script card.
+ *
+ * The trigger is exactly the signal a formula card gets from the backend: a dirty node. That
+ * one condition covers a definition PATCH, an input rebind, an upstream change (the backend
+ * marks the node stale and pushes the event) and a restored workspace (the node is created
+ * dirty). There is deliberately no timer here: the 200 ms settle belongs to the user's edit,
+ * and once it fired the graph must advance immediately — an automatic rerun must not add a
+ * second wait of its own.
+ */
+function maybeAutoRunScript(cardId: number): void {
+  const state = useWorkspace.getState();
+  const card = state.cards.find((entry) => entry.id === cardId);
+  if (!card || !isScriptCard(card)) return;
+  // `true` only: never-armed (`undefined`) waits for the first manual run, and an explicit
+  // "off" stays off even across later manual runs.
+  if (card.autoRun !== true) return;
+  if (state.propagationFrozen) return;
+  // The same permission gates the run path enforces, checked before anything is scheduled.
+  if (!scriptTrusted(state.trust, cardId)) return;
+  if (!workspaceEnvIsPinned(state.workspaceEnv)) return;
+  const previous = state.scriptRuns[cardId];
+  if (previous && previous.code === 'runtimeMissing') return;
+  if (scriptRunsInFlight.has(cardId)) {
+    // A run already carries the newest definition; remember that another change landed so
+    // completion re-checks the node instead of silently dropping it.
+    autoRunQueued.add(cardId);
+    return;
+  }
+  if (!card.node || card.node.state !== 'dirty') return;
+  void runScriptCardNow(cardId, 'clean').finally(() => {
+    if (autoRunQueued.delete(cardId)) maybeAutoRunScript(cardId);
+  });
 }
 
 interface WorkspaceState {
@@ -1024,7 +1073,8 @@ interface WorkspaceState {
    *
    * How many script cards the loaded file holds, or `null` when there are none / the notice
    * was dismissed. Deliberately a COUNT for the whole workspace rather than a per-card flag:
-   * "N 段用户脚本，均未自动执行" is one sentence, once, and nothing is executed to produce it.
+   * "N 段用户脚本，首次成功后才自动重跑" is one sentence, once, and nothing is executed to
+   * produce it.
    */
   scriptNotice: number | null;
   nextCardId: number;
@@ -1109,6 +1159,14 @@ interface WorkspaceState {
    * (see docs/decisions/2026-11-17-port-anchored-connections.md).
    */
   setFunctionPanelOpen: (cardId: number, panel: 'inputs' | 'outputs', open: boolean) => void;
+  /** Arm / disarm the automatic rerun of a script card (tri-state, see `FunctionCardModel`). */
+  setScriptAutoRun: (cardId: number, on: boolean) => void;
+  /**
+   * Automatic execution is suspended while a blocking problem is open (Phase D fills this):
+   * a blocked workspace keeps every result and lets manual actions through, but nothing new
+   * runs on its own.
+   */
+  propagationFrozen: boolean;
   /**
    * Workspace trust (2026-11-17): which scripts of the opened FILE may execute.
    *
@@ -1697,8 +1755,15 @@ async function pushFunctionCard(cardId: number): Promise<void> {
   const bindings = portBindingsFor(card, backendMatrixIdFor);
   if (!bindings) return;
   const params = wireParams(card);
-
   const existing = card.node;
+
+  // Identical (params, bindings) means the server already carries this declaration: a
+  // restore legitimately pushes the same card twice while matrices register, and the second
+  // PATCH would dirty the node again — which an armed script card would read as a new input
+  // change and answer with a second interpreter. Skipping it is both cheaper and quieter.
+  const pushSignature = JSON.stringify({ params, inputs: bindings });
+  if (existing && lastPushedSignature.get(cardId) === pushSignature) return;
+
   // Identity of the card this push was started for: it can be closed (or the whole
   // workspace replaced) while the request is in flight, and a later card may reuse the id.
   const startedInEpoch = workspaceEpoch;
@@ -1735,11 +1800,15 @@ async function pushFunctionCard(cardId: number): Promise<void> {
     nodeId,
     state: result.state ?? 'dirty',
   });
+  lastPushedSignature.set(cardId, pushSignature);
   if (resultMatrixIds.length > 0) applyOutputIds(cardId, resultMatrixIds);
   // A downstream card may have been created before this card had a node or a result id;
   // now that it has one, the binding can be completed.
   syncUnboundDependents(cardId);
   if (result.state === 'done') void pullResultIntoCache(cardId);
+  // A definition push or an input rebind left the node dirty: for an armed script card that
+  // is the same signal a formula card gets from the backend, so it runs in the same wave.
+  if ((result.state ?? 'dirty') === 'dirty') maybeAutoRunScript(cardId);
 }
 
 /**
@@ -3020,6 +3089,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     dependencies: new DependencyGraph(),
     // No file yet: nothing to trust, and a session-authored script never waits.
     trust: initialTrust(),
+    propagationFrozen: false,
     blockedCardId: null,
     blockNonce: 0,
     repointOffers: [],
@@ -3754,6 +3824,16 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           };
         }),
       }));
+    },
+
+    setScriptAutoRun(cardId, on) {
+      set((state) => ({
+        cards: state.cards.map((card) =>
+          card.id === cardId && isFormulaCard(card) ? { ...card, autoRun: on } : card,
+        ),
+      }));
+      // Turning it back on is an explicit request: if the node is already waiting, run now.
+      if (on) maybeAutoRunScript(cardId);
     },
 
     // ── workspace trust (2026-11-17) ───────────────────────────────────
@@ -5035,6 +5115,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // A finished computation is the trigger to pull the numbers — the display cache is
       // refreshed from the window endpoint, never from a local evaluation.
       if (event.state === 'done') void pullResultIntoCache(cardId);
+      // An armed script card treats "my input changed" exactly like a formula card's node
+      // does: it runs again (the user asked for formula-like behaviour after the first run).
+      if (event.state === 'dirty') maybeAutoRunScript(cardId);
     },
 
     startBackendEventLoop() {
@@ -5134,9 +5217,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // skipped: a hand-edited save file must not corrupt close-protection.
       const restored = normalizeRestoredCards(snapshot.cards);
       const { dependencies, droppedEdges } = rebuildDependencies(restored);
-      // "本工作区包含 N 段用户脚本，均未自动执行": one sentence for the whole file, and the
+      // "本工作区包含 N 段用户脚本，首次成功后才自动重跑": one sentence for the file, and the
       // number is a count of CARDS — nothing is compiled, imported or run to produce it.
       const scriptCount = restored.filter(isScriptCard).length;
+
+      // Restored cards are pushed afresh; a signature from the previous workspace would
+      // suppress a push that the restarted backend actually needs.
+      lastPushedSignature.clear();
 
       set({
         cards: restored,
@@ -5165,6 +5252,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // The caller knows the file's hash (it read the bytes); trust starts empty so a file
         // can never be treated as trusted by accident while that lookup is in flight.
         trust: initialTrust(),
+        propagationFrozen: false,
         // The stamp travels with the file, verbatim: a legacy file (no block — `migrate`
         // fills the pinned one) or a file from another machine both land here, and the
         // difference from this build's constants is REPORTED by the banner, never repaired.
@@ -5222,6 +5310,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // that inherits the same id.
       syncingCards.clear();
       resyncRequested.clear();
+      lastPushedSignature.clear();
       // Uploads started for the previous workspace must not bind their server ids to the
       // new workspace's local ids; `registerUploadedMatrix` releases the copy on settle.
       matrixUploads.clear();
@@ -5251,6 +5340,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         summaries: {},
         scriptRuns: {},
         trust: initialTrust(),
+        propagationFrozen: false,
         toast: null,
         // A reset returns the app to its initial state, including "no modal open".
         helpOpen: false,

@@ -20,11 +20,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MatrixData } from '../src/core/MatrixData.ts';
 import { useWorkspace, emptyScriptRun } from '../src/ui/workspaceStore.ts';
 import {
+  PINNED_WORKSPACE_ENV,
   PYTHON_SIGNATURE,
   isScriptCard,
   type FunctionCardModel,
   type MatrixCardModel,
 } from '../src/ui/types.ts';
+import { initialTrust } from '../src/ui/workspaceTrust.ts';
 
 /**
  * The one transport instance the store creates at import time.
@@ -717,5 +719,201 @@ describe('declaration-column presentation (2026-11-17)', () => {
     const matrix = store().cards.find((entry) => entry.id === source);
     store().setFunctionPanelOpen(source, 'inputs', false);
     expect(store().cards.find((entry) => entry.id === source)).toBe(matrix);
+  });
+});
+
+
+// ── automatic rerun (2026-11-17) ──────────────────────────────────────────────────────────
+//
+// The user's rule: once a CLEAN run succeeded, the card behaves like a formula card — it
+// recomputes when its definition or its inputs change, and on reopen. Debug never arms it, an
+// explicit "off" survives later manual runs, and every permission gate (trust, environment)
+// is checked before an interpreter is spawned.
+
+describe('automatic rerun', () => {
+  /** The node id the mocked backend assigned to this card. */
+  function nodeOf(cardId: number): number {
+    const node = scriptCardOf(cardId).node;
+    if (!node) throw new Error('card has no node');
+    return node.nodeId;
+  }
+
+  async function armCard(cardId: number): Promise<void> {
+    store().runScriptCard(cardId);
+    await flush();
+    await flush();
+  }
+
+  it('arms after a clean run but not after a debug run', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+
+    const debugId = await makeScriptCard([source]);
+    store().debugScriptCard(debugId);
+    await flush();
+    await flush();
+    expect(scriptCardOf(debugId).autoRun).toBeUndefined();
+
+    const cleanId = await makeScriptCard([source]);
+    await armCard(cleanId);
+    expect(scriptCardOf(cleanId).autoRun).toBe(true);
+  });
+
+  it('reruns when the backend reports that the inputs changed', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    await armCard(cardId);
+    client.computeNode.mockClear();
+
+    store().applyNodeEvent({
+      seq: 99,
+      nodeId: nodeOf(cardId),
+      state: 'dirty',
+      reason: 'upstreamChanged',
+    });
+    await flush();
+    await flush();
+
+    expect(client.computeNode).toHaveBeenCalledTimes(1);
+  });
+
+  it('reruns after a definition edit, like a formula card', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    await armCard(cardId);
+    client.computeNode.mockClear();
+
+    store().setScriptText(cardId, 'result = 2.0\n');
+    await flush();
+    await flush();
+    await flush();
+
+    expect(client.computeNode).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not run before the first successful clean run', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    client.computeNode.mockClear();
+
+    store().applyNodeEvent({
+      seq: 3,
+      nodeId: nodeOf(cardId),
+      state: 'dirty',
+      reason: 'upstreamChanged',
+    });
+    await flush();
+
+    expect(client.computeNode).not.toHaveBeenCalled();
+  });
+
+  it('stays off when the user switched it off', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    await armCard(cardId);
+    store().setScriptAutoRun(cardId, false);
+    client.computeNode.mockClear();
+
+    store().applyNodeEvent({
+      seq: 4,
+      nodeId: nodeOf(cardId),
+      state: 'dirty',
+      reason: 'upstreamChanged',
+    });
+    await flush();
+
+    expect(client.computeNode).not.toHaveBeenCalled();
+  });
+
+  it('never runs a script the file trust has not confirmed', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    useWorkspace.setState((state) => ({
+      cards: state.cards.map((card) =>
+        card.id === cardId ? { ...card, autoRun: true } : card,
+      ),
+      trust: {
+        ...initialTrust(),
+        hash: 'a'.repeat(64),
+        persistence: 'persistent',
+        restoredScriptIds: [cardId],
+      },
+    }));
+    client.computeNode.mockClear();
+
+    store().applyNodeEvent({
+      seq: 5,
+      nodeId: nodeOf(cardId),
+      state: 'dirty',
+      reason: 'upstreamChanged',
+    });
+    await flush();
+
+    expect(client.computeNode).not.toHaveBeenCalled();
+  });
+
+  it('does not run while the workspace environment stamp differs', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    await armCard(cardId);
+    useWorkspace.setState({
+      workspaceEnv: { ...PINNED_WORKSPACE_ENV, python: 'cpython 0.0.0-foreign' },
+    });
+    client.computeNode.mockClear();
+
+    store().applyNodeEvent({
+      seq: 6,
+      nodeId: nodeOf(cardId),
+      state: 'dirty',
+      reason: 'upstreamChanged',
+    });
+    await flush();
+
+    expect(client.computeNode).not.toHaveBeenCalled();
+  });
+
+  it('does not loop when the automatic run fails', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    await armCard(cardId);
+    client.computeNode.mockClear();
+    client.computeNode.mockImplementationOnce(async (nodeId: number) => ({
+      ok: true,
+      nodeId,
+      state: 'error' as const,
+      resultMatrixIds: [],
+    }));
+
+    store().applyNodeEvent({
+      seq: 7,
+      nodeId: nodeOf(cardId),
+      state: 'dirty',
+      reason: 'upstreamChanged',
+    });
+    await flush();
+    await flush();
+    await flush();
+
+    expect(client.computeNode).toHaveBeenCalledTimes(1);
+    expect(scriptCardOf(cardId).node?.state).toBe('error');
+  });
+
+  it('keeps the arm through a save file and reruns after reopening', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+    await armCard(cardId);
+    const snapshot = store().toSnapshot();
+    const saved = snapshot.cards.find((card) => card.id === cardId) as FunctionCardModel;
+    expect(saved.autoRun).toBe(true);
+
+    store().reset();
+    client.computeNode.mockClear();
+    store().loadSnapshot(snapshot);
+    await flush();
+    await flush();
+    await flush();
+
+    expect(scriptCardOf(cardId).autoRun).toBe(true);
+    // Reopening re-creates the node as dirty; the armed card runs without a click.
+    expect(client.computeNode).toHaveBeenCalledTimes(1);
   });
 });

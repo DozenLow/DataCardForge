@@ -41,7 +41,7 @@ const dictionaries = {
       '保存工作区时钉死的工具链与本机不同。点「以当前环境重算」只是关掉这条横幅、把运行交还给你；不会自动执行任何脚本。',
     'env.recompute': '以当前环境重算',
     'env.dismiss': '知道了',
-    'script.notice': '本工作区包含 {n} 段用户脚本，均未自动执行',
+    'script.notice': '本工作区包含 {n} 段用户脚本：首次成功运行后才自动重跑；自动运行仍先过工作区信任',
     'trust.panel': '工作区信任',
     'trust.decision': '是否保留这个工作区的信任记录？',
     'trust.decisionHint': '记录绑定本机，保存在程序目录或用户配置目录；选择「仅本次会话」则不写任何文件。',
@@ -401,7 +401,7 @@ const dictionaries = {
       'The toolchain this workspace was pinned to differs from the one installed here. “Recompute with this machine” only closes this banner and leaves the runs to you — no script is ever executed automatically.',
     'env.recompute': 'Recompute with this machine',
     'env.dismiss': 'Got it',
-    'script.notice': 'This workspace contains {n} user script(s); none of them were run automatically',
+    'script.notice': 'This workspace contains {n} user script(s): they rerun automatically only after a first successful run, and only behind workspace trust',
     'trust.panel': 'Workspace trust',
     'trust.decision': 'Keep trust records for this workspace?',
     'trust.decisionHint':

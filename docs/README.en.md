@@ -30,7 +30,9 @@ were considered and dropped. Three entrances, each answering one question:
   causal history: four eras, four spirals, a lesson list and the current state
   - [Project history (DataCardForge)](history.en.md) ← **read this one before the individual volumes**
 - 📌 **Decision records** (`decisions/`) — settled, direction-setting conclusions
-  - [Workspace trust: per-file hash records, per-script confirmation, bound to this machine](decisions/2026-11-17-workspace-trust.md) ← **latest: unconfirmed scripts do not run; the gate auto-run sits behind**
+  - [Script-card auto-run: formula-like after the first successful clean run](decisions/2026-11-17-script-autorun.md) ← **latest: one manual first run, automatic afterwards**
+  - [Debounce belongs to the user operation: one 200 ms settle for the workspace](decisions/2026-11-17-operation-settle.md) ← the per-card 250/500/600 ms timers are gone
+  - [Workspace trust: per-file hash records, per-script confirmation, bound to this machine](decisions/2026-11-17-workspace-trust.md) ← unconfirmed scripts do not run; the gate auto-run sits behind
   - [Connection endpoints land on the input/output sub-cards: port first, facing card edge as fallback](decisions/2026-11-17-port-anchored-connections.md) ← after the script card's three-column body, wires leave and enter at the port row's height
   - [Python script card: a card is a function, injection is name binding, outputs are declared first](decisions/2026-11-15-python-script-card.md) ← the O(1) escape hatch for algorithmic completeness; stage 1 landed, every declared output is wireable
   - [Regression card renamed to "relation enumeration": picking a column is a port binding, headers carry X : Y](decisions/2026-10-31-relation-enum-card.md) ← cards can finally pick columns; horizontal table-scroll alignment fixed too
