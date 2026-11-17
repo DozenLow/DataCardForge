@@ -26,6 +26,7 @@ import { useAccuracyHint } from '../useAccuracyHint.ts';
 import { MatrixData } from '../../core/MatrixData.ts';
 import { useTranslator, useWorkspace, type RepointOffer } from '../workspaceStore.ts';
 import { registerPort, unregisterPort, type AnchorSide } from '../cardMetrics.ts';
+import { flushOperations, settleOperation } from '../operationSettle.ts';
 import type { FunctionCardModel, NodeStatus } from '../types.ts';
 import type { MessageKey } from '../i18n.ts';
 import type { ChartTypeId } from '../../charts/chartTypes.ts';
@@ -40,9 +41,6 @@ import {
 import { HoverHelp, useHoverHelp } from './HoverHelp.tsx';
 import { SummaryPanel } from './SummaryPanel.tsx';
 import { ROW_HEADER_WIDTH, VirtualTable } from './VirtualTable.tsx';
-
-/** How long to wait after the last keystroke before re-sending each formula to the backend. */
-const FORMULA_DEBOUNCE_MS = 250;
 
 /**
  * Readable names for the relation signature's five output columns.
@@ -223,6 +221,9 @@ export function FormulaCard({
   const commitName = (index: number): void => {
     const next = nameDraft[index] ?? '';
     if (next === formulas?.[index]?.name) return;
+    // A pending expression edit is part of "the user finished": apply it before the rename
+    // rewrites the same declaration, or the two changes would race in the store.
+    flushOperations();
     onRenameOutputColumn(index, next);
   };
 
@@ -281,16 +282,23 @@ export function FormulaCard({
     setDraft((formulas ?? []).map((formula) => ({ ...formula })));
   }, [card.id, formulas]);
 
+  /**
+   * Commit on the workspace-wide 200 ms settle, not on a per-card timer.
+   *
+   * The settle belongs to the USER OPERATION (`operationSettle.ts`): once it fires, this
+   * commit's PATCH and every other pending edit leave in one wave, and the backend evaluates
+   * the whole subtree immediately. The former per-card 250 ms timer made each card excuse
+   * itself separately — latency the user reads as lag, and one wave per card instead of one.
+   */
   useEffect(() => {
-    const timer = window.setTimeout(() => {
+    settleOperation(`formula:${card.id}`, () => {
       draft.forEach((formula, index) => {
         const current = formulas?.[index];
         if (!current) return;
         if (current.name === formula.name && current.expression === formula.expression) return;
         setFormula(card.id, index, formula.name, formula.expression);
       });
-    }, FORMULA_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
+    });
   }, [draft, formulas, card.id, setFormula]);
 
   /**
@@ -596,7 +604,10 @@ export function FormulaCard({
                       className="formula-card__remove card__control"
                       title={t('formula.remove')}
                       aria-label={t('formula.remove')}
-                      onClick={() => removeFormula(card.id, index)}
+                      onClick={() => {
+                        flushOperations();
+                        removeFormula(card.id, index);
+                      }}
                     >
                       ×
                     </button>
@@ -613,6 +624,7 @@ export function FormulaCard({
                   className="formula-card__add card__control"
                   {...addHover.anchorProps}
                   onClick={() => {
+                    flushOperations();
                     const name = `Col${draft.length + 1}`;
                     setDraft((rows) => [...rows, { name, expression: 'A' }]);
                     setFormula(card.id, draft.length, name, 'A');
@@ -828,7 +840,11 @@ export function FormulaCard({
                       <button
                         type="button"
                         className="card__control"
-                        onClick={() => recomputeFormula(card.id)}
+                        onClick={() => {
+                          // Resend what the user sees, not the pre-edit declaration.
+                          flushOperations();
+                          recomputeFormula(card.id);
+                        }}
                       >
                         {t('formula.recompute')}
                       </button>
@@ -913,6 +929,8 @@ export function FormulaCard({
                 // The menu primitive is menu-agnostic: it reports the outcome, the card owns
                 // its own lifecycle. Closing here (also when the store refuses, the toast is
                 // the answer then) is what every other entry of this menu already does.
+                // Building from a result column reads the declaration: settle pending edits.
+                flushOperations();
                 const created = onOpenChart(chartMenu.column, type);
                 setChartMenu(null);
                 return created;
@@ -922,6 +940,7 @@ export function FormulaCard({
           <div className="context-menu__separator" />
           <ContextMenuItem
             onClick={() => {
+              flushOperations();
               onOpenFunction();
               setChartMenu(null);
             }}

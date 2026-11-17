@@ -58,6 +58,11 @@ import {
   type AnchorSide,
 } from '../cardMetrics.ts';
 import {
+  cancelOperation,
+  flushOperations,
+  settleOperation,
+} from '../operationSettle.ts';
+import {
   isFormulaCard,
   isMatrixCard,
   scriptParams,
@@ -71,23 +76,6 @@ import {
   ContextMenuItem,
   ContextMenuSub,
 } from './ContextMenu.tsx';
-
-/**
- * How long an edit waits before it becomes a definition change.
- *
- * The backend stores `params` on PATCH and marks the node dirty, so shipping every keystroke
- * would be a network round trip per character for a card that never auto-runs anyway.
- */
-const SCRIPT_DEBOUNCE_MS = 500;
-
-/**
- * How long an edit waits before the authoritative check runs (POST /api/script/check).
- *
- * Deliberately longer than the definition sync: the local lezer layer already answers "is
- * this plausible Python" at zero latency, and every check spawns a real CPython process, so
- * the second layer is for the pause between bursts, not for every key.
- */
-const SCRIPT_CHECK_DEBOUNCE_MS = 600;
 
 // ── prose ─────────────────────────────────────────────────────────────────────────────
 //
@@ -131,7 +119,7 @@ interface ScriptLabels {
   runMode: { clean: string; debug: string };
   runSummary: string;
   traceJump: string;
-  /** Two-layer diagnostics (lezer now, CPython 600 ms later). */
+  /** Two-layer diagnostics (lezer now, CPython after the 200 ms settle). */
   diagnostics: string;
   diagnosticLocal: string;
   diagnosticBackend: string;
@@ -840,10 +828,10 @@ export function ScriptCard({
     [card, cards, matrices, t],
   );
 
-  // ── diagnostics: local layer now, authoritative layer 600 ms after a burst ──
+  // ── diagnostics: local layer now, authoritative layer after the 200 ms settle ──
   //
   // `localDiagnostic` is recomputed from the editor's own document on every keystroke (below),
-  // so it never waits for the store's 500 ms definition sync. `check` remembers which text the
+  // so it never waits for the store's 200 ms settle. `check` remembers which text the
   // last authoritative verdict was about — applying a stale verdict to newer text is the one
   // bug this state shape is designed to make impossible.
   const [localDiagnostic, setLocalDiagnostic] = useState<ScriptDiagnostic | null>(() =>
@@ -852,14 +840,13 @@ export function ScriptCard({
   /**
    * The document as the EDITOR has it, not as the store has it.
    *
-   * The store's `scriptText` lags by the definition debounce (500 ms), so merging diagnostics
+   * The store's `scriptText` lags by the 200 ms operation settle, so merging diagnostics
    * against it would pair a fresh local error with an old authoritative verdict and show the
    * wrong layer for the wrong text. This state is updated in the same listener that computes
    * the local layer, i.e. at the speed of typing.
    */
   const [documentText, setDocumentText] = useState(scriptText);
   const [check, setCheck] = useState<CompletedScriptCheck | null>(null);
-  const checkTimer = useRef<number | null>(null);
   const checkSequence = useRef(0);
 
   const runCheck = useCallback((text: string) => {
@@ -882,17 +869,6 @@ export function ScriptCard({
     );
   }, []);
 
-  const scheduleCheck = useCallback(
-    (text: string) => {
-      if (checkTimer.current !== null) window.clearTimeout(checkTimer.current);
-      checkTimer.current = window.setTimeout(() => {
-        checkTimer.current = null;
-        runCheck(text);
-      }, SCRIPT_CHECK_DEBOUNCE_MS);
-    },
-    [runCheck],
-  );
-
   // Opening a card is a moment the user is looking at the script without having typed
   // anything, so the authoritative pass runs once up front: an already-impure script must be
   // stamped before the first edit. Later text changes come through the editor's update
@@ -901,8 +877,8 @@ export function ScriptCard({
   useEffect(() => {
     if (scriptText.trim().length > 0) runCheck(scriptText);
     return () => {
-      if (checkTimer.current !== null) window.clearTimeout(checkTimer.current);
-      checkTimer.current = null;
+      // A pending definition edit for this card must not land after the card is gone.
+      cancelOperation(`script:${card.id}`);
       ++checkSequence.current;  // a reply landing after unmount must not set state
     };
   }, [runCheck]);  // mount/unmount only; `scriptText` is read as the opening value on purpose
@@ -910,20 +886,26 @@ export function ScriptCard({
   // ── editor ──
   const editorHost = useRef<HTMLDivElement | null>(null);
   const editorView = useRef<EditorView | null>(null);
-  const syncTimer = useRef<number | null>(null);
   // Callbacks the editor is created with are reached through refs: re-creating the view on
   // every render would throw away the cursor, the undo history and the user's selection.
   const changeRef = useRef(setScriptText);
+  const checkRef = useRef(runCheck);
   const debugRef = useRef(debugScriptCard);
   changeRef.current = setScriptText;
+  checkRef.current = runCheck;
   debugRef.current = debugScriptCard;
 
-  const flushPendingEdit = useCallback(() => {
-    if (syncTimer.current !== null) {
-      window.clearTimeout(syncTimer.current);
-      syncTimer.current = null;
-    }
-  }, []);
+  /**
+   * Drop this card's pending definition edit.
+   *
+   * Used when an EXTERNAL rewrite (a rename) replaces the document: the pending task holds the
+   * pre-rename text, and letting it land would undo the rename. The rename path itself flushes
+   * first instead of cancelling — there the pending text is the newer intent and must be
+   * committed before the rewrite.
+   */
+  const cancelPendingEdit = useCallback(() => {
+    cancelOperation(`script:${card.id}`);
+  }, [card.id]);
 
   useEffect(() => {
     const host = editorHost.current;
@@ -941,7 +923,9 @@ export function ScriptCard({
               mac: 'Cmd-Enter',
               run: () => {
                 // Ctrl+Enter is the run the user is inspecting with, so it is the DEBUG run:
-                // inspecting must never publish into the graph.
+                // inspecting must never publish into the graph. Flush the pending text first:
+                // a shortcut is a finished operation, not a pause.
+                flushOperations();
                 debugRef.current(card.id);
                 return true;
               },
@@ -954,14 +938,14 @@ export function ScriptCard({
             // Layer 1, synchronously: lezer's own parse of what is in the document NOW. No
             // timer, no request — this is what makes the first diagnostic feel instant.
             setLocalDiagnostic(localSyntaxDiagnostic(text));
-            // Layer 2, behind the debounce: the authoritative CPython verdict. Each new edit
-            // resets the timer, so a burst of typing costs one process, not one per key.
-            scheduleCheck(text);
-            if (syncTimer.current !== null) window.clearTimeout(syncTimer.current);
-            syncTimer.current = window.setTimeout(() => {
-              syncTimer.current = null;
+            // Both remaining layers wait for the same workspace-wide 200 ms settle: the
+            // authoritative CPython verdict and the definition PATCH leave in one wave, so a
+            // burst of typing costs one process and one store update — and the graph advances
+            // immediately after (the backend evaluates the subtree, nothing per-card waits).
+            settleOperation(`script:${card.id}`, () => {
               changeRef.current(card.id, text);
-            }, SCRIPT_DEBOUNCE_MS);
+              checkRef.current(text);
+            });
           }),
         ],
       }),
@@ -985,15 +969,15 @@ export function ScriptCard({
     if (!view) return;
     const current = view.state.doc.toString();
     if (current === scriptText) return;
-    flushPendingEdit();
+    cancelPendingEdit();
     const anchor = Math.min(view.state.selection.main.head, scriptText.length);
     view.dispatch({
       changes: { from: 0, to: current.length, insert: scriptText },
       selection: { anchor },
     });
-  }, [scriptText, flushPendingEdit]);
+  }, [scriptText, cancelPendingEdit]);
 
-  useEffect(() => flushPendingEdit, [flushPendingEdit]);
+  useEffect(() => cancelPendingEdit, [cancelPendingEdit]);
 
   const jumpToLine = useCallback(
     (line: number) => {
@@ -1167,7 +1151,12 @@ export function ScriptCard({
             className="script-card__run"
             title={labels.runTitle}
             disabled={running}
-            onClick={() => runScriptCard(card.id)}
+            onClick={() => {
+              // A click means "the user finished": commit the editor's pending text first so
+              // the run operates on exactly what is on screen.
+              flushOperations();
+              runScriptCard(card.id);
+            }}
           >
             {labels.run}
           </button>
@@ -1176,7 +1165,10 @@ export function ScriptCard({
             className="script-card__run script-card__run--debug"
             title={labels.debugTitle}
             disabled={running}
-            onClick={() => debugScriptCard(card.id)}
+            onClick={() => {
+              flushOperations();
+              debugScriptCard(card.id);
+            }}
           >
             {labels.debug}
           </button>
@@ -1255,7 +1247,12 @@ export function ScriptCard({
                         labels={labels}
                         check={checkForPanel('port', index)}
                         occurrences={countScriptOccurrences(scriptText, port.varName)}
-                        onCommit={(name) => renameScriptPort(card.id, port.portId, name)}
+                        onCommit={(name) => {
+                          // The rename rewrites identifiers in the CURRENT script: commit the
+                          // pending editor text before it, or the two edits would race.
+                          flushOperations();
+                          renameScriptPort(card.id, port.portId, name);
+                        }}
                       />
                       <span className="script-card__source" title={port.label}>
                         ← {port.label}
@@ -1277,7 +1274,11 @@ export function ScriptCard({
               type="button"
               className="script-card__add"
               disabled={ports.length === 0}
-              onClick={() => addScriptPort(card.id)}
+              onClick={() => {
+                // The action appends to the script's text: it must append to the latest text.
+                flushOperations();
+                addScriptPort(card.id);
+              }}
             >
               {labels.addPort}
             </button>
@@ -1336,7 +1337,10 @@ export function ScriptCard({
                           scriptText,
                           outputNames[ordinal] ?? '',
                         )}
-                        onCommit={(name) => renameScriptOutput(card.id, output.outputId, name)}
+                        onCommit={(name) => {
+                          flushOperations();
+                          renameScriptOutput(card.id, output.outputId, name);
+                        }}
                       />
                       <span className="script-card__output-id" title={output.outputId}>
                         {output.outputId}
@@ -1350,7 +1354,10 @@ export function ScriptCard({
                         title={labels.removeOutput}
                         aria-label={`${labels.removeOutput} ${outputNames[ordinal] ?? ordinal + 1}`}
                         disabled={ordinal === 0}
-                        onClick={() => removeScriptOutput(card.id, output.outputId)}
+                        onClick={() => {
+                          flushOperations();
+                          removeScriptOutput(card.id, output.outputId);
+                        }}
                       >
                         ×
                       </button>
@@ -1367,7 +1374,10 @@ export function ScriptCard({
             <button
               type="button"
               className="script-card__add"
-              onClick={() => addScriptOutput(card.id)}
+              onClick={() => {
+                flushOperations();
+                addScriptOutput(card.id);
+              }}
             >
               {labels.addOutput}
             </button>
@@ -1467,6 +1477,8 @@ export function ScriptCard({
                 //
                 // The card still owns its own lifecycle: it closes the menu (both outcomes),
                 // the primitive only reports what happened.
+                // Creating from an output reads the declaration: settle pending edits first.
+                flushOperations();
                 const created = addChartCard(card.id, 0, type, buildMenu.outputId);
                 setBuildMenu(null);
                 return created;
@@ -1478,6 +1490,7 @@ export function ScriptCard({
             onClick={() => {
               // One table in, one table out: the slot id is the store's to resolve
               // (`out:0` is the display cache, `out:N` its own slot) — never derived here.
+              flushOperations();
               const matrixId = outputMatrixId(card, buildMenu.outputId);
               const created = matrixId === null ? null : addFormulaCard(card.id, matrixId);
               if (created === null) {
@@ -1491,6 +1504,7 @@ export function ScriptCard({
           <ContextMenuItem
             onClick={() => {
               // Same birth binding the data card's column menu uses, pointed at this output.
+              flushOperations();
               addScriptCard([{ cardId: card.id, outputId: buildMenu.outputId }]);
               setBuildMenu(null);
             }}

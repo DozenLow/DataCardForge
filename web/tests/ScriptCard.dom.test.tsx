@@ -562,7 +562,7 @@ describe('two-layer diagnostics in the card', () => {
         }
       });
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(599);
+        await vi.advanceTimersByTimeAsync(199);
       });
       expect(client.checkScript).not.toHaveBeenCalled();
 
@@ -614,7 +614,7 @@ describe('two-layer diagnostics in the card', () => {
       expect(client.checkScript).not.toHaveBeenCalled();
 
       await act(async () => {
-        await vi.advanceTimersByTimeAsync(600);
+        await vi.advanceTimersByTimeAsync(200);
       });
       expect(client.checkScript).toHaveBeenCalledTimes(1);
       // In flight: the local layer is still the only answer, so it stays.
