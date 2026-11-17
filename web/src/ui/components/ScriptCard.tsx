@@ -1291,11 +1291,17 @@ export function ScriptCard({
             data-script-repoint={repoint.portId}
             style={{ flexShrink: 0 }}
           >
-            <span className="script-card__repoint-text">
+            <span className="script-card__repoint-text" title={repoint.portId}>
               <strong>{labels.repointTitle}</strong>
               {' — '}
               {labels.repointBody
-                .replace('{port}', repoint.portId)
+                // The variable the script uses ("A"), not the technical `in:0` identity:
+                // "输入 in:0" is meaningless to the person looking at `result = A * 1.0`.
+                .replace(
+                  '{port}',
+                  portNames[card.inputs.findIndex((input) => input.portId === repoint.portId)] ??
+                    repoint.portId,
+                )
                 .replace('{from}', repoint.fromName)
                 .replace('{to}', repoint.toName)
                 .replace('{fromRows}', String(repoint.fromRows))
