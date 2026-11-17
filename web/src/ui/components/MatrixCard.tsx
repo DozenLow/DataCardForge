@@ -24,6 +24,7 @@ import {
   ContextMenuItem,
   ContextMenuSub,
 } from './ContextMenu.tsx';
+import { AddToChartItems } from './AddToChartItems.tsx';
 import { SummaryPanel } from './SummaryPanel.tsx';
 import { VirtualTable } from './VirtualTable.tsx';
 
@@ -258,6 +259,12 @@ export function MatrixCard({
               }}
             />
           </ContextMenuSub>
+          {/* A chart that already exists can take this column: the explicit way to add a
+              second source, now that the dock only lists cards a chart already reads. */}
+          <AddToChartItems
+            matrixId={card.sources[card.activeSource]?.matrixId ?? -1}
+            columnIndex={menu.column}
+          />
           <div className="context-menu__separator" />
           <ContextMenuItem
             onClick={() => {

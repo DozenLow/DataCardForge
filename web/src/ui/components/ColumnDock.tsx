@@ -3,9 +3,15 @@
  *
  * A chart depends on the whole matrix *card*, so which columns it draws is purely a
  * presentation choice. This dock is the one place that choice is made (it replaced the
- * footer's "+ Add column…" select). Collapsed it costs a thin rail; expanded it lists
- * every matrix the workspace publishes — a data card's active file, and each output of a
- * function card — grouped by where the columns come from.
+ * footer's "+ Add column…" select). Collapsed it costs a thin rail; expanded it lists the
+ * matrices of **the cards this chart reads** — a data card's active file, and each output
+ * of a function card — grouped by where the columns come from.
+ *
+ * It deliberately does NOT enumerate the whole workspace: a matrix the chart has no edge to
+ * is not a presentation choice but a new connection, and connections are explicit (right-
+ * click a column or an output row -> 添加到图表). Listing everything made one chart able to
+ * draw any card's output — including the very table a script card consumes — which the
+ * dataflow contract forbids.
  *
  * It deliberately imports nothing from ChartCard or the ECharts stack, so it stays
  * inexpensive and testable on its own.
@@ -56,6 +62,18 @@ export function ColumnDock({ card, open, onToggle }: ColumnDockProps) {
   // A chart must always keep at least one column, and a paired type needs two.
   const floor = Math.max(1, minimumColumns(card.config.type));
 
+  /**
+   * The cards this chart reads — its own edges, not the workspace.
+   *
+   * `inputs[]` is the authoritative edge list (a chart's edges are re-derived from its
+   * config by the store), so this needs no separate bookkeeping.
+   */
+  const connected = useMemo(() => {
+    const ids = new Set<number>();
+    for (const input of card.inputs) ids.add(input.target.cardId);
+    return ids;
+  }, [card.inputs]);
+
   const groups = useMemo<DockGroup[]>(() => {
     const out: DockGroup[] = [];
     // (matrixId, columnIndex) pairs a group already offers. The fallback below uses it to
@@ -64,6 +82,9 @@ export function ColumnDock({ card, open, onToggle }: ColumnDockProps) {
     const listed = new Set<string>();
 
     for (const entry of cards) {
+      // Only the cards this chart reads. Another card's matrix is reachable through the
+      // explicit "添加到图表" gesture, never by appearing here.
+      if (!connected.has(entry.id)) continue;
       // `publishedMatrices` enumerates what the card publishes; a chart publishes nothing,
       // so it contributes no group without this file needing to know what a chart is.
       for (const published of publishedMatrices(entry)) {
@@ -112,7 +133,7 @@ export function ColumnDock({ card, open, onToggle }: ColumnDockProps) {
     if (unlisted.length > 0) out.push({ name: t('chart.columnDockUnlisted'), columns: unlisted });
 
     return out;
-  }, [cards, matrices, card.config.sources, t]);
+  }, [cards, matrices, card.config.sources, connected, t]);
 
   const isChecked = (matrixId: number, columnIndex: number): boolean =>
     card.config.sources.some(

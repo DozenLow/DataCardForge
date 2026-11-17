@@ -393,3 +393,48 @@ describe('unlisted sources', () => {
     expect(titles).not.toContain(t('chart.columnDockUnlisted'));
   });
 });
+
+// ── the dock lists only the cards the chart reads (2026-11-17) ────────────────────────────
+//
+// Reported: one chart listed every card's output matrix, so it could draw any table in the
+// workspace — including the very table a script card consumes. A chart's dataflow edges are
+// its contract; the dock is a presentation choice within them, and a NEW source is added by
+// an explicit gesture (`添加到图表`) instead of by ambient availability.
+
+describe('dock scope', () => {
+  function twoTables(): { chartId: number; secondMatrixId: number } {
+    const first = store().addMatrixCard([{ name: 'a.csv', matrix: annotatedMatrix(['one']) }]);
+    const chartId = store().addChartCard(first, 0)!;
+    const second = store().addMatrixCard([{ name: 'b.csv', matrix: annotatedMatrix(['two']) }]);
+    const secondMatrixId = (
+      store().cards.find((card) => card.id === second) as {
+        sources: { matrixId: number }[];
+      }
+    ).sources[0].matrixId;
+    return { chartId, secondMatrixId };
+  }
+
+  it('does not list a second table the chart has no edge to', async () => {
+    const { chartId } = twoTables();
+    const host = await mount(chartOf(chartId), true);
+    const titles = [...host.querySelectorAll('.chart-card__dock-group-title')].map(
+      (node) => node.textContent,
+    );
+    expect(titles.some((title) => title?.includes('a.csv'))).toBe(true);
+    expect(titles.some((title) => title?.includes('b.csv'))).toBe(false);
+  });
+
+  it('lists it once the column was attached explicitly (the edge exists)', async () => {
+    const { chartId, secondMatrixId } = twoTables();
+    store().addChartSource(chartId, secondMatrixId, 0);
+    const host = await mount(chartOf(chartId), true);
+    const titles = [...host.querySelectorAll('.chart-card__dock-group-title')].map(
+      (node) => node.textContent,
+    );
+    expect(titles.some((title) => title?.includes('b.csv'))).toBe(true);
+    // …and the store derived the edge to that card, so the contract holds for it too.
+    const chart = chartOf(chartId);
+    expect(chart.config.sources.some((source) => source.matrixId === secondMatrixId)).toBe(true);
+    expect(new Set(chart.inputs.map((input) => input.target.cardId)).size).toBe(2);
+  });
+});

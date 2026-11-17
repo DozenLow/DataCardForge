@@ -70,6 +70,7 @@ import {
   workspaceEnvPackageVersion,
   type FunctionCardModel,
 } from '../types.ts';
+import { AddToChartItems } from './AddToChartItems.tsx';
 import { CardShell } from './CardShell.tsx';
 import { SidePanel } from './SidePanel.tsx';
 import {
@@ -1632,6 +1633,12 @@ export function ScriptCard({
               }}
             />
           </ContextMenuSub>
+          {/* A chart that already exists can take this output: the explicit way to add a
+              second source to it, now that the dock only lists cards a chart reads. */}
+          <AddToChartItems
+            matrixId={outputMatrixId(card, buildMenu.outputId) ?? -1}
+            columnIndex={0}
+          />
           <div className="context-menu__separator" />
           <ContextMenuItem
             onClick={() => {
