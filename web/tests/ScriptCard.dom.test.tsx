@@ -924,6 +924,43 @@ describe('collapsible declaration columns', () => {
 // says why. The store's run path enforces the same predicate, so no other entry point (a
 // shortcut, a future automatic rerun) can execute it before the confirmation.
 
+describe('in-flight feedback', () => {
+  it('shows a breathing light and an elapsed progress strip only while running', async () => {
+    let finish!: (value: { ok: boolean; nodeId: number; state: 'done'; resultMatrixIds: number[] }) => void;
+    const pending = new Promise<{ ok: boolean; nodeId: number; state: 'done'; resultMatrixIds: number[] }>(
+      (resolve) => {
+        finish = resolve;
+      },
+    );
+    client.computeNode.mockReturnValueOnce(pending);
+
+    const host = await mount(cardId);
+    await act(async () => {
+      host.querySelector<HTMLButtonElement>('.script-card__run:not(.script-card__run--debug)')!.click();
+    });
+    await flush();
+
+    // The lamp breathes (a class the stylesheet animates) and the strip counts the wait.
+    const light = host.querySelector('.card--script .node-light')!;
+    expect(light.className).toContain('node-light--computing');
+    const strip = host.querySelector('.script-card__progress');
+    expect(strip).not.toBeNull();
+    expect(strip!.getAttribute('role')).toBe('progressbar');
+    expect(strip!.querySelector('.script-card__progress-sweep')).not.toBeNull();
+    expect(strip!.textContent).toMatch(/\d+\.\d s/);
+
+    await act(async () => {
+      finish({ ok: true, nodeId: 11, state: 'done', resultMatrixIds: [111] });
+    });
+    await flush();
+    await flush();
+    await flush();
+
+    // Nothing left to report once the numbers are in.
+    expect(host.querySelector('.script-card__progress')).toBeNull();
+  });
+});
+
 describe('blocking outline', () => {
   it('outlines the offending card while a node-level blocker is open', async () => {
     const host = await mount(cardId);

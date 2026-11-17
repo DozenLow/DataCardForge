@@ -768,6 +768,40 @@ export interface ScriptCardProps {
   onJumpToLine?: (line: number) => void;
 }
 
+/**
+ * In-flight feedback for one run: a sweep and the wall clock.
+ *
+ * A compute is a single request, so there is no row counter to show (the numbers are made
+ * by whatever the script does — often one vectorised numpy call). What the browser does know
+ * is how long it has been waiting, and that is what this shows; a "progress" number invented
+ * here would be a lie. Mounted only while a run is in flight, so the interval stops with it.
+ */
+function RunProgress({ label }: { label: string }) {
+  const [elapsedMs, setElapsedMs] = useState(0);
+  useEffect(() => {
+    const started = Date.now();
+    setElapsedMs(0);
+    const timer = setInterval(() => setElapsedMs(Date.now() - started), 200);
+    return () => clearInterval(timer);
+  }, []);
+  const seconds = (elapsedMs / 1000).toFixed(1);
+  return (
+    <span
+      className="script-card__progress"
+      role="progressbar"
+      aria-valuetext={`${label} ${seconds} s`}
+      data-run-progress={seconds}
+    >
+      <span className="script-card__progress-track" aria-hidden>
+        <span className="script-card__progress-sweep" />
+      </span>
+      <span className="script-card__progress-text">
+        {label} · {seconds} s
+      </span>
+    </span>
+  );
+}
+
 /** Source line of one input port, resolved from the cards the port reads. */
 interface PortView {
   portId: string;
@@ -1246,7 +1280,7 @@ export function ScriptCard({
           </button>
           <span className={`node-light node-light--${state}`} aria-hidden />
           {running ? (
-            <span className="script-card__running">{labels.running}</span>
+            <RunProgress label={labels.running} />
           ) : (
             <span className="script-card__env" title={env}>
               {env}
