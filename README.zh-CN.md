@@ -338,6 +338,43 @@ node scripts/smoke.mjs http://127.0.0.1:4173
 Linux 静态链接 libstdc++/libgcc，Windows 用 `/MT` 静态链接 MSVC 运行时，Eigen 是 header-only。
 完整说明见 [`.github/release-assets.md`](.github/release-assets.md)。
 
+### 运行
+
+```bash
+# Windows：直接双击 datacardforge.exe —— 会弹出一个显示地址的控制台窗口，并自动打开浏览器
+./datacardforge                 # 起服务并自动打开浏览器
+./datacardforge --no-open       # 只起服务（CI、服务器、远程 shell 用）
+./datacardforge --open          # 即使 stdout 不是控制台也强制打开浏览器
+./datacardforge --port 4000     # 换端口
+./datacardforge --web-root DIR  # 指到别处的前端产物
+```
+
+Windows 上那个控制台窗口是刻意保留的：它就是运行状态（地址、前端目录、浏览器是否打开、失败原因）。
+**关掉窗口即停止服务**；启动失败时窗口会停留 15 秒，不会一闪而过。浏览器没打开时，窗口里会写明原因
+（`--no-open`、`DC_NO_OPEN`、没找到 `web/`、控制台不可交互）并给出可手动打开的地址；端口被占用时会
+提示是已有实例在跑（直接打开该地址）还是换端口。
+
+找不到 `web/` 时后端仍会启动，只提供 API，并在启动窗口里说明（`no web/ directory was found`）。
+
+### 运行时依赖
+
+| 平台 | 需要什么 |
+|---|---|
+| Linux | 仅 glibc ≥ 2.39（Ubuntu 24.04 / Debian 13 及以上）；libstdc++ 与 libgcc 已静态链接进二进制 |
+| macOS | 系统自带 libc++，无需额外安装 |
+| Windows | C++ 运行库已**整体链接进 exe**（`libstdc++` / `libgcc` / `winpthread` 都不需要外部 DLL），只依赖系统自带 DLL，**不需要**装 VC++ Redistributable 或任何 MinGW 组件 |
+| 全部 | Eigen 是 header-only，已编译进二进制，不需要单独安装 |
+
+> **如果旧包弹出「无法定位程序输入点 …`do_unshift`… 于动态链接库 `dc_backend.exe` 上」**：
+> 那是因为旧包的 exe 仍然动态依赖 MinGW 的 `libstdc++-6.dll`，而系统从 `PATH` 里抓到了一个
+> 口味或版本不匹配的副本（mingw-w64 的 UCRT 版与 MSVCRT 版 libstdc++ 连 `mbstate_t` 的符号名都不同，
+> 所以版本号一样也可能不兼容）。当前包已把运行时全部静态链接，不会再出现；若你手工解压过旧包，
+> 请把同目录残留的 `libstdc++-6.dll`、`libgcc_s_seh-1.dll`、`libwinpthread-1.dll` 删掉。
+
+### 安全边界
+
+无鉴权、只绑 `127.0.0.1`、无 HTTPS；静态托管只服务白名单扩展名，拒绝路径穿越（越界探测返回 404，不会回退成 `index.html`）。详见 [SECURITY.zh-CN.md](SECURITY.zh-CN.md)。
+
 ## 架构扩展点
 
 - `backend/src/expression.cpp` → 表达式引擎（cell 模式 + 矩阵模式评估器）

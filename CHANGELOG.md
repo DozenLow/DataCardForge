@@ -7,6 +7,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.4] - 2026-11-17
+
+### Features
+
+- `feat(backend)`: gate every response behind a loopback `Origin` check — a page from another origin
+  can no longer read the API
+- `feat(backend)`: `builtin:python` cards evaluate in a clean-room child process, pinned to a
+  provisioned Python 3.13 + numpy runtime, with byte-level golden fixtures behind them
+- `feat(web)`: Python script card — three-column body, declaration rails, port sub-cards, and every
+  declared output in its own wireable cache slot
+- `feat(web)`: workspace environment stamp, locked on first use and surfaced as a banner
+- `feat`: two-layer script check — a compile-only endpoint plus an "impure" badge; nothing is executed
+- `feat(web)`: charts and cards can be built from **any** declared output; the column dock lists
+  exactly the matrices a chart can read
+- `feat(web)`: connections anchor on the rendered port sub-cards; the right-click menu creates cards,
+  with chart types one level down
+- `feat(web)`: user operations settle once at 200 ms before propagation, instead of a timer per card
+- `feat`: script execution is gated on workspace-file trust — per-file sha256, per-script confirmation,
+  bound to this machine's environment
+- `feat(web)`: an armed script card reruns like a formula card; a blocked card freezes its propagation
+  only, and the gate releases by itself
+- `feat(web)`: the formula card adopts the script card's three-column body
+- `feat(web)!`: switching a data card's file is a **data change** — the function and chart cards that
+  read it follow and recompute; the re-pointing confirmation is gone
+- `feat(web)`: a chart lists only the cards it reads; further sources are added through
+  *Add to existing chart*
+- `feat(web)`: breathing lamp and elapsed-time strip while a run is in flight
+
+### Bug fixes
+
+- `fix(web)`: same-origin proxy traffic reaches the backend as loopback, so the origin gate does not
+  reject the dev server
+- `fix(web)`: the column dock lists every matrix a chart can read
+- `fix(web)`: a change that lands while a card is computing reruns it afterwards instead of being lost
+- `fix(web)`: every function card gets the file switch, not just legacy inputs, and the banner names
+  the script variable
+- `fix(web)`: a card is done only once its numbers landed — a partial result is never charted
+- `fix(web)`: automatic runs replay when a gate reopens, and superseded results are discarded
+- `fix(web)`: `resumeAutoRuns` stays inside the script-card section
+
 ## [0.1.3] - 2026-11-04
 
 ### Added

@@ -413,6 +413,50 @@ the browser. No runtime installation is needed — libstdc++/libgcc are statical
 MSVC runtime is static (`/MT`) on Windows, and Eigen is header-only. Full details in
 [`.github/release-assets.md`](.github/release-assets.md).
 
+### Running a release archive
+
+```bash
+# Windows: just double-click datacardforge.exe — a console window shows the address and the
+#          browser opens on it
+./datacardforge                 # start the service and open the browser
+./datacardforge --no-open       # start the service only (CI, servers, remote shells)
+./datacardforge --open          # open the browser even when stdout is not a console
+./datacardforge --port 4000     # use another port
+./datacardforge --web-root DIR  # point at a front end built elsewhere
+```
+
+That Windows console window is deliberate — it *is* the run state (address, front end directory,
+whether the browser was opened, and why not). **Closing it stops the service.** After a startup
+failure it stays open for 15 s instead of flashing by. When the browser is not opened the window
+says why (`--no-open`, `DC_NO_OPEN`, no `web/` found, a non-interactive console) and prints the
+address to open by hand; when the port is taken it tells you either to open the address of the
+instance that already runs or to pick another port.
+
+When `web/` is missing the backend still starts, serving the API only, and says so in that window
+(`no web/ directory was found`).
+
+### Runtime requirements
+
+| Platform | What you need |
+|---|---|
+| Linux | Only glibc ≥ 2.39 (Ubuntu 24.04 / Debian 13 or newer); libstdc++ and libgcc are linked statically into the binary |
+| macOS | The system provides libc++; nothing to install |
+| Windows | The C++ runtime is linked **into the exe** (no `libstdc++` / `libgcc` / `winpthread` DLL is needed), so all it uses are Windows system DLLs — no VC++ Redistributable and no MinGW components are required |
+| All | Eigen is header-only and compiled in — nothing to install separately |
+
+> **If an older archive pops up "the procedure entry point …`do_unshift`… could not be located in `dc_backend.exe`"**:
+> that archive still imported MinGW's `libstdc++-6.dll`, and Windows resolved an unrelated copy from `PATH`
+> whose flavour or version did not match (mingw-w64's UCRT and MSVCRT libstdc++ builds do not even spell
+> `mbstate_t` the same way, so an identical version number can still be incompatible). The runtime is now
+> linked entirely into the exe, so it cannot recur; if you extracted an old archive by hand, delete the
+> leftover `libstdc++-6.dll`, `libgcc_s_seh-1.dll` and `libwinpthread-1.dll` beside it.
+
+### Security boundary
+
+No authentication, bound to `127.0.0.1` only, no HTTPS; static hosting serves allow-listed extensions
+only and refuses path traversal (an out-of-root probe returns 404 rather than falling back to
+`index.html`). See [SECURITY.md](SECURITY.md).
+
 ## Extension points
 
 - `backend/src/expression.cpp` → expression engine (cell-mode + matrix-mode evaluators)
