@@ -27,6 +27,14 @@ import {
 } from './cardMetrics.ts';
 import { DependencyGraph } from '../core/DependencyGraph.ts';
 import { MatrixData } from '../core/MatrixData.ts';
+import {
+  NO_UNIT,
+  candidateByUnit,
+  normalizeUnitToken,
+  resolveConfirmed,
+  unitSignature,
+  type UnitConfirmations,
+} from '../core/units.ts';
 import { DEFAULT_SMOOTHING, type SmoothingOptions } from '../core/Smoothing.ts';
 import { defaultChartConfig, type ChartConfig, type ChartSource } from '../charts/chartModel.ts';
 import { chartTypeDef, minimumColumns, type ChartTypeId } from '../charts/chartTypes.ts';
@@ -1286,6 +1294,22 @@ interface WorkspaceState {
   /** Extend/shrink the contract (the explicit way out of a self-edit violation). */
   setColumnContract: (cardId: number, columns: number | null) => void;
 
+  // ── column units v1 (derived metadata; see decisions/2026-11-18-units-v1.md) ─────────
+  /**
+   * Confirmation memory, keyed by column-unit signature then column index. Persisted as an
+   * optional snapshot field so identical headers are asked only once. The matrix itself
+   * stores no unit — resolution is always `annotation + this memory`, derived at read time.
+   */
+  unitConfirmations: UnitConfirmations;
+  /**
+   * Confirm one ambiguous token for EVERY column of a matrix that carries it (group-level).
+   * Returns the number of columns affected. The caller shows the affected-column list before
+   * invoking this, so a batch is always visible; a recognised column is never re-asked.
+   */
+  confirmUnitGroup: (matrixId: number, token: string, unit: string) => number;
+  /** Override or clear ONE column's unit (`NO_UNIT` clears). Writes the same signature memory. */
+  setColumnUnit: (matrixId: number, columnIndex: number, unit: string) => void;
+
   // ── summary panel (`builtin:summary`; session-only, plan A lazy node) ─
   /**
    * Per-card 摘要 state, keyed by card id. Never persisted and never on the card model:
@@ -1520,6 +1544,32 @@ function formulaReference(column: { posName: string; annotation: string }): stri
 }
 
 
+
+/**
+ * Sanitise unit-confirmation memory read from a save file.
+ *
+ * A hand-edited (or older) snapshot must not hand the resolver a unit it does not know:
+ * only a registered unit or the explicit `none` survives, and only against a numeric column
+ * index under a string signature. Anything else is dropped rather than guessed — the same
+ * "never invent data" rule the loaders use for unparseable cells.
+ */
+function sanitizeUnitConfirmations(raw: unknown): UnitConfirmations {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, Record<number, string>> = {};
+  for (const [signature, perColumn] of Object.entries(raw as Record<string, unknown>)) {
+    if (!perColumn || typeof perColumn !== 'object') continue;
+    const columns: Record<number, string> = {};
+    for (const [indexKey, unit] of Object.entries(perColumn as Record<string, unknown>)) {
+      const index = Number(indexKey);
+      if (!Number.isInteger(index) || index < 0) continue;
+      if (typeof unit !== 'string') continue;
+      if (unit !== NO_UNIT && !candidateByUnit(unit)) continue;
+      columns[index] = unit;
+    }
+    if (Object.keys(columns).length > 0) out[signature] = columns;
+  }
+  return out;
+}
 
 /**
  * Make restored cards safe for the backend-owned model.
@@ -3092,6 +3142,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     dependencies: new DependencyGraph(),
     // No file yet: nothing to trust, and a session-authored script never waits.
     trust: initialTrust(),
+    // No confirmations yet: every ambiguous header starts un-asked.
+    unitConfirmations: {},
     propagationFrozen: false,
     blockers: [],
     blockedCardId: null,
@@ -3556,6 +3608,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         dependencies: new DependencyGraph(),
             // The panels' nodes were released above; their state goes with the cards.
         summaries: {},
+        // Confirmations belonged to the matrices that were just released.
+        unitConfirmations: {},
         // Same for each script card's last run: the nodes are gone with the cards.
         scriptRuns: {},
         // The sentence counted the scripts of the workspace that was just emptied; leaving
@@ -4290,6 +4344,48 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         ),
       });
       void syncFunctionCard(cardId);
+    },
+
+    // ── column units v1 ───────────────────────────────────────────────
+
+    confirmUnitGroup(matrixId, token, unit) {
+      const state = get();
+      const matrix = state.matrices.get(matrixId);
+      if (!matrix) return 0;
+      // Only a registered unit (or an explicit "no unit") may be remembered; anything else
+      // would invent a unit the convert card could not act on.
+      if (unit !== NO_UNIT && !candidateByUnit(unit)) return 0;
+      const annotations = matrix.columns().map((col) => col.annotation);
+      const signature = unitSignature(annotations);
+      const target = normalizeUnitToken(token).toLowerCase();
+      const existing = state.unitConfirmations[signature] ?? {};
+      const affected: number[] = [];
+      annotations.forEach((annotation, index) => {
+        // Read the CONFIRMED resolution: a column that already carries an answer is no
+        // longer "un-asked", so a repeated group confirm touches nothing (idempotent).
+        const resolution = resolveConfirmed(annotation, existing[index]);
+        if (
+          resolution.state === 'ambiguous' &&
+          normalizeUnitToken(resolution.token).toLowerCase() === target
+        ) {
+          affected.push(index);
+        }
+      });
+      if (affected.length === 0) return 0;
+      const next = { ...existing };
+      for (const index of affected) next[index] = unit;
+      set({ unitConfirmations: { ...state.unitConfirmations, [signature]: next } });
+      return affected.length;
+    },
+
+    setColumnUnit(matrixId, columnIndex, unit) {
+      const state = get();
+      const matrix = state.matrices.get(matrixId);
+      if (!matrix || columnIndex < 0 || columnIndex >= matrix.columnCount()) return;
+      if (unit !== NO_UNIT && !candidateByUnit(unit)) return;
+      const signature = unitSignature(matrix.columns().map((col) => col.annotation));
+      const next = { ...(state.unitConfirmations[signature] ?? {}), [columnIndex]: unit };
+      set({ unitConfirmations: { ...state.unitConfirmations, [signature]: next } });
     },
 
     // ── summary panel (`builtin:summary`) ─────────────────────────────
@@ -5130,6 +5226,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         env: cloneWorkspaceEnv(state.workspaceEnv),
         cards: state.cards,
         matrices,
+        // Written unconditionally (like `env`): the file shape never depends on whether a
+        // unit happened to be confirmed, and a legacy reader simply ignores the field.
+        unitConfirmations: state.unitConfirmations,
         nextCardId: state.nextCardId,
         nextMatrixId: state.nextMatrixId,
       };
@@ -5192,6 +5291,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // Panel state names nodes of the workspace being replaced; a restored card starts
         // with 未请求 like every other card.
         summaries: {},
+        // Unit confirmations travel with the file (sanitised): the same headers must not be
+        // re-asked after a restore. A legacy file without the block starts empty.
+        unitConfirmations: sanitizeUnitConfirmations(snapshot.unitConfirmations),
         // A restored script card has no run of its own: the traceback, duration and previews
         // belonged to a node that no longer exists.
         scriptRuns: {},
@@ -5285,6 +5387,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // must never be answered for a card that inherits the same id).
         summaries: {},
         scriptRuns: {},
+        // Confirmations belonged to the matrices that were just dropped.
+        unitConfirmations: {},
         trust: initialTrust(),
         propagationFrozen: false,
         blockers: [],

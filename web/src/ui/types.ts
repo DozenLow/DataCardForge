@@ -449,6 +449,13 @@ export interface WorkspaceSnapshot {
    * legacy file being read, never a file this app produced.
    */
   env?: WorkspaceEnv;
+  /**
+   * Column-unit confirmation memory (units v1): column-unit signature → column index →
+   * confirmed unit (or the literal `none`). Optional because snapshots written before units
+   * existed are still on users' disks; a missing block simply means "nothing confirmed yet".
+   * The matrix data itself carries no unit — resolution is always annotation + this memory.
+   */
+  unitConfirmations?: Record<string, Record<number, string>>;
   cards: CardSnapshot[];
   matrices: MatrixSnapshot[];
   nextCardId: number;
