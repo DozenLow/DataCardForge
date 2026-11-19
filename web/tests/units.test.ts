@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import {
   NO_UNIT,
   candidateByUnit,
+  convertibleUnits,
   resolveConfirmed,
   resolveUnit,
   unitSignature,
@@ -129,5 +130,28 @@ describe('unit signature', () => {
 
   it('includes the column count so a prefix/suffix pair cannot collide', () => {
     expect(unitSignature(['a'])).not.toBe(unitSignature(['a', '']));
+  });
+});
+
+describe('convertibleUnits (target picker source)', () => {
+  it('lists only scalar units, each with a dimension and factor', () => {
+    const units = convertibleUnits();
+    expect(units.length).toBeGreaterThan(0);
+    for (const u of units) {
+      expect(u.scalar).toBe(true);
+      expect(typeof u.dimension).toBe('string');
+      expect(typeof u.factor).toBe('number');
+    }
+    // Non-scalar units must never be offered as conversion targets.
+    expect(units.some((u) => u.unit === '°C')).toBe(false);
+    expect(units.some((u) => u.unit === 'dB')).toBe(false);
+    expect(units.some((u) => u.unit === 'AU')).toBe(false);
+  });
+
+  it('contains the pressure family so a kPa source can target bar/MPa', () => {
+    const pressure = convertibleUnits().filter((u) => u.dimension === 'pressure').map((u) => u.unit);
+    expect(pressure).toContain('kPa');
+    expect(pressure).toContain('bar');
+    expect(pressure).toContain('MPa');
   });
 });

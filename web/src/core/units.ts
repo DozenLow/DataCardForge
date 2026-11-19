@@ -533,3 +533,22 @@ export function columnUnitResolutions(
   );
   return { signature, resolutions };
 }
+
+/**
+ * Every registered convertible (scalar) unit, in registry order.
+ *
+ * The convert card's target picker lists these filtered to the source column's dimension.
+ * Pure enumeration — it adds no resolution behaviour, so the shared parse fixtures are
+ * unaffected. Non-scalar units (°C/dB/HRC/AU) are excluded: they have no multiplicative
+ * conversion and must never appear as a target.
+ */
+export function convertibleUnits(): UnitCandidate[] {
+  return entries
+    .filter((entry) => entry.scalar)
+    .map((entry) => ({
+      unit: entry.unit,
+      dimension: entry.dimension,
+      factor: entry.factor,
+      scalar: entry.scalar,
+    }));
+}
