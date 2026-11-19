@@ -63,6 +63,7 @@ extern const char* const kSigExpressionColumns;
 extern const char* const kSigLinearRegression;
 extern const char* const kSigSummary;
 extern const char* const kSigPython;
+extern const char* const kSigUnitConvert;
 
 // The summary statistic catalog. Its ORDER is the output row order of `builtin:summary`,
 // and its ids are stable identities — never renamed, never reused, the same rule as

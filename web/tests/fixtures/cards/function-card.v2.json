@@ -842,6 +842,532 @@
           }
         ]
       }
+    },
+    {
+      "name": "unit-convert-pressure-passthrough",
+      "comment": "Convert col0 kPa->bar (annotation suffix rewritten); col1 passes through verbatim even though its unit is unconfirmed. out = value*factorFrom/factorTo.",
+      "matrices": [
+        {
+          "id": 40,
+          "columns": [
+            {
+              "posName": "Pos.1",
+              "annotation": "pressure_kpa",
+              "data": [
+                100,
+                250,
+                50
+              ]
+            },
+            {
+              "posName": "Pos.2",
+              "annotation": "temp_c",
+              "data": [
+                20,
+                21,
+                22
+              ]
+            }
+          ]
+        }
+      ],
+      "card": {
+        "kind": "formula",
+        "inputs": [
+          {
+            "portId": "src",
+            "target": {
+              "type": "matrix",
+              "cardId": 40,
+              "matrixId": 40
+            }
+          }
+        ],
+        "signatureId": "builtin:unit-convert",
+        "params": {
+          "targets": [
+            {
+              "column": 0,
+              "to": "bar"
+            }
+          ]
+        }
+      },
+      "afterCreate": {
+        "state": "dirty",
+        "reason": "notRequested",
+        "empty": true
+      },
+      "trigger": "compute",
+      "expect": {
+        "outputs": [
+          {
+            "outputId": "result",
+            "columns": [
+              {
+                "name": "pressure_bar",
+                "data": [
+                  1.0,
+                  2.5,
+                  0.5
+                ]
+              },
+              {
+                "name": "temp_c",
+                "data": [
+                  20,
+                  21,
+                  22
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "unit-convert-velocity",
+      "matrices": [
+        {
+          "id": 41,
+          "columns": [
+            {
+              "posName": "Pos.1",
+              "annotation": "wind_m_s",
+              "data": [
+                5,
+                0.5,
+                12
+              ]
+            }
+          ]
+        }
+      ],
+      "card": {
+        "kind": "formula",
+        "inputs": [
+          {
+            "portId": "src",
+            "target": {
+              "type": "matrix",
+              "cardId": 41,
+              "matrixId": 41
+            }
+          }
+        ],
+        "signatureId": "builtin:unit-convert",
+        "params": {
+          "targets": [
+            {
+              "column": 0,
+              "to": "mm/s"
+            }
+          ]
+        }
+      },
+      "afterCreate": {
+        "state": "dirty",
+        "reason": "notRequested",
+        "empty": true
+      },
+      "trigger": "compute",
+      "expect": {
+        "outputs": [
+          {
+            "outputId": "result",
+            "columns": [
+              {
+                "name": "wind_mm/s",
+                "data": [
+                  5000.0,
+                  500.0,
+                  12000.0
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "unit-convert-frequency",
+      "matrices": [
+        {
+          "id": 42,
+          "columns": [
+            {
+              "posName": "Pos.1",
+              "annotation": "speed_rpm",
+              "data": [
+                120,
+                60,
+                30
+              ]
+            }
+          ]
+        }
+      ],
+      "card": {
+        "kind": "formula",
+        "inputs": [
+          {
+            "portId": "src",
+            "target": {
+              "type": "matrix",
+              "cardId": 42,
+              "matrixId": 42
+            }
+          }
+        ],
+        "signatureId": "builtin:unit-convert",
+        "params": {
+          "targets": [
+            {
+              "column": 0,
+              "to": "Hz"
+            }
+          ]
+        }
+      },
+      "afterCreate": {
+        "state": "dirty",
+        "reason": "notRequested",
+        "empty": true
+      },
+      "trigger": "compute",
+      "expect": {
+        "outputs": [
+          {
+            "outputId": "result",
+            "columns": [
+              {
+                "name": "speed_Hz",
+                "data": [
+                  2.0,
+                  1.0,
+                  0.5
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "unit-convert-ratio",
+      "matrices": [
+        {
+          "id": 43,
+          "columns": [
+            {
+              "posName": "Pos.1",
+              "annotation": "conc_ppm",
+              "data": [
+                2,
+                0.1
+              ]
+            }
+          ]
+        }
+      ],
+      "card": {
+        "kind": "formula",
+        "inputs": [
+          {
+            "portId": "src",
+            "target": {
+              "type": "matrix",
+              "cardId": 43,
+              "matrixId": 43
+            }
+          }
+        ],
+        "signatureId": "builtin:unit-convert",
+        "params": {
+          "targets": [
+            {
+              "column": 0,
+              "to": "ppb"
+            }
+          ]
+        }
+      },
+      "afterCreate": {
+        "state": "dirty",
+        "reason": "notRequested",
+        "empty": true
+      },
+      "trigger": "compute",
+      "expect": {
+        "outputs": [
+          {
+            "outputId": "result",
+            "columns": [
+              {
+                "name": "conc_ppb",
+                "data": [
+                  1999.9999999999998,
+                  99.99999999999999
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "unit-convert-explicit-from",
+      "matrices": [
+        {
+          "id": 44,
+          "columns": [
+            {
+              "posName": "Pos.1",
+              "annotation": "current_a",
+              "data": [
+                2
+              ]
+            }
+          ]
+        }
+      ],
+      "card": {
+        "kind": "formula",
+        "inputs": [
+          {
+            "portId": "src",
+            "target": {
+              "type": "matrix",
+              "cardId": 44,
+              "matrixId": 44
+            }
+          }
+        ],
+        "signatureId": "builtin:unit-convert",
+        "params": {
+          "targets": [
+            {
+              "column": 0,
+              "from": "A",
+              "to": "mA"
+            }
+          ]
+        }
+      },
+      "afterCreate": {
+        "state": "dirty",
+        "reason": "notRequested",
+        "empty": true
+      },
+      "trigger": "compute",
+      "expect": {
+        "outputs": [
+          {
+            "outputId": "result",
+            "columns": [
+              {
+                "name": "current_mA",
+                "data": [
+                  2000.0
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    },
+    {
+      "name": "unit-convert-dimension-mismatch",
+      "matrices": [
+        {
+          "id": 45,
+          "columns": [
+            {
+              "posName": "Pos.1",
+              "annotation": "stress_MPa",
+              "data": [
+                1
+              ]
+            }
+          ]
+        }
+      ],
+      "card": {
+        "kind": "formula",
+        "inputs": [
+          {
+            "portId": "src",
+            "target": {
+              "type": "matrix",
+              "cardId": 45,
+              "matrixId": 45
+            }
+          }
+        ],
+        "signatureId": "builtin:unit-convert",
+        "params": {
+          "targets": [
+            {
+              "column": 0,
+              "to": "kN"
+            }
+          ]
+        }
+      },
+      "afterCreate": {
+        "state": "dirty",
+        "reason": "notRequested",
+        "empty": true
+      },
+      "trigger": "compute",
+      "expectError": {
+        "code": "unitMismatch"
+      },
+      "comment": "Source parses recognized MPa (pressure); target kN is force -> dimension mismatch."
+    },
+    {
+      "name": "unit-convert-nonscalar",
+      "matrices": [
+        {
+          "id": 46,
+          "columns": [
+            {
+              "posName": "Pos.1",
+              "annotation": "level_db",
+              "data": [
+                10
+              ]
+            }
+          ]
+        }
+      ],
+      "card": {
+        "kind": "formula",
+        "inputs": [
+          {
+            "portId": "src",
+            "target": {
+              "type": "matrix",
+              "cardId": 46,
+              "matrixId": 46
+            }
+          }
+        ],
+        "signatureId": "builtin:unit-convert",
+        "params": {
+          "targets": [
+            {
+              "column": 0,
+              "to": "Pa"
+            }
+          ]
+        }
+      },
+      "afterCreate": {
+        "state": "dirty",
+        "reason": "notRequested",
+        "empty": true
+      },
+      "trigger": "compute",
+      "expectError": {
+        "code": "unitNotScalar"
+      }
+    },
+    {
+      "name": "unit-convert-ambiguous-from",
+      "matrices": [
+        {
+          "id": 47,
+          "columns": [
+            {
+              "posName": "Pos.1",
+              "annotation": "output_mw",
+              "data": [
+                5
+              ]
+            }
+          ]
+        }
+      ],
+      "card": {
+        "kind": "formula",
+        "inputs": [
+          {
+            "portId": "src",
+            "target": {
+              "type": "matrix",
+              "cardId": 47,
+              "matrixId": 47
+            }
+          }
+        ],
+        "signatureId": "builtin:unit-convert",
+        "params": {
+          "targets": [
+            {
+              "column": 0,
+              "to": "mW"
+            }
+          ]
+        }
+      },
+      "afterCreate": {
+        "state": "dirty",
+        "reason": "notRequested",
+        "empty": true
+      },
+      "trigger": "compute",
+      "expectError": {
+        "code": "unitAmbiguous"
+      }
+    },
+    {
+      "name": "unit-convert-unknown-target",
+      "matrices": [
+        {
+          "id": 48,
+          "columns": [
+            {
+              "posName": "Pos.1",
+              "annotation": "pressure_kpa",
+              "data": [
+                1
+              ]
+            }
+          ]
+        }
+      ],
+      "card": {
+        "kind": "formula",
+        "inputs": [
+          {
+            "portId": "src",
+            "target": {
+              "type": "matrix",
+              "cardId": 48,
+              "matrixId": 48
+            }
+          }
+        ],
+        "signatureId": "builtin:unit-convert",
+        "params": {
+          "targets": [
+            {
+              "column": 0,
+              "to": "furlong"
+            }
+          ]
+        }
+      },
+      "afterCreate": {
+        "state": "dirty",
+        "reason": "notRequested",
+        "empty": true
+      },
+      "trigger": "compute",
+      "expectError": {
+        "code": "unknownUnit"
+      }
     }
   ]
 }

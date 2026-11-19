@@ -81,6 +81,7 @@ add_library(dc_core
   src/expression.cpp
   src/signature.cpp
   src/summary.cpp
+  src/units.cpp
   src/nodes.cpp
   src/accuracy.cpp
 )
@@ -319,6 +320,15 @@ add_executable(dc_card_fixture_run tests/card_fixture_run.cpp)
 target_link_libraries(dc_card_fixture_run PRIVATE dc_core)
 add_test(NAME card_fixtures
   COMMAND dc_card_fixture_run ${CMAKE_SOURCE_DIR}/../web/tests/fixtures/cards/function-card.v2.json)
+
+# Unit resolver parity (tests/units_test.cpp): reads the SAME web/tests/fixtures/units/parse.json
+# that web/tests/units.test.ts judges the TS resolver with. Two ports of one registry drift
+# silently unless one fixture convicts both, so this is the referee for
+# docs/decisions/2026-11-18-units-v1.md §二 and for the conversion card's factor constants.
+add_executable(dc_units_test tests/units_test.cpp)
+target_link_libraries(dc_units_test PRIVATE dc_core)
+add_test(NAME units_resolver
+  COMMAND dc_units_test ${CMAKE_SOURCE_DIR}/../web/tests/fixtures/units/parse.json)
 
 # Engine-layer perf gate (docs/decisions/2026-10-29-perf-gate.md): dc_bench calls
 # ExprEngine::evaluate / evaluateMatrix directly — no HTTP, no server, no service restarts.

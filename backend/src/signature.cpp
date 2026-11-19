@@ -8,6 +8,7 @@ const char* const kSigExpressionColumns = "builtin:expression-columns";
 const char* const kSigLinearRegression = "builtin:linear-regression";
 const char* const kSigSummary = "builtin:summary";
 const char* const kSigPython = "builtin:python";
+const char* const kSigUnitConvert = "builtin:unit-convert";
 
 // The statistic catalog. Order == output row order. Ids are stable identities: renaming
 // one would silently re-label every stored summary card, so they are frozen here exactly
@@ -58,6 +59,27 @@ const FunctionSignature& linearRegression() {
     s.displayName = "linear regression";
     s.inputs = {{"x", "x values", true}, {"y", "y values", true}};
     s.outputs = {{"fit"}};
+    return s;
+  }();
+  return kSig;
+}
+
+// `builtin:unit-convert` — the unit conversion card. One matrix port in, one table out.
+//
+// The output is the WHOLE input table with the targeted columns converted, so the width follows
+// the data (like an expression table) while K stays 1. explicitCompute for the same reason
+// `builtin:summary` has it: converting is an explicit user action ("选目标单位、点换算"),
+// creating a card must not rewrite anyone's numbers
+// (docs/decisions/2026-11-18-units-v1.md §四).
+const FunctionSignature& unitConvert() {
+  static const FunctionSignature kSig = [] {
+    FunctionSignature s;
+    s.id = kSigUnitConvert;
+    s.version = 1;
+    s.displayName = "unit convert";
+    s.inputs = {{"src", "source table", true}};
+    s.outputs = {{"result"}};
+    s.explicitCompute = true;
     return s;
   }();
   return kSig;
@@ -116,11 +138,12 @@ const FunctionSignature* findSignature(const std::string& id) {
   if (id == kSigLinearRegression) return &linearRegression();
   if (id == kSigSummary) return &summary();
   if (id == kSigPython) return &pythonScript();
+  if (id == kSigUnitConvert) return &unitConvert();
   return nullptr;
 }
 
 std::vector<const FunctionSignature*> allSignatures() {
-  return {&expressionColumns(), &linearRegression(), &summary(), &pythonScript()};
+  return {&expressionColumns(), &linearRegression(), &summary(), &pythonScript(), &unitConvert()};
 }
 
 }  // namespace dc

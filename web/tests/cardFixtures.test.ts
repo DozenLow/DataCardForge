@@ -60,6 +60,7 @@ const DECLARED_PORTS: Record<string, string[]> = {
   'builtin:expression-columns': ['src'],
   'builtin:linear-regression': ['x', 'y'],
   'builtin:summary': ['src'],
+  'builtin:unit-convert': ['src'],
 };
 
 /** Output column names each signature promises (order matters; names are its contract). */
@@ -167,6 +168,15 @@ for (const file of ['function-card.v2.json']) {
             });
             // A lazy signature is only tested if the case says both how it starts and
             // what computes it.
+            expect(c.afterCreate?.reason).toBe('notRequested');
+            expect(c.trigger).toBe('compute');
+          } else if (c.card.signatureId === 'builtin:unit-convert') {
+            // The output IS the input table: same width, same height, one column per input
+            // column. Names are data-dependent (the annotation suffix is rewritten), so this
+            // signature deliberately has no entry in DECLARED_OUTPUT_COLUMNS.
+            expect(columns).toHaveLength(c.matrices[0].columns.length);
+            for (const column of columns) expect(column.data).toHaveLength(sourceRows);
+            // Converting is an explicit user action, never something creation does.
             expect(c.afterCreate?.reason).toBe('notRequested');
             expect(c.trigger).toBe('compute');
           } else if (c.card.signatureId === 'builtin:expression-columns') {

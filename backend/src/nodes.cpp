@@ -34,6 +34,7 @@
 #include "matrix_value.h"  // ShapeError (matrix-mode failures)
 #include "signature.h"
 #include "summary.h"
+#include "units.h"
 
 namespace dc {
 
@@ -1522,6 +1523,9 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
   // Script cards (builtin:python) carry their own structured detail (stderr tail, exit code,
   // parsed manifest fields) and their declared outputs beyond output 0.
   Json scriptErrorDetail = Json::object();
+  // builtin:unit-convert reports which column/unit failed; the sentence is built client-side
+  // from `code` + these fields, so they must not be lost in the error path.
+  Json unitConvertDetail = Json::object();
   std::vector<std::pair<std::string, std::vector<Column>>> scriptExtras;
   bool cancelled = false;
 
@@ -1671,6 +1675,34 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
         } else {
           outputs.push_back(std::move(table.columns));
         }
+      } else if (signatureId == kSigUnitConvert) {
+        // builtin:unit-convert — the whole input table with the targeted columns converted
+        // (units.cpp). Columns nobody asked about pass through verbatim, so an unconfirmed
+        // header (`temp_c`) survives a card that does not touch it.
+        //
+        // The column labels arrive flattened ("Pos.1 pressure_kpa"), so they are split again:
+        // the unit resolver reads the annotation and the annotation rewrite splices the same
+        // string, which is why the output column can be renamed without a label channel.
+        std::vector<Column> inputColumns;
+        if (!slices.empty()) {
+          const PortSlice& slice = slices[0];
+          for (size_t i = 0; i < slice.columnCount; ++i) {
+            Column source;
+            Matrix::labelParsed(names[slice.firstColumn + i], &source.posName,
+                                &source.annotation);
+            source.data = data[slice.firstColumn + i];
+            inputColumns.push_back(std::move(source));
+          }
+        }
+        UnitConvertResult converted = evaluateUnitConvert(inputColumns, params);
+        if (!converted.errorCode.empty()) {
+          errorCode = converted.errorCode;
+          // Structured params travel in the same channel the summary/script errors use:
+          // the UI localises `code` + these fields into a sentence.
+          unitConvertDetail = std::move(converted.errorParams);
+        } else {
+          outputs.push_back(std::move(converted.columns));
+        }
       } else if (signatureId == kSigPython) {
         // builtin:python — the script card. The interpreter runs OUTSIDE the registry lock
         // (runScriptCard registers itself so POST /api/nodes/{id}/cancel can kill its
@@ -1796,6 +1828,10 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
     // named). It carries the sentence a user reads, so the client never has to invent one.
     if (scriptErrorDetail.isObject()) {
       for (const auto& member : scriptErrorDetail.members())
+        params_out.set(member.first, member.second);
+    }
+    if (unitConvertDetail.isObject()) {
+      for (const auto& member : unitConvertDetail.members())
         params_out.set(member.first, member.second);
     }
     failNodeLocked(nodeId, errorCode, std::move(params_out));
