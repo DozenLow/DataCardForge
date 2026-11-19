@@ -19,6 +19,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type * as echartsNamespace from 'echarts';
 
 import { applySmoothing, MAX_SG_DEGREE, type SmoothingMode } from '../../core/Smoothing.ts';
+import { columnUnitResolutions } from '../../core/units.ts';
 import { formatBytes } from '../i18n.ts';
 import { useTranslator, useWorkspace } from '../workspaceStore.ts';
 import { isChartCard, isMatrixCard, type ChartCardModel } from '../types.ts';
@@ -78,6 +79,7 @@ export function ChartCard({
   const matrices = useWorkspace((s) => s.matrices);
   const cards = useWorkspace((s) => s.cards);
   const showToast = useWorkspace((s) => s.showToast);
+  const unitConfirmations = useWorkspace((s) => s.unitConfirmations);
   const typeDef = useMemo(() => chartTypeDef(card.config.type), [card.config.type]);
   const tRef = useRef(t);
   tRef.current = t;
@@ -179,12 +181,45 @@ export function ChartCard({
     [t, card.config.errorKind],
   );
 
+  /**
+   * Unit for the value axis, derived at render time — a chart stores no unit (units v1).
+   *
+   * Only a *single shared* `recognized` unit is reported: if the plotted columns disagree,
+   * or any of them is ambiguous/unknown, the axis keeps the plain "Value" title. An axis
+   * title is a statement about every number on it, so a mixed set must not claim one.
+   */
+  const yAxisUnit = useMemo((): string | undefined => {
+    // A histogram plots counts and a heatmap plots correlation coefficients; neither y axis
+    // measures the column's unit.
+    if (card.config.type === 'histogram' || card.config.type === 'heatmap') return undefined;
+    const sources =
+      typeDef.columnArity === 'single' ? card.config.sources.slice(0, 1) : card.config.sources;
+    if (sources.length === 0) return undefined;
+    let shared: string | null = null;
+    for (const source of sources) {
+      const matrix = matrices.get(source.matrixId);
+      if (!matrix || !matrix.column(source.columnIndex)) return undefined;
+      // Same derivation the data card's header chips use, so the axis and the chips can
+      // never disagree about a column's unit.
+      const { resolutions } = columnUnitResolutions(
+        matrix.columns().map((entry) => entry.annotation),
+        unitConfirmations,
+      );
+      const resolution = resolutions[source.columnIndex];
+      if (!resolution) return undefined;
+      if (resolution.state !== 'recognized') return undefined;
+      if (shared === null) shared = resolution.unit;
+      else if (shared !== resolution.unit) return undefined;
+    }
+    return shared ?? undefined;
+  }, [card.config.type, card.config.sources, typeDef.columnArity, matrices, unitConfirmations]);
+
   const option = useMemo(
     () =>
       drawable
-        ? buildOption({ config: card.config, smoothing: card.smoothing, strings })
+        ? buildOption({ config: card.config, smoothing: card.smoothing, strings, yAxisUnit })
         : null,
-    [card.config, card.smoothing, strings, drawable],
+    [card.config, card.smoothing, strings, drawable, yAxisUnit],
   );
 
   useEffect(() => {

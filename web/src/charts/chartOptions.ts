@@ -69,6 +69,15 @@ type RenderItemResult = CustomSeriesRenderItemReturn;
 export interface BuildContext {
   config: ChartConfig;
   smoothing: SmoothingOptions;
+  /**
+   * Unit shared by every plotted y column, or absent.
+   *
+   * The caller derives it at render time (units v1: a unit is never stored on the data, see
+   * decisions/2026-11-18-units-v1.md §三) and passes it ONLY when every drawn y source
+   * resolves to the same `recognized` unit. An axis title is a claim about the numbers on
+   * it, so a mixed or unconfirmed set must leave it out rather than say something false.
+   */
+  yAxisUnit?: string;
   /** Localised axis/tooltip labels, resolved by the caller (keeps this module i18n-free). */
   strings: {
     rowIndex: string;
@@ -721,12 +730,22 @@ export function buildOption(context: BuildContext): EChartsOption {
           splitLine: { show: true, lineStyle: { color: 'rgba(128,128,128,0.18)' } },
         };
 
+  /**
+   * Unit suffix for the value axis — never for a histogram (it counts occurrences) and
+   * never for a heatmap (its "value" is a correlation coefficient, not the column's unit).
+   * The dual-axis case is left alone too: two axes can carry two different units, and the
+   * caller only reports a single shared one.
+   */
+  const yAxisUnit =
+    config.type === 'histogram' || isHeatmap ? undefined : context.yAxisUnit;
   const yAxisName =
     config.type === 'histogram'
       ? strings.count
       : config.type === 'heatmap'
         ? ''
-        : strings.value;
+        : yAxisUnit
+          ? `${strings.value} (${yAxisUnit})`
+          : strings.value;
 
   // Explicit bounds where the plotted quantity differs from the column values.
   const bounds = computeBounds(context);

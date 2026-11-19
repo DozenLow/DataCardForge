@@ -641,6 +641,53 @@ body {
   box-shadow: inset 0 -2px 0 var(--accent);
 }
 
+/* ── Column unit chip (header) ───────────────────────────────────────────
+   Three states from decisions/2026-11-18-units-v1.md §二: recognized = solid, ambiguous =
+   dashed outline with `?`, unknown = no chip. Only the ambiguous one is a question, so only
+   it reads as clickable; the solid one is a label the header cannot show as free text
+   (P1 keeps the column name unchanged, see task book §六.3). */
+.vtable__unit {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  padding: 0 4px;
+  height: 14px;
+  font: inherit;
+  font-size: 9.5px;
+  line-height: 1;
+  font-weight: 600;
+  color: var(--on-accent);
+  background: var(--accent);
+  border: 1px solid transparent;
+  border-radius: 7px;
+  cursor: default;
+  user-select: none;
+}
+
+.vtable__unit--ambiguous {
+  color: var(--accent);
+  background: transparent;
+  border: 1px dashed var(--accent);
+  cursor: pointer;
+}
+
+.vtable__unit--ambiguous:hover {
+  background: var(--accent-soft);
+}
+
+.vtable__unit-label {
+  white-space: nowrap;
+  max-width: 44px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vtable__unit-mark {
+  font-weight: 700;
+}
+
 .vtable__viewport {
   flex: 1 1 auto;
   min-height: 0;
@@ -1234,6 +1281,73 @@ body {
   opacity: 0.6;
   font-size: 10px;
   line-height: 1;
+}
+
+/* ── Unit confirmation popover ───────────────────────────────────────────
+   Same skin as the context menu (it IS a menu of choices), only wider: the affected-column
+   list is the reason the panel exists and it must stay readable for long sensor names. */
+.unit-confirm {
+  min-width: 200px;
+  max-width: 320px;
+}
+
+.unit-confirm__hint {
+  max-width: none;
+  padding: 0 8px 4px;
+  white-space: normal;
+}
+
+.unit-confirm__candidate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.unit-confirm__unit {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.unit-confirm__tag {
+  font-size: 9.5px;
+  padding: 0 4px;
+  border-radius: 6px;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+}
+
+.unit-confirm__batch {
+  padding: 2px 8px 6px;
+  white-space: normal;
+}
+
+.unit-confirm__batch-title {
+  font-size: 10.5px;
+  color: var(--text);
+  line-height: 1.35;
+  padding-bottom: 3px;
+}
+
+.unit-confirm__batch-title--muted {
+  color: var(--text-dim);
+  padding-top: 4px;
+}
+
+.unit-confirm__columns {
+  margin: 0;
+  padding: 0 0 0 14px;
+  max-height: 132px;
+  overflow-y: auto;
+  font-family: var(--mono);
+  font-size: 10.5px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.unit-confirm__columns--muted {
+  color: var(--text-dim);
 }
 
 /* One-line rule under a menu title (e.g. why the pair-based chart types are greyed out). */

@@ -298,6 +298,22 @@ const dictionaries = {
     'summary.statColumn': '统计量',
     'summary.emptyResult': '后端返回的摘要表为空',
 
+    // ── column units v1 ──────────────────────────────────────────────────
+    // Three states (decision §二): recognized = solid chip with the unit, ambiguous = dashed
+    // chip with the raw token + `?` that asks, unknown = no chip at all.
+    'unit.recognized': '单位：{unit}',
+    'unit.ambiguous': '单位待确认「{token}」— 点击选择',
+    'unit.popoverTitle': '确认单位「{token}」',
+    'unit.popoverHint': '一次确认本卡内同 token 的全部列；确认结果按列单位签名记忆，同一数据下次不再询问。',
+    'unit.affectedTitle': '将把下列 {n} 列确认为「{unit}」：',
+    'unit.affectedOther': '下列 {n} 列与本列 token 相同，但已排除（已确认或不是待确认状态）：',
+    'unit.affectedNone': '没有同 token 的待确认列',
+    'unit.notAUnit': '不是单位',
+    'unit.notAUnitHint': '把这些列记为无量纲标签，不再询问',
+    'unit.cancel': '取消',
+    'unit.unnamedColumn': '第 {n} 列',
+    'unit.labelOnly': '仅标签',
+
     // 帮助（公式 / 函数说明）：菜单项、卡片上的「?」与悬停提示共用同一份文案。
     // 签名（Pos.1、SUM(c)…）是代码，保持字面量；这里只有散文，因此两个语言都齐。
     'help.title': '公式与函数说明',
@@ -673,6 +689,22 @@ const dictionaries = {
     'summary.statsLast': 'Keep at least one statistic',
     'summary.statColumn': 'Statistic',
     'summary.emptyResult': 'The backend returned an empty summary table',
+
+    // ── column units v1 ──────────────────────────────────────────────────
+    'unit.recognized': 'Unit: {unit}',
+    'unit.ambiguous': 'Unit not confirmed for "{token}" — click to choose',
+    'unit.popoverTitle': 'Confirm the unit of "{token}"',
+    'unit.popoverHint':
+      'One answer covers every column of this card with the same token; it is remembered per column-unit signature, so the same data is never asked twice.',
+    'unit.affectedTitle': 'This will set these {n} column(s) to "{unit}":',
+    'unit.affectedOther':
+      'These {n} column(s) carry the same token but are left out (already answered or no longer pending):',
+    'unit.affectedNone': 'No pending column carries this token',
+    'unit.notAUnit': 'Not a unit',
+    'unit.notAUnitHint': 'Remember these columns as plain labels and stop asking',
+    'unit.cancel': 'Cancel',
+    'unit.unnamedColumn': 'Column {n}',
+    'unit.labelOnly': 'label only',
 
     // Help (formula / function reference): the menu entries, the card's "?" and the hover
     // tooltips all read these same strings.

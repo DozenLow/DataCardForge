@@ -415,6 +415,49 @@ describe('buildOption axis selection', () => {
     expect(names).toContain('X → Y');
   });
 
+  it('puts the shared unit on the value axis, and only when it is given', () => {
+    // units v1: the caller derives the unit at render time and hands it over only when every
+    // plotted column resolves to the SAME recognized unit (see ChartCard). The builder's job
+    // is just to state it — "Value (kPa)".
+    const plain = buildOption(context('line', [source('A', ramp)])).yAxis as { name?: string };
+    expect(plain.name).toBe('Value');
+
+    const withUnit = buildOption({
+      ...context('line', [source('A', ramp)]),
+      yAxisUnit: 'kPa',
+    }).yAxis as { name?: string };
+    expect(withUnit.name).toBe('Value (kPa)');
+
+    // Every row-indexed / per-series type that plots values uses the same title.
+    for (const type of ['bar', 'boxplot', 'violin', 'errorBar', 'scatter'] as ChartTypeId[]) {
+      const option = buildOption({
+        ...context(type, [source('A', noisy), source('B', ramp)]),
+        yAxisUnit: 'kPa',
+      });
+      expect((option.yAxis as { name?: string }).name, `y axis for ${type}`).toBe('Value (kPa)');
+    }
+  });
+
+  it('leaves the histogram y axis (a count) and the heatmap (no value axis) unit-free', () => {
+    // A histogram's y axis counts occurrences, so appending the column's unit would label a
+    // frequency as a pressure.
+    const histogram = buildOption({
+      ...context('histogram', [source('A', ramp)]),
+      yAxisUnit: 'kPa',
+    }).yAxis as { name?: string };
+    expect(histogram.name).toBe('Count');
+
+    // The heatmap's y axis is a category axis over column names; there is no value axis to
+    // annotate, and its colour scale is a correlation coefficient, not a measurement.
+    const heatmap = buildOption({
+      ...context('heatmap', [source('A', ramp), source('B', wave)]),
+      yAxisUnit: 'kPa',
+    }).yAxis as { name?: string; type?: string };
+    // A category axis with no title at all — nothing to append a unit to.
+    expect(heatmap.name).toBeUndefined();
+    expect(heatmap.type).toBe('category');
+  });
+
   it('caps the number of scatter symbols so exported SVGs stay practical', () => {
     const big = Array.from({ length: 40_000 }, (_, i) => Math.sin(i / 50) + i / 100_000);
     const other = Array.from({ length: 40_000 }, (_, i) => Math.cos(i / 50));

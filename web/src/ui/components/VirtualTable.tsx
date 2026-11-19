@@ -25,6 +25,22 @@ const MIN_COLUMN_WIDTH = 48;
 const MAX_COLUMN_WIDTH = 600;
 const OVERSCAN = 8;
 
+/**
+ * One column header's unit chip.
+ *
+ * The table is a dumb renderer: it is told *what* to show and reports clicks. Deriving the
+ * unit from the annotation plus the confirmation memory is the card's job (see
+ * `columnUnitResolutions`), so this component never imports the store.
+ */
+export interface ColumnUnitChip {
+  /** Text inside the chip: the resolved unit (`kPa`) or, when ambiguous, the raw token. */
+  label: string;
+  /** Ambiguous tokens are drawn as a dashed outline with a `?` and are the clickable ones. */
+  ambiguous: boolean;
+  /** Hover text (the card supplies a localised sentence). */
+  title?: string;
+}
+
 export interface VirtualTableProps {
   matrix: MatrixData;
   readOnly: boolean;
@@ -53,6 +69,15 @@ export interface VirtualTableProps {
   onCellChange?: (row: number, col: number, value: number) => void;
   /** Called with the raw text when an edit cannot be read as a number. */
   onInvalidEdit?: (raw: string) => void;
+  /**
+   * Unit chip for a column header; `null` (or no callback) draws no chip.
+   *
+   * `recognized` units are display-only in v1 — only the `ambiguous` state asks a question,
+   * so only those chips are buttons.
+   */
+  columnUnit?: (columnIndex: number) => ColumnUnitChip | null;
+  /** Click on an ambiguous unit chip. The click never also selects the column. */
+  onUnitChipClick?: (columnIndex: number, event: React.MouseEvent) => void;
 }
 
 export function VirtualTable({
@@ -68,6 +93,8 @@ export function VirtualTable({
   sourceColumns = [],
   onCellChange,
   onInvalidEdit,
+  columnUnit,
+  onUnitChipClick,
 }: VirtualTableProps) {
   const viewportRef = useRef<HTMLDivElement | null>(null);
   const [scrollLeft, setScrollLeft] = useState(0);
@@ -233,27 +260,58 @@ export function VirtualTable({
           }}
         >
           <div className="vtable__corner" />
-          {Array.from({ length: columnCount }, (_, c) => (
-            <div
-              key={c}
-              className={`vtable__colhead${
-                highlightColumn === c ? ' vtable__colhead--highlight' : ''
-              }${sourceSet.has(c) ? ' vtable__colhead--source' : ''}`}
-              title={headerTitle(c)}
-              onClick={() => onHeaderClick?.(c)}
-              onContextMenu={(event) => onHeaderContextMenu?.(event, c)}
-            >
-              {/* A real box: `text-overflow` cannot act on an anonymous flex item. */}
-              <span className="vtable__colhead-label">{headerLabel(c)}</span>
-              {/* Drag the right edge to widen/narrow the column. The handler stops
-                  propagation so a resize never also selects the column. */}
-              <span
-                className="vtable__colresize"
-                aria-hidden
-                onMouseDown={(event) => beginResize(event, c)}
-              />
-            </div>
-          ))}
+          {Array.from({ length: columnCount }, (_, c) => {
+            const unit = columnUnit?.(c) ?? null;
+            return (
+              <div
+                key={c}
+                className={`vtable__colhead${
+                  highlightColumn === c ? ' vtable__colhead--highlight' : ''
+                }${sourceSet.has(c) ? ' vtable__colhead--source' : ''}`}
+                title={headerTitle(c)}
+                onClick={() => onHeaderClick?.(c)}
+                onContextMenu={(event) => onHeaderContextMenu?.(event, c)}
+              >
+                {/* A real box: `text-overflow` cannot act on an anonymous flex item. */}
+                <span className="vtable__colhead-label">{headerLabel(c)}</span>
+                {unit ? (
+                  // Recognized units are labels, not questions, so only the ambiguous chip
+                  // is a button — and its click must not also select the column, because a
+                  // column selection is a chart gesture, not a unit answer.
+                  <button
+                    type="button"
+                    className={`vtable__unit${
+                      unit.ambiguous ? ' vtable__unit--ambiguous' : ''
+                    }`}
+                    title={unit.title ?? unit.label}
+                    aria-label={unit.title ?? unit.label}
+                    onClick={
+                      unit.ambiguous
+                        ? (event) => {
+                            event.stopPropagation();
+                            onUnitChipClick?.(c, event);
+                          }
+                        : (event) => event.stopPropagation()
+                    }
+                  >
+                    <span className="vtable__unit-label">{unit.label}</span>
+                    {unit.ambiguous ? (
+                      <span className="vtable__unit-mark" aria-hidden="true">
+                        ?
+                      </span>
+                    ) : null}
+                  </button>
+                ) : null}
+                {/* Drag the right edge to widen/narrow the column. The handler stops
+                    propagation so a resize never also selects the column. */}
+                <span
+                  className="vtable__colresize"
+                  aria-hidden
+                  onMouseDown={(event) => beginResize(event, c)}
+                />
+              </div>
+            );
+          })}
         </div>
       </div>
       {/* Body: single scroll container; rows are absolutely positioned inside. */}

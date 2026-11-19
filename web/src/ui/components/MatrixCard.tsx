@@ -11,9 +11,10 @@
  * Columns that feed a chart are marked on their headers; the connection lines
  * themselves are card-level (see ConnectionLayer).
  */
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 import { MatrixData } from '../../core/MatrixData.ts';
+import { columnUnitResolutions, type UnitResolution } from '../../core/units.ts';
 import type { ChartTypeId } from '../../charts/chartTypes.ts';
 import { useTranslator, useWorkspace } from '../workspaceStore.ts';
 import type { MatrixCardModel } from '../types.ts';
@@ -26,7 +27,8 @@ import {
 } from './ContextMenu.tsx';
 import { AddToChartItems } from './AddToChartItems.tsx';
 import { SummaryPanel } from './SummaryPanel.tsx';
-import { VirtualTable } from './VirtualTable.tsx';
+import { UnitConfirmPopover, type UnitAffectedColumn } from './UnitConfirmPopover.tsx';
+import { VirtualTable, type ColumnUnitChip } from './VirtualTable.tsx';
 
 interface MatrixCardProps {
   card: MatrixCardModel;
@@ -85,6 +87,56 @@ export function MatrixCard({
 
   const [menu, setMenu] = useState<{ x: number; y: number; column: number } | null>(null);
   const [highlightColumn, setHighlightColumn] = useState<number | null>(null);
+  /** Ambiguous unit chip awaiting an answer (the popover's anchor), if any. */
+  const [unitAsk, setUnitAsk] = useState<{ column: number; x: number; y: number } | null>(null);
+
+  const activeMatrixId = card.sources[card.activeSource]?.matrixId ?? -1;
+  const unitConfirmations = useWorkspace((s) => s.unitConfirmations);
+  const confirmUnitGroup = useWorkspace((s) => s.confirmUnitGroup);
+
+  /**
+   * Every column's unit, derived — the matrix stores no unit field (decision §三): this is
+   * always `annotation + confirmation memory`, recomputed when either changes.
+   */
+  const unitView = useMemo(
+    () =>
+      matrix
+        ? columnUnitResolutions(
+            matrix.columns().map((column) => column.annotation),
+            unitConfirmations,
+          )
+        : null,
+    [matrix, unitConfirmations],
+  );
+
+  /** Header label for a column, the same expression the table prints. */
+  const columnName = (index: number): string =>
+    (matrix && (matrix.columnLabel(index) || matrix.column(index).posName)) ||
+    t('unit.unnamedColumn', { n: index + 1 });
+
+  /** The ambiguous resolution behind the open popover (re-read every render: it can change). */
+  const askedResolution: UnitResolution | null =
+    unitAsk && unitView ? (unitView.resolutions[unitAsk.column] ?? null) : null;
+
+  /**
+   * Columns the confirm would actually touch: the same token, case-folded, still ambiguous.
+   * Mirrors `confirmUnitGroup`'s own rule so the list shown and the list changed are one set.
+   */
+  const unitBatch = useMemo(() => {
+    if (!unitView || !askedResolution) return { affected: [], excluded: [] };
+    const token = askedResolution.token.toLowerCase();
+    const affected: UnitAffectedColumn[] = [];
+    const excluded: UnitAffectedColumn[] = [];
+    unitView.resolutions.forEach((resolution, index) => {
+      if (resolution.token === '' || resolution.token.toLowerCase() !== token) return;
+      const entry = { columnIndex: index, label: columnName(index) };
+      if (resolution.state === 'ambiguous') affected.push(entry);
+      else excluded.push(entry);
+    });
+    return { affected, excluded };
+    // `columnName` reads only `matrix` and `t`, both listed.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unitView, askedResolution, matrix, t]);
 
   const rows = matrix?.rowCount() ?? 0;
   const cols = matrix?.columnCount() ?? 0;
@@ -107,6 +159,36 @@ export function MatrixCard({
   const badge = `${t('table.rows', { n: rows })} · ${t('table.cols', { n: cols })}${
     card.readOnly ? ` · ${t('table.readOnly')}` : ''
   }`;
+
+  /**
+   * What the table draws per column: recognized → the unit, ambiguous → the raw token plus a
+   * `?`, unknown → nothing. The chip is presentation; the click is reported upwards.
+   */
+  const columnUnit = (index: number): ColumnUnitChip | null => {
+    const resolution = unitView?.resolutions[index];
+    if (!resolution) return null;
+    if (resolution.state === 'recognized') {
+      return {
+        label: resolution.unit,
+        ambiguous: false,
+        title: t('unit.recognized', { unit: resolution.unit }),
+      };
+    }
+    if (resolution.state === 'ambiguous') {
+      return {
+        label: resolution.token,
+        ambiguous: true,
+        title: t('unit.ambiguous', { token: resolution.token }),
+      };
+    }
+    return null;
+  };
+
+  /** Close the popover and answer for the whole group (idempotent in the store). */
+  const confirmAskedToken = (unit: string) => {
+    if (askedResolution) confirmUnitGroup(activeMatrixId, askedResolution.token, unit);
+    setUnitAsk(null);
+  };
 
   return (
     <CardShell
@@ -230,6 +312,13 @@ export function MatrixCard({
               event.stopPropagation();
               setMenu({ x: event.clientX, y: event.clientY, column });
             }}
+            columnUnit={columnUnit}
+            onUnitChipClick={(column, event) => {
+              // Anchor below the chip: the answered question is "which unit is this token?",
+              // and the chip is the thing being explained.
+              const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+              setUnitAsk({ column, x: rect.left, y: rect.bottom + 4 });
+            }}
           />
         ) : (
           <div className="matrix-card__empty">{t('empty.hint')}</div>
@@ -239,6 +328,19 @@ export function MatrixCard({
             and it never computes by itself; the panel asks first. */}
         <SummaryPanel card={card} />
       </div>
+
+      {unitAsk && askedResolution && askedResolution.state === 'ambiguous' ? (
+        <UnitConfirmPopover
+          x={unitAsk.x}
+          y={unitAsk.y}
+          token={askedResolution.token}
+          candidates={askedResolution.candidates}
+          affected={unitBatch.affected}
+          excluded={unitBatch.excluded}
+          onDismiss={() => setUnitAsk(null)}
+          onConfirm={confirmAskedToken}
+        />
+      ) : null}
 
       {menu ? (
         // The title is the column name, not the old "绘制图表 · <column>" line: "draw chart"
