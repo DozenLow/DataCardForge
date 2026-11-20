@@ -27,7 +27,7 @@
 - 🧭 **项目演进史**（`history.md`）— 把决策/日志/踩坑/审计按因果链串成一条历史：四个时代、四条螺旋线、教训清单与现状
   - [项目演进史（DataCardForge）](history.md) · [EN](history.en.md) ← **先读这篇再进各分册**
 - 📌 **决策记录**（`decisions/`）— 已经拍板、影响后续的方向性结论
-  - [单位感知阶梯与三档策略：P3 提示与公式输出单位](decisions/2026-11-19-units-awareness-p3-and-formula-output.md) ← 🧭 **方向已拍板**：L1→L3 推断 × 严格/自动/自由三档，卡>工作区>全局 作用域
+  - [单位感知阶梯与三档策略：P3 提示与公式输出单位](decisions/2026-11-19-units-awareness-p3-and-formula-output.md) ← 🧭 方向已拍板；**L1/L2 已实施**、L3 无限期搁置：推断阶梯 × 严格/自动/自由三档，卡>工作区>全局 作用域
   - [单位 v1：列元数据、三态识别、组级确认、显式换算](decisions/2026-11-18-units-v1.md) ← **已实施 P1+P2**：单位是派生元数据，数值永不自动改写
   - [阻塞闸门：冻结传播、告警、红框标出节点（计算错误不算阻塞）](decisions/2026-11-17-blocking-gate.md) ← 停下来但保留一切状态，原因消失自动恢复
   - [脚本卡的自动运行：clean 成功一次后与公式卡同频](decisions/2026-11-17-script-autorun.md) ← **最新：首次手点，之后随数据自动重算**
@@ -65,10 +65,10 @@
   - [ImPlot v1.1 API 大改](lessons/implot-v1.1-api.md)
   - [ImGui Docking 下 PushStyleColor 的坑](lessons/imgui-docking-pushstylecolor.md)
 - 🧾 **任务书**（`tasks/`）— 一次会话可完成的执行切片：前置条件、契约红线、验收命令
-  - [单位 L2（白名单继承+自动换算档；做完即停，L3 搁置）](tasks/2026-11-19-units-l2.md) ← 🚧 开工
+  - [单位 L2（白名单继承+自动换算档；做完即停，L3 搁置）](tasks/2026-11-19-units-l2.md) ← ✅ 已合入（be46d58/2b3036d）；做完即停，L3 搁置
   - [单位 L1（作用域骨架+显式输出单位+漂移提示）](tasks/2026-11-19-units-l1.md) ← ✅ 已合入（d4d9454/be5c4f9/750af78）
   - [单位 v1（P1 识别/确认/轴单位 · P2 换算卡 · P3 提示）](tasks/2026-11-18-units-v1.md) ← P1+P2 已合入；P3 并入[单位感知阶梯](decisions/2026-11-19-units-awareness-p3-and-formula-output.md)
-  - [摘要面板 P2（前端）](tasks/2026-10-29-summary-p2-panel.md) ← 待开工，被「结果预览 / 稠密帧」阻塞
+  - [摘要面板 P2（前端）](tasks/2026-10-29-summary-p2-panel.md) ← ✅ 已合入（2026-10-31）
 - 🗃 **样本数据**（`sampleData/`）— 合成数据，供演示与手工验证；生成脚本可复现
   - [`1.txt`](sampleData/1.txt) · [`2.txt`](sampleData/2.txt) · [`generate_matrix.py`](sampleData/generate_matrix.py)
 - 🖼 **图**（`diagrams/`）— 所有示意图的 SVG 与交互页，见下节[图](#图diagrams)
