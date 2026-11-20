@@ -181,6 +181,76 @@ export function cardRect(id: number): Rect | null {
 }
 
 /**
+ * Every registered card's rectangle, by card id.
+ *
+ * The hit test of the wiring gesture (G3) resolves a drop against *all* cards at once, so it
+ * asks for the whole measured set instead of guessing which card ids exist. The map is
+ * paint-order-agnostic; the caller decides which card wins an overlap (the store's `z`).
+ */
+export function allCardRects(): Map<number, Rect> {
+  const origin = canvasRect();
+  const out = new Map<number, Rect>();
+  for (const [id, metrics] of cards) {
+    out.set(id, toCanvas(metrics.root.getBoundingClientRect(), origin));
+  }
+  return out;
+}
+
+/** One rendered port row, measured in plane coordinates. */
+export interface MeasuredPortRow {
+  cardId: number;
+  portId: string;
+  rect: Rect;
+}
+
+/**
+ * Every element inside a registered card that carries `data-port-id`, in plane coordinates.
+ *
+ * This is a *hit-test* measurement, which is why it is taken from the DOM attribute rather
+ * than from the `registerPort` registry: the registry answers "where does this port's WIRE
+ * attach" (one anchor per port, and a folded column's rail item is an anchor without being a
+ * row), while a drop has to know where the ROW itself is on screen. `ScriptCard` puts the
+ * attribute on the very element it also registers as the anchor, so the two can never
+ * disagree about where a port is; `ColumnDock` puts it on chart port rows, which the gesture
+ * refuses as targets anyway (a chart accepts no new input).
+ *
+ * Cards are measured through the same origin as everything else in this module, so a port row
+ * and the card that contains it are always expressed in one coordinate system.
+ */
+export function measuredPortRows(): MeasuredPortRow[] {
+  const origin = canvasRect();
+  const out: MeasuredPortRow[] = [];
+  for (const [cardId, metrics] of cards) {
+    for (const element of metrics.root.querySelectorAll<HTMLElement>('[data-port-id]')) {
+      const portId = element.dataset.portId;
+      if (!portId) continue;
+      out.push({ cardId, portId, rect: toCanvas(element.getBoundingClientRect(), origin) });
+    }
+  }
+  return out;
+}
+
+/**
+ * Convert a *viewport* point (a pointer's `clientX/clientY`) into plane coordinates.
+ *
+ * Two spaces differ by the pan and the zoom, and the conversion has to use the same origin the
+ * rest of this module measures against. Deriving it from the store's `view` instead would be a
+ * second source of truth: a draft wire computed from the store and a drop hit-test resolved
+ * from `cardRect()` would disagree about where the cards are the moment the two drift apart
+ * (a clamped pan, a frame of animation), and the wire would point somewhere the drop does not
+ * land. The measured origin cannot drift — it *is* what `cardRect` subtracts.
+ *
+ * `worldScale` (published by `setCanvasZoom`) is the zoom factor the plane is drawn at, so
+ * dividing by it converts screen pixels back into plane pixels. With no world layer registered
+ * (a unit test, or before the canvas mounts) the origin is (0,0) and the scale 1, which makes
+ * the conversion the identity — never NaN, never a guess.
+ */
+export function clientToPlane(clientX: number, clientY: number): { x: number; y: number } {
+  const origin = canvasRect();
+  return { x: (clientX - origin.left) / worldScale, y: (clientY - origin.top) / worldScale };
+}
+
+/**
  * Which side of a card a line leaves from or enters into.
  *
  * A line is not just two points: the side decides the bezier's control points *and* the

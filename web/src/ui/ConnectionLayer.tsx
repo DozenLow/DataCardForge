@@ -27,25 +27,35 @@
  * The fg lines are dashed so that colour is not the only cue (red = the selected card is
  * the *source*, blue = it is the *target*, long dash vs short dash), and the dash offset
  * animates toward the target, so the flow direction itself reads as input/output.
+ *
+ * Since 2026-11-20 the layer also draws the wire the user is currently dragging (task G3,
+ * `wireGesture.ts`): one more path in this same `pointer-events: none` SVG, plus the label that
+ * says what the release would do. Drawing it anywhere else — a new overlay, an interactive
+ * layer — would break the subordination rule this file exists to enforce.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import type { CSSProperties } from 'react';
 
 import {
+  cardAnchor,
   cardRect,
   subscribeLayout,
   getLayoutVersion,
   type AnchorSide,
   type Rect,
 } from './cardMetrics.ts';
-import { resolveEdgeAnchors } from './connectionAnchors.ts';
+import { resolveEdgeAnchors, facingSide } from './connectionAnchors.ts';
 import {
   arrowPathAt,
+  arrowTip,
+  cubicTangent,
   dashArray,
   dashCycle,
   dashDuration,
   easeOutCubic,
   lerpPolyline,
+  pathData,
   polylineArrowTip,
   polylineDistance,
   polylineLabelPoint,
@@ -64,6 +74,17 @@ import {
   type WireDirection,
   type WireGeometry,
 } from './connectionGeometry.ts';
+import type { Locale } from './i18n.ts';
+import { useTranslator } from './workspaceStore.ts';
+import {
+  dismissWireChoice,
+  pickWireChoice,
+  useWireState,
+  type DropPlan,
+  type WireChoiceRequest,
+  type WireState,
+} from './wireGesture.ts';
+import { Popup } from './components/Popup.tsx';
 import type { DependencyGraph } from '../core/DependencyGraph.ts';
 import type { CardModel } from './types.ts';
 
@@ -416,6 +437,249 @@ function portLabel(ports: string[]): string {
   return ports.length > 2 ? `${shown} +${ports.length - 2}` : shown;
 }
 
+// ── the draft wire: the one being dragged (G3) ───────────────────────────────────────
+//
+// The wire under the cursor is drawn HERE and not in a layer of its own, for the reason the
+// whole layer exists: connections are subordinate, they never intercept the mouse, and a new
+// interactive overlay is exactly what "drag a wire" must not introduce. The draft is one more
+// path in the same `pointer-events: none` SVG, painted above the settled wires and masked by
+// the same card cutout — so it looks like a wire because it *is* one, and it disappears into a
+// card's face the same way every other wire does.
+//
+// It is never wired to anything: `wireGesture` owns the state, this file owns the drawing, and
+// the only thing crossing between them is a `DropPlan` (already decided, never re-derived).
+
+/** The side a wire enters when it ends at a bare point: the mirror of the side it left. */
+const OPPOSITE_SIDE: Record<AnchorSide, AnchorSide> = {
+  left: 'right',
+  right: 'left',
+  top: 'bottom',
+  bottom: 'top',
+};
+
+const DRAFT_THICKNESS = 2.5;
+const DRAFT_DASH: readonly [number, number] = [7, 5];
+
+/** One drawn draft: a curve, an arrowhead, and the colour/dash that state implies. */
+interface DraftWire {
+  d: string;
+  arrow: string;
+  color: string;
+  dashed: boolean;
+}
+
+/**
+ * Turn the gesture state into a wire, or `null` when nothing is being dragged.
+ *
+ * Two details are load-bearing:
+ *   - the source end is the card edge that FACES the cursor (`facingSide`), so the curve always
+ *     leaves towards the pointer instead of looping back over the card;
+ *   - the arrowhead is parked on the target card's frame when the pointer is over one
+ *     (`arrowTip`). Inside the frame the mask erases it, and an invisible arrow is not a
+ *     direction cue — the same rule the settled wires follow.
+ */
+function draftWireFor(
+  state: WireState,
+  rects: Map<number, Rect>,
+  zoom: number,
+): DraftWire | null {
+  if (state.phase !== 'wiring' || !state.point || state.sourceCardId === null) return null;
+  const sourceRect = rects.get(state.sourceCardId);
+  if (!sourceRect) return null;
+  const fromSide = facingSide(sourceRect, state.point);
+  const from = cardAnchor(state.sourceCardId, fromSide);
+  if (!from) return null;
+
+  const geometry = wireGeometry(from, state.point, fromSide, OPPOSITE_SIDE[fromSide]);
+  const plan = state.plan;
+  const targetRect =
+    plan?.targetCardId === undefined ? undefined : rects.get(plan.targetCardId);
+  const parked = targetRect ? arrowTip(geometry, targetRect) : null;
+  const tip = parked ?? { tip: state.point, dir: cubicTangent(geometry, 1) };
+
+  const refused = plan?.kind === 'reject';
+  const cancel = !plan || plan.kind === 'cancel';
+  const neutral = !refused && (cancel || plan?.kind === 'noop');
+  return {
+    d: pathData(geometry),
+    arrow: arrowPathAt(tip.tip, tip.dir, zoom),
+    color: refused ? COLOR_RED : neutral ? COLOR_GREY : COLOR_BLUE,
+    // A dashed draft is the decision's "this release does nothing" cue (§六: blank canvas).
+    dashed: cancel,
+  };
+}
+
+// ── the drop label and the multi-output chooser (G3) ─────────────────────────────────
+//
+// Every string this gesture can say, per locale — the same shape `SourcePicker` and `ScriptCard`
+// use, because this lane owns no dictionary file. `wireGesture` hands over NAMES (a port's
+// variable, a file name); only the prose lives here.
+//
+// The label is rendered as a body-portaled badge carrying the stylesheet's `hover-help` box
+// (fixed position, `pointer-events: none`): the cards are transform-positioned and clipped, so
+// anything drawn inside one is displaced or cut off (see `Popup.tsx`), and a pointer-events:
+// none badge cannot intercept the gesture that is producing it.
+
+interface WireLabelSet {
+  add: string;
+  replace: string;
+  replaceFresh: string;
+  noop: string;
+  refuseNoInput: string;
+  refuseSelf: string;
+  refuseCycle: string;
+  refuseNoSource: string;
+  cancel: string;
+  choosePort: string;
+  chooseAdd: string;
+  chooseHint: string;
+}
+
+const WIRE_LABELS: Record<Locale, WireLabelSet> = {
+  zh: {
+    add: '新增端口 {port} ← {source}',
+    replace: '替换端口 {port}（{previous} → {source}）',
+    replaceFresh: '替换端口 {port} ← {source}',
+    noop: '已经是 {card} 的输入 {port}',
+    refuseNoInput: '此卡片不接受新输入 · 松开取消',
+    refuseSelf: '不能接到自己 · 松开取消',
+    refuseCycle: '会成环：{card} 已经依赖本卡 · 松开取消',
+    refuseNoSource: '这张卡片还没有可接线的输出 · 松开取消',
+    cancel: '松开取消',
+    choosePort: '替换端口 {port}：接 {source} 的哪个输出',
+    chooseAdd: '新增端口：接 {source} 的哪个输出',
+    chooseHint: '这张卡声明了 {n} 个输出 — 接哪一个由你决定（不会替你猜 out:0）',
+  },
+  en: {
+    add: 'Add port {port} ← {source}',
+    replace: 'Replace port {port} ({previous} → {source})',
+    replaceFresh: 'Replace port {port} ← {source}',
+    noop: 'Already an input of {card} as {port}',
+    refuseNoInput: 'This card accepts no new input · release to cancel',
+    refuseSelf: 'A card cannot feed itself · release to cancel',
+    refuseCycle: 'Would create a cycle: {card} already depends on this one · release to cancel',
+    refuseNoSource: 'This card publishes no output to wire yet · release to cancel',
+    cancel: 'Release to cancel',
+    choosePort: 'Replace port {port}: which output of {source}?',
+    chooseAdd: 'Add a port: which output of {source}?',
+    chooseHint: '{n} outputs are declared — which one is wired is your call (out:0 is never assumed)',
+  },
+};
+
+/** `{name}` / `{n}` substitution — the same one-liner `SourcePicker` uses. */
+function fill(template: string, params: Record<string, string | number>): string {
+  let text = template;
+  for (const [key, value] of Object.entries(params)) {
+    text = text.split(`{${key}}`).join(String(value));
+  }
+  return text;
+}
+
+/** The sentence shown at the pointer before the release, e.g. `新增端口 B ← c.csv`. */
+function dropLabelText(plan: DropPlan, labels: WireLabelSet): string {
+  const { label } = plan;
+  switch (label.action) {
+    case 'add':
+      return fill(labels.add, { port: label.next ?? '', source: label.source });
+    case 'replace':
+      return label.previous !== null
+        ? fill(labels.replace, {
+            port: label.port ?? '',
+            previous: label.previous,
+            source: label.source,
+          })
+        : fill(labels.replaceFresh, { port: label.port ?? '', source: label.source });
+    case 'noop':
+      return fill(labels.noop, {
+        card: plan.targetName ?? '',
+        port: label.port ?? '',
+      });
+    case 'refuse':
+      if (label.reason === 'cycle') {
+        return fill(labels.refuseCycle, { card: plan.targetName ?? '' });
+      }
+      if (label.reason === 'self') return labels.refuseSelf;
+      if (label.reason === 'noSource') return labels.refuseNoSource;
+      return labels.refuseNoInput;
+    case 'cancel':
+      return labels.cancel;
+  }
+}
+
+/** Distance between the pointer and the label, in px (same offset `HoverHelp` uses). */
+const LABEL_OFFSET = 14;
+
+/** One pickable output of a multi-output source (ruling 4A: the chooser, never `out:0`). */
+const CHOICE_LABEL_STYLE = {
+  minWidth: 0,
+  overflow: 'hidden',
+  textOverflow: 'ellipsis',
+  whiteSpace: 'nowrap',
+} as const;
+
+/**
+ * The matrix chooser a multi-output source opens at the drop point.
+ *
+ * A popup rather than a silent commit, and one *after* the release rather than during it: the
+ * gesture is already over when this appears, so nothing here can intercept the pointer
+ * sequence, and dismissing it writes exactly nothing (the store is only called when a row is
+ * picked). A source with a single output never reaches this component — it commits with zero
+ * clicks.
+ */
+function WireChoiceMenu({ request }: { request: WireChoiceRequest }) {
+  const { locale } = useTranslator();
+  const labels = WIRE_LABELS[locale];
+  const heading =
+    request.portName !== null
+      ? fill(labels.choosePort, { port: request.portName, source: request.plan.label.source })
+      : fill(labels.chooseAdd, { source: request.plan.label.source });
+
+  return (
+    <Popup
+      x={request.client.x}
+      y={request.client.y}
+      className="chart-card__popup chart-card__popup--wide wire-choice"
+      onDismiss={() => dismissWireChoice()}
+    >
+      <div
+        className="wire-choice__body"
+        role="group"
+        aria-label={heading}
+        data-wire-choice={request.targetCardId}
+        data-wire-choice-port={request.portId ?? undefined}
+      >
+        <div className="chart-card__field wire-choice__title">{heading}</div>
+        <p className="context-menu__hint wire-choice__hint">
+          {fill(labels.chooseHint, { n: request.choices.length })}
+        </p>
+        <ul className="formula-card__port-list">
+          {request.choices.map((choice) => (
+            <li key={choice.matrixId}>
+              <button
+                type="button"
+                className="chart-card__popup-item wire-choice__item"
+                data-matrix-id={choice.matrixId}
+                data-output-id={choice.outputId ?? undefined}
+                title={choice.label}
+                onClick={() => pickWireChoice(choice.matrixId)}
+              >
+                <span className="source-picker__item-label" style={CHOICE_LABEL_STYLE}>
+                  {choice.label}
+                </span>
+                {choice.outputId !== null ? (
+                  <span className="script-card__output-id source-picker__item-id">
+                    {choice.outputId}
+                  </span>
+                ) : null}
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </Popup>
+  );
+}
+
 interface ConnectionLayerProps {
   cards: CardModel[];
   selectedId: number | null;
@@ -440,6 +704,18 @@ export function ConnectionLayer({
   const connections = useConnectionGeometry(cards, selectedId, dependencies, rects);
   const hidden = useBlockedBlink(blockedCardId, blockNonce);
   const rectList = useMemo(() => [...rects.values()], [rects]);
+
+  // The wire being dragged (G3). Subscribing here — not in a layer of its own — is what keeps
+  // the draft in the background: this SVG is `pointer-events: none`, so an in-flight wire can
+  // no more intercept the mouse than a settled one.
+  const wire = useWireState();
+  const draft = useMemo(
+    () => draftWireFor(wire, rects, view.zoom),
+    [wire, rects, view.zoom],
+  );
+  const { locale } = useTranslator();
+  const wireLabels = WIRE_LABELS[locale];
+  const wireText = draft !== null && wire.plan !== null ? dropLabelText(wire.plan, wireLabels) : null;
 
   const isHidden = (conn: Connection): boolean =>
     hidden.has(conn.dependsOn) || hidden.has(conn.dependent);
@@ -501,7 +777,8 @@ export function ConnectionLayer({
   // can keep working in unbounded *plane* coordinates — the same space the anchors are
   // measured in (see cardMetrics).
   return (
-    <svg className="connection-layer" aria-hidden="true">
+    <>
+      <svg className="connection-layer" aria-hidden="true">
       {/* Same transform as the world layer: translate *after* scale, so a plane point
           (px, py) lands at (px*zoom - view.x, py*zoom - view.y) in viewport px. */}
       <g transform={`translate(${-view.x}, ${-view.y}) scale(${view.zoom})`}>
@@ -550,8 +827,62 @@ export function ConnectionLayer({
         <g mask={`url(#${maskId})`}>
           {foreground.map((conn) => renderLine(conn, true))}
         </g>
+        {/* The wire under the cursor (G3): same mask, same "behind the cards" rule, painted
+            last so it reads above the settled wires while a drag is in flight. */}
+        {draft !== null ? (
+          <g className="connection connection--draft">
+            <g mask={`url(#${maskId})`}>
+              <path
+                className="connection__wire connection__wire--draft"
+                d={draft.d}
+                stroke={draft.color}
+                strokeWidth={DRAFT_THICKNESS / view.zoom}
+                strokeDasharray={
+                  draft.dashed
+                    ? `${DRAFT_DASH[0] / view.zoom} ${DRAFT_DASH[1] / view.zoom}`
+                    : undefined
+                }
+              />
+              <path className="connection__arrow" d={draft.arrow} fill={draft.color} />
+            </g>
+          </g>
+        ) : null}
       </g>
     </svg>
+      {/* The label that says what the release would do, before it does it (决策 §六). It is a
+          pointer-events:none badge portaled to the body: the cards are transformed and clipped,
+          so a badge drawn inside the layer (or inside a card) would be displaced, cut off or —
+          since this SVG paints *behind* the cards — erased. */}
+      {wireText !== null && wire.client !== null ? (
+        <WireDropLabel text={wireText} plan={wire.plan} client={wire.client} />
+      ) : null}
+      {wire.choosing !== null ? <WireChoiceMenu request={wire.choosing} /> : null}
+    </>
+  );
+}
+
+/** The pre-release badge: text plus the action it describes, at the pointer. */
+function WireDropLabel({
+  text,
+  plan,
+  client,
+}: {
+  text: string;
+  plan: DropPlan | null;
+  client: { x: number; y: number };
+}) {
+  return createPortal(
+    <div
+      className="hover-help wire-drop-label"
+      data-wire-drop={plan?.kind ?? 'cancel'}
+      data-wire-reason={plan?.label.reason ?? undefined}
+      data-wire-target={plan?.targetCardId ?? undefined}
+      data-wire-port={plan?.portId ?? undefined}
+      style={{ left: client.x + LABEL_OFFSET, top: client.y + LABEL_OFFSET }}
+    >
+      {text}
+    </div>,
+    document.body,
   );
 }
 

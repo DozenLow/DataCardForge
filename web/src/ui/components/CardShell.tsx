@@ -5,6 +5,15 @@
  * absolutely positioned inside the canvas so that the connection layer can measure
  * them directly; react-rnd handles the pointer interactions and reports the new
  * geometry back to the store.
+ *
+ * Since 2026-11-20 the title bar is also the **wiring handle** (task G3,
+ * `docs/decisions/2026-11-20-card-multi-input-and-wire-gesture.md` §六/§七): a right press
+ * arms the right-drag gesture that wires this card into another card's input. The title bar is
+ * the one clean surface for it — react-rnd's handle ignores the right button (`allowAnyClick`
+ * defaults to false, so a right press never moves the card) and the title bar carries no
+ * right-click menu of its own. This shell is shared by all nine card types, so the trigger is
+ * a single `onPointerDown` that does nothing at all unless `button === 2`; the left-button
+ * drag/resize/double-click paths are untouched.
  */
 import { useEffect, useRef } from 'react';
 import { Rnd } from 'react-rnd';
@@ -12,7 +21,19 @@ import type { ReactNode } from 'react';
 
 import { MIN_CARD_HEIGHT, MIN_CARD_WIDTH, useWorkspace } from '../workspaceStore.ts';
 import { registerCard, unregisterCard, invalidateLayout } from '../cardMetrics.ts';
+import { startWireGesture, useWireHighlight } from '../wireGesture.ts';
 import type { CardModel } from '../types.ts';
+
+/**
+ * Wire-drop rings, painted inline because this lane owns no stylesheet.
+ *
+ * Deliberately unlike `.card--drop-target` (a dashed accent outline for a *file* drop): a wire
+ * drop is a solid ring pulled inside the frame — blue where the release would commit, red where
+ * it would be refused — so "a file will replace this card's data" and "a wire will feed this
+ * card" can never be read as the same state.
+ */
+const WIRE_ACCEPT_RING = { outline: '2px solid rgb(40, 120, 220)', outlineOffset: '-4px' } as const;
+const WIRE_REFUSE_RING = { outline: '2px solid rgb(200, 50, 50)', outlineOffset: '-4px' } as const;
 
 interface CardShellProps {
   card: CardModel;
@@ -69,6 +90,16 @@ export function CardShell({
   const zoom = useWorkspace((s) => s.view.zoom);
   /** Node-level blockers outline the card that cannot advance (workspace-level ones do not). */
   const blocked = useWorkspace((s) => s.blockers.some((blocker) => blocker.cardId === card.id));
+  /**
+   * Is a wire being dragged over this card, and would the drop be accepted? (G3)
+   *
+   * A primitive snapshot, so the other eight cards do not re-render on every pointer move. The
+   * ring below is painted inline: this lane owns no stylesheet, and the two file-drop states
+   * (`.card--drop-target`) must stay visually distinct from a wire drop anyway.
+   */
+  const wireHighlight = useWireHighlight(card.id);
+  const wireRing =
+    wireHighlight === 'accept' ? WIRE_ACCEPT_RING : wireHighlight === 'refuse' ? WIRE_REFUSE_RING : null;
 
   // Publish this card's DOM element so the connection layer can measure anchors on it.
   useEffect(() => {
@@ -87,9 +118,11 @@ export function CardShell({
     <Rnd
       className={`card ${variant}${active ? ' card--active' : ''}${
         dropTarget ? ' card--drop-target' : ''
-      }${blocked ? ' card--blocked' : ''}`}
+      }${blocked ? ' card--blocked' : ''}${wireHighlight ? ` card--wire-${wireHighlight}` : ''}`}
       data-card-id={card.id}
-      style={{ zIndex: card.z }}
+      // `outline` instead of `box-shadow`: the card's own shadow is a stylesheet rule, and an
+      // inline box-shadow would erase it for the duration of the gesture.
+      style={wireRing ? { zIndex: card.z, ...wireRing } : { zIndex: card.z }}
       size={{ width: card.width, height: card.height }}
       position={{ x: card.x, y: card.y }}
       minWidth={minWidth ?? MIN_CARD_WIDTH}
@@ -116,7 +149,37 @@ export function CardShell({
       }
       ref={rndRef}
     >
-      <div className="card__titlebar" onDoubleClick={onActivate}>
+      <div
+        className="card__titlebar"
+        onDoubleClick={onActivate}
+        onPointerDown={(event) => {
+          // ── the right-drag wiring trigger (G3) ────────────────────────────────────────
+          //
+          // Right button only. Every other button returns immediately, so react-rnd's
+          // left-button move/resize and the double-click/title behaviour are bit-for-bit what
+          // they were before this lane.
+          if (event.button !== 2) return;
+          // A press on the close control is not a wire: the shell already excludes it from the
+          // DRAG handle (`cancel`), and arming here would let "right-click just off the ×, drift
+          // 4px, let go" add a port by accident.
+          if (event.target instanceof Element && event.target.closest('.card__close') !== null) {
+            return;
+          }
+          // NO `preventDefault()` here: react-rnd's `onMouseDown` (→ `onActivate`, which raises
+          // and selects the card) must still run, and the native context menu is already
+          // cancelled application-wide by G1. The press itself decides nothing — the arbiter
+          // separates "right click" from "wire drag" at pointer-up, by displacement.
+          startWireGesture({
+            sourceCardId: card.id,
+            pointerId: event.pointerId,
+            client: { x: event.clientX, y: event.clientY },
+            // Capture keeps the rest of the sequence on the surface that started it (`move` /
+            // `up`/ `cancel` still pass through the window listeners the controller installs;
+            // jsdom has no pointer capture at all, hence the optional call).
+            capture: event.currentTarget,
+          });
+        }}
+      >
         <span className="card__title" title={title}>
           {title}
         </span>
