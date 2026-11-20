@@ -88,6 +88,7 @@ import {
   REGRESSION_PORT_X,
   REGRESSION_PORT_Y,
 } from './bindings.ts';
+import { flushOperations } from './operationSettle.ts';
 import { translatorFor, detectLocale, type Locale } from './i18n.ts';
 import { initialTrust, scriptTrusted, type WorkspaceTrust } from './workspaceTrust.ts';
 // Application-level settings (units L1a): the GLOBAL layer of the three scope layers. The
@@ -715,6 +716,42 @@ export function nextOutputId(outputs: readonly OutputBinding[]): string {
 /** Next input port identity of a script card (`in:N`). */
 export function nextInputPortId(inputs: readonly PortConnection[]): string {
   return nextOrdinalId('in', inputs.map((input) => input.portId));
+}
+
+/**
+ * `params.portNames` aligned to `inputs[]`, index for index.
+ *
+ * A saved snapshot predating this card's last port can leave the declaration short; the port
+ * ids fill the gap, which is the same fallback `portVarName` applies on the wire. Every action
+ * that writes `portNames` starts from THIS array, so the declaration stays indexable by
+ * `inputs[]` instead of each caller inventing its own padding.
+ */
+function declaredPortNames(card: FunctionCardModel): string[] {
+  const names = [...scriptParams(card).portNames];
+  while (names.length < card.inputs.length) names.push(card.inputs[names.length].portId);
+  return names;
+}
+
+/**
+ * Do two port targets name the SAME source (and the same shape of it)?
+ *
+ * Used to make a re-bind onto the source a port already reads a no-op: the graph would not
+ * change, but a PATCH would mark the node dirty and an armed script card would run again for
+ * nothing.
+ */
+function samePortTarget(a: PortConnection['target'], b: PortConnection['target']): boolean {
+  if (a.type === 'matrix' && b.type === 'matrix') {
+    return a.cardId === b.cardId && a.matrixId === b.matrixId;
+  }
+  if (a.type === 'cell' && b.type === 'cell') {
+    return (
+      a.cardId === b.cardId &&
+      a.matrixId === b.matrixId &&
+      a.column === b.column &&
+      a.row === b.row
+    );
+  }
+  return false;
 }
 
 /**
@@ -1593,14 +1630,46 @@ interface WorkspaceState {
    */
   removeScriptOutput: (cardId: number, outputId: string) => ScriptOutputRemoval;
   /**
-   * Declare one more input port, bound to the same source as the card's first port.
+   * 加口: declare one more input port on an explicit source.
    *
-   * v1 has no source picker inside the card (picking a NEW source is a canvas gesture that
-   * already exists for every other card kind), so "+ 端口" grows the declaration on the
-   * source the card already reads. Returns the new portId, or null when there is nothing to
-   * bind to.
+   * The port is `in:N` (max + 1, never colliding with a survivor) and its injected name is the
+   * next free letter, so the script gets one more variable rather than a second name for
+   * numbers it already has. `params.portNames` and `inputs[]` grow together, the edge is
+   * added through `applyCardInputs` (cycle-checked, atomic), and the card is marked dirty —
+   * never run. Returns the new portId, or null when the card cannot take the port.
    */
-  addScriptPort: (cardId: number) => string | null;
+  addScriptInput: (cardId: number, target: PortConnection['target']) => string | null;
+  /**
+   * 改接: point an EXISTING port at another source matrix.
+   *
+   * Only `inputs[index].target` moves. `portId` is the port's identity, `params.portNames` is
+   * the variable the script already uses, and the script text is the user's — a re-bind is a
+   * data change, so none of the three is touched (决策 §二). The old source's edge loses this
+   * port and the new source's edge gains it, in one atomic write.
+   */
+  rebindScriptInput: (cardId: number, portId: string, target: PortConnection['target']) => boolean;
+  /**
+   * 删口: remove a declared input port and its injected name.
+   *
+   * ALLOWED unconditionally, by user ruling: the writer of the script is the reader of its
+   * inputs, and a script that still names the variable fails at run time with a line-numbered
+   * `NameError` — explicit, and it costs the user one edit. (Refusing instead would be a
+   * store-side veto of a decision that belongs to whoever owns the script; the panel's
+   * "N references" count is a hint, not a gate.) The remaining ports keep their ids and
+   * names, the edge survives while other ports still carry it, and a 0-port card stays a
+   * valid declaration (`portNames: []`).
+   */
+  removeScriptInput: (cardId: number, portId: string) => boolean;
+  /**
+   * The retired spelling of "add a port": it used to clone the card's FIRST source, which
+   * made every added port read the same table as the first one ("B is the same numbers as
+   * A" reads as a bug, not as a rule).
+   *
+   * A port without a source cannot be expressed on the wire (`portNames.length` must equal
+   * the binding count), so nothing is declared when no target is given — the source picker
+   * (M2) and the canvas gesture (G3) call `addScriptInput` with the source the user chose.
+   */
+  addScriptPort: (cardId: number, target?: PortConnection['target']) => string | null;
   /**
    * 净室运行: sync the declaration to the node, `POST .../compute`, then publish the result
    * into the display cache and the DAG (charts and chained cards follow).
@@ -2174,15 +2243,52 @@ function wireFormulas(value: unknown): unknown {
   });
 }
 
+/**
+ * The `(params, bindings)` identity of a push.
+ *
+ * One string, compared in two places — `pushFunctionCard` (skip a push the server already
+ * carries) and `bindingNeedsPush` (decide who a retry must visit) — because two spellings of
+ * "the same declaration" would drift the day either side grows a field.
+ */
+function pushSignatureOf(
+  params: Record<string, unknown>,
+  bindings: NonNullable<ReturnType<typeof portBindingsFor>>,
+): string {
+  return JSON.stringify({ params, inputs: bindings });
+}
+
+/**
+ * Would a push send something the server does not already carry?
+ *
+ * This is the widening of the old `node === null` retry predicate. The obvious spelling —
+ * "its binding is incomplete" — does NOT work: the retry paths run right AFTER the id they
+ * are about gets registered, so at that moment the card's binding is complete again, and the
+ * card that needs the push is exactly the one that would answer "false". The question that
+ * has to be asked is the one `pushFunctionCard` asks for itself: is the server still holding
+ * a DIFFERENT declaration? A card with no node, or with a binding it never managed to push
+ * (a re-bind onto a table that had not uploaded yet, an upstream that only now published its
+ * output id), needs the push; a card the server already agrees with does not, which is what
+ * keeps a registration from re-PATCHing every reader of the matrix.
+ */
+function bindingNeedsPush(card: FunctionCardModel): boolean {
+  // Cannot be bound at all yet (some other source still has no id): nothing to send, and the
+  // registration of THAT source asks again.
+  const bindings = portBindingsFor(card, backendMatrixIdFor);
+  if (!bindings) return false;
+  if (card.node === null) return true;
+  return lastPushedSignature.get(card.id) !== pushSignatureOf(wireParams(card), bindings);
+}
+
 async function pushFunctionCard(cardId: number): Promise<void> {
   const state = useWorkspace.getState();
   const card = state.cards.find((c) => c.id === cardId);
   if (!card || !isFormulaCard(card)) return;
 
   // The node must read the *server-side* copies of the referenced matrices. A missing id
-  // (offline, or not registered yet) is not an error: the card stays unbound and the
-  // registration callback / upstream push retries it (syncUnbound* below), instead of
-  // leaving it unusable forever.
+  // (offline, or not registered yet) is not an error: the card stays on its previous
+  // binding and `syncUnbound*` below retries it once that matrix has an id — including the
+  // case where this card already HAS a node (a re-bind onto a not-yet-uploaded table), which
+  // is why those retries ask `bindingNeedsPush` rather than `node === null`.
   const bindings = portBindingsFor(card, backendMatrixIdFor);
   if (!bindings) return;
   const params = wireParams(card);
@@ -2192,7 +2298,7 @@ async function pushFunctionCard(cardId: number): Promise<void> {
   // restore legitimately pushes the same card twice while matrices register, and the second
   // PATCH would dirty the node again — which an armed script card would read as a new input
   // change and answer with a second interpreter. Skipping it is both cheaper and quieter.
-  const pushSignature = JSON.stringify({ params, inputs: bindings });
+  const pushSignature = pushSignatureOf(params, bindings);
   if (existing && lastPushedSignature.get(cardId) === pushSignature) return;
 
   // Identity of the card this push was started for: it can be closed (or the whole
@@ -2253,25 +2359,31 @@ async function pushFunctionCard(cardId: number): Promise<void> {
 }
 
 /**
- * Re-attempt binding for unbound formula cards that read `ownerCardId`'s output.
+ * Re-attempt binding for formula cards that read `ownerCardId`'s output and are still
+ * incompletely bound.
  *
  * The chain is built from the upstream card's result menu, and that card may still be
  * computing (or have no node yet). Nothing else retries the binding, so without this an
  * unbound downstream card used to stay "No result yet" forever.
+ *
+ * The predicate is `bindingNeedsPush`, NOT "it has no node yet": a card that already HAS a
+ * node can be re-pointed (改接) at a matrix that has not registered, and its push is then
+ * skipped. Retrying only `node === null` cards left that one bound to the OLD table on the
+ * server forever, silently — the numbers on screen stayed plausible.
  */
 function syncUnboundDependents(ownerCardId: number): void {
   for (const card of useWorkspace.getState().cards) {
-    if (!isFormulaCard(card) || card.node !== null) continue;
+    if (!isFormulaCard(card) || !bindingNeedsPush(card)) continue;
     if (card.inputs.some((input) => input.target.cardId === ownerCardId)) {
       void syncFunctionCard(card.id);
     }
   }
 }
 
-/** Same retry for a matrix that finished registering after the card was created. */
+/** Same retry for a matrix that finished registering after the card was pointed at it. */
 function syncUnboundReadersOfMatrix(localMatrixId: number): void {
   for (const card of useWorkspace.getState().cards) {
-    if (!isFormulaCard(card) || card.node !== null) continue;
+    if (!isFormulaCard(card) || !bindingNeedsPush(card)) continue;
     if (card.inputs.some((input) => input.target.matrixId === localMatrixId)) {
       void syncFunctionCard(card.id);
     }
@@ -3366,6 +3478,80 @@ function rebuildDependencies(cards: CardModel[]): {
   return { dependencies, droppedEdges };
 }
 
+/**
+ * Point one card's `inputs[]` at a candidate port list — the ONE edge-resync rule.
+ *
+ * Every card kind that can gain, lose or re-target a source funnels through here: a chart
+ * column edit (`commitChartConfig`) and the three script-port operations
+ * (`addScriptInput` / `rebindScriptInput` / `removeScriptInput`). The rule reads `inputs[]`
+ * only — never `signatureId`, never the card kind — which is what lets the zero-special-case
+ * gate be satisfied by construction instead of by inspection.
+ *
+ * WHAT IT DOES, in order:
+ *   1. an owner this card no longer mentions loses its whole edge;
+ *   2. every owner it still mentions gets its PORT SET re-synced (an edge is one card pair,
+ *      so a column added to a chart or a port removed from a script card rewrites the ports
+ *      of an edge whose owner did not change);
+ *   3. the card is written with the candidate `inputs[]` — in the SAME write as `prepared`,
+ *      the caller's copy of the card carrying its own field change (a chart's `config`, a
+ *      script card's `portNames`), so the two representations cannot disagree for even one
+ *      render.
+ *
+ * ATOMICITY: every candidate owner edge is cycle-checked BEFORE anything is written, so a
+ * refused change leaves card, `inputs[]` and the graph exactly as they were — there is no
+ * half-wired state to roll back. Asking `findDownstreamPath` per candidate is the same test
+ * `addDependency` makes, and checking them all up front is equivalent to checking them one by
+ * one: all candidates share the dependent, and an edge LEAVING this card cannot make another
+ * candidate reach this card.
+ *
+ * Returns `false` (and shows the existing `status.cycle` toast) when the change is refused;
+ * the caller then reports the refusal to its own caller and writes nothing else.
+ */
+function applyCardInputs(
+  cardId: number,
+  nextInputs: PortConnection[],
+  prepared?: CardModel,
+): boolean {
+  const state = useWorkspace.getState();
+  const card = state.cards.find((entry) => entry.id === cardId);
+  if (!card) return false;
+
+  const beforeOwners = new Set(card.inputs.map((input) => input.target.cardId));
+  const afterOwners = new Set(nextInputs.map((input) => input.target.cardId));
+  const portsFor = (ownerId: number): string[] =>
+    nextInputs.filter((input) => input.target.cardId === ownerId).map((input) => input.portId);
+
+  for (const ownerId of afterOwners) {
+    const downstream = state.dependencies.findDownstreamPath(ownerId, cardId);
+    if (!downstream) continue;
+    useWorkspace.getState().showToast(
+      'error',
+      translatorFor(useWorkspace.getState().locale)('status.cycle', {
+        // Same ring `addDependency` reports: outermost first, back to the owner.
+        path: [...downstream, ownerId].join(' → '),
+      }),
+    );
+    return false;
+  }
+
+  for (const ownerId of beforeOwners) {
+    if (!afterOwners.has(ownerId)) state.dependencies.removeDependency(cardId, ownerId);
+  }
+  for (const ownerId of afterOwners) {
+    state.dependencies.removeDependency(cardId, ownerId);
+    state.dependencies.addDependency(cardId, ownerId, portsFor(ownerId));
+  }
+
+  const wired = { ...(prepared ?? card), inputs: nextInputs } as CardModel;
+  useWorkspace.setState({
+    cards: state.cards.map((entry) => (entry.id === cardId ? wired : entry)),
+    // The graph was mutated in place; publishing the reference is what tells every
+    // `dependencies` subscriber (the connection layer) that the port set moved.
+    dependencies: state.dependencies,
+  });
+  return true;
+}
+
 export const useWorkspace = create<WorkspaceState>((set, get) => {
   /** Highest z currently in use, so new cards land on top. */
   const topZ = (): number =>
@@ -3744,9 +3930,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
    * Commit a chart config change and keep `inputs[]` (the authoritative edges) in step.
    *
    * Every chart mutation funnels through here, so there is exactly one rule for "which
-   * cards does this chart read?" and it is applied atomically: new owner edges are
-   * validated for cycles BEFORE anything is written (a refused edit leaves the chart and
-   * the graph untouched), stale edges are dropped afterwards.
+   * cards does this chart read?" — and that rule is `applyCardInputs`, shared with the
+   * script card's port operations. The config and the derived `inputs[]` go out in ONE
+   * write, so a cycle refusal leaves the chart exactly as it was (no config pointing at a
+   * source whose edge was never registered).
    */
   const commitChartConfig = (
     cardId: number,
@@ -3758,39 +3945,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     const nextConfig = mutate(card.config);
     if (nextConfig === card.config) return true;
 
-    const cards = state.cards.map((entry) =>
-      entry.id === cardId && isChartCard(entry) ? { ...entry, config: nextConfig } : entry,
+    const nextCard: ChartCardModel = { ...card, config: nextConfig };
+    const nextInputs = chartInputsFromConfig(
+      nextCard,
+      state.cards.map((entry) => (entry.id === cardId ? nextCard : entry)),
     );
-    const nextCard = cards.find((c) => c.id === cardId) as ChartCardModel;
-    const nextInputs = chartInputsFromConfig(nextCard, cards);
-
-    const beforeOwners = new Set(card.inputs.map((input) => input.target.cardId));
-    const afterOwners = new Set(nextInputs.map((input) => input.target.cardId));
-    const portsFor = (ownerId: number): string[] =>
-      nextInputs.filter((input) => input.target.cardId === ownerId).map((input) => input.portId);
-    for (const ownerId of afterOwners) {
-      if (beforeOwners.has(ownerId)) continue;
-      const cycle = state.dependencies.addDependency(cardId, ownerId, portsFor(ownerId));
-      if (cycle) {
-        get().showToast(
-          'error',
-          translatorFor(get().locale)('status.cycle', { path: cycle.join(' → ') }),
-        );
-        return false;
-      }
-    }
-    for (const ownerId of beforeOwners) {
-      if (!afterOwners.has(ownerId)) state.dependencies.removeDependency(cardId, ownerId);
-    }
-    // A surviving owner can still have its port set rewritten (a column was added to or
-    // removed from the chart without changing who owns it), so re-sync the set instead of
-    // only appending to it.
-    for (const ownerId of afterOwners) {
-      state.dependencies.removeDependency(cardId, ownerId);
-      state.dependencies.addDependency(cardId, ownerId, portsFor(ownerId));
-    }
-    set({ cards: cards.map((entry) => (entry.id === cardId ? { ...nextCard, inputs: nextInputs } : entry)) });
-    return true;
+    return applyCardInputs(cardId, nextInputs, nextCard);
   };
 
   return {
@@ -5878,12 +6038,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       if (index < 0) return { ok: false, error: { code: 'notFound' } };
 
       const params = scriptParams(card);
-      const portNames = [...params.portNames];
-      // A saved snapshot predating this card's last port can leave the declaration short;
-      // fill from the port ids so the array stays indexable by `inputs[]`.
-      while (portNames.length < card.inputs.length) {
-        portNames.push(card.inputs[portNames.length].portId);
-      }
+      const portNames = declaredPortNames(card);
       const current = portNames[index];
       if (current === varName) return { ok: true, warning: null, replaced: 0 };
 
@@ -6047,47 +6202,81 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       return { ok: true };
     },
 
-    addScriptPort(cardId) {
-      const state = get();
-      const card = state.cards.find((entry) => entry.id === cardId);
-      if (!card || !isScriptCard(card) || card.inputs.length === 0) return null;
+    addScriptInput(cardId, target) {
+      // A discrete action (决策 §四): the text the user has already typed is applied first, so
+      // the port joins the declaration they can see, not a 200 ms older one.
+      flushOperations();
+      const card = get().cards.find((entry) => entry.id === cardId);
+      if (!card || !isScriptCard(card)) return null;
 
-      // v1 binds a new port to the source the card already reads: picking a NEW source is a
-      // canvas gesture that already exists for every other card kind, and inventing a second
-      // one inside the card would be the "port-level connection" the decision rules out.
-      const first = card.inputs[0];
-      const portId = nextInputPortId(card.inputs);
       const params = scriptParams(card);
-      const portNames = [...params.portNames];
-      while (portNames.length < card.inputs.length) {
-        portNames.push(card.inputs[portNames.length].portId);
-      }
+      const portNames = declaredPortNames(card);
       portNames.push(nextScriptVarName([...portNames, ...params.outputs]));
-      const cycle = state.dependencies.addDependency(cardId, first.target.cardId, portId);
-      if (cycle) {
-        get().showToast(
-          'error',
-          translatorFor(get().locale)('status.cycle', { path: cycle.join(' → ') }),
-        );
-        return null;
-      }
-      set({
-        cards: state.cards.map((entry) =>
-          entry.id === cardId && isFormulaCard(entry)
-            ? {
-                ...entry,
-                inputs: [...entry.inputs, { portId, target: { ...first.target } }],
-                params: { ...entry.params, portNames },
-              }
-            : entry,
-        ),
-        // The graph was mutated in place; publishing the reference is what tells every
-        // `dependencies` subscriber (the connection layer) that one more port exists.
-        dependencies: state.dependencies,
-      });
+      const portId = nextInputPortId(card.inputs);
+      const wired = applyCardInputs(
+        cardId,
+        [...card.inputs, { portId, target }],
+        { ...card, params: { ...card.params, portNames } },
+      );
+      // A refused (cyclic) edge wrote nothing — not the port, not the name, not the edge.
+      if (!wired) return null;
       markScriptDefinitionChanged(cardId);
       void syncFunctionCard(cardId);
       return portId;
+    },
+
+    rebindScriptInput(cardId, portId, target) {
+      flushOperations();
+      const card = get().cards.find((entry) => entry.id === cardId);
+      if (!card || !isScriptCard(card)) return false;
+      const index = card.inputs.findIndex((input) => input.portId === portId);
+      if (index < 0) return false;
+      // Already reads this source: the graph would not move, but the PATCH would dirty the
+      // node (and an armed card would run again for nothing).
+      if (samePortTarget(card.inputs[index].target, target)) return true;
+
+      // ONLY the target changes. The port keeps `in:N`, the script keeps its text, and
+      // `portNames[index]` keeps the variable name — that is what makes a re-bind a data
+      // change rather than a declaration edit (决策 §二).
+      const nextInputs = card.inputs.map((input, position) =>
+        position === index ? { ...input, target } : input,
+      );
+      if (!applyCardInputs(cardId, nextInputs, card)) return false;
+      markScriptDefinitionChanged(cardId);
+      void syncFunctionCard(cardId);
+      return true;
+    },
+
+    removeScriptInput(cardId, portId) {
+      flushOperations();
+      const card = get().cards.find((entry) => entry.id === cardId);
+      if (!card || !isScriptCard(card)) return false;
+      const index = card.inputs.findIndex((input) => input.portId === portId);
+      if (index < 0) return false;
+
+      // Allowed even while the script still names the variable (user ruling #3): the run
+      // reports it as a line-numbered `NameError`, and the "N references" count is the
+      // panel's hint — a store-side veto would make removing a port the script no longer
+      // needs impossible to perform.
+      const portNames = declaredPortNames(card).filter((_, position) => position !== index);
+      const nextInputs = card.inputs.filter((_, position) => position !== index);
+      const wired = applyCardInputs(
+        cardId,
+        nextInputs,
+        { ...card, params: { ...card.params, portNames } },
+      );
+      if (!wired) return false;
+      markScriptDefinitionChanged(cardId);
+      void syncFunctionCard(cardId);
+      return true;
+    },
+
+    addScriptPort(cardId, target) {
+      // Retired clone-the-first-source rule: a port must name the source it reads, so there
+      // is nothing to declare without one (`portNames.length` has to equal the binding
+      // count). The card's picker (M2) and the canvas gesture (G3) call `addScriptInput`.
+      if (!target) return null;
+      return get().addScriptInput(cardId, target);
     },
 
     runScriptCard(cardId) {

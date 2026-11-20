@@ -1,0 +1,32 @@
+{
+  "comment": "Multi-source SCRIPT card fixture (M1, docs/decisions/2026-11-20-card-multi-input-and-wire-gesture.md §四). One card, three ports, three DIFFERENT upstream matrices — the case the frontend store could not express before the port actions existed. It has two halves that must agree: `ports` describes the card side (`inputs[]` + `params.portNames`), `wire` describes what the backend is told (positional `portId`/`varName`/`mode`/`source`). `web/tests/ScriptCardStore.test.ts` builds the card through the real store actions and compares BOTH halves against the live state, so a rule that drifts on either side of the wire fails here instead of in production. NOTE: ctest's `card_fixtures` runner lists `function-card.v2.json` explicitly, so this file is not (yet) read by the C++ side; a `builtin:python` case cannot go through `NodeRegistry` there without a pinned Python runtime, and the multi-port builtin case (`builtin:linear-regression`, x<-m7 y<-m8) is already covered by that file.",
+  "case": {
+    "name": "script-card-three-sources",
+    "signatureId": "builtin:python",
+    "script": "result = A + B + C\n",
+    "sources": [
+      {
+        "name": "a.csv",
+        "columns": [{ "posName": "Pos.1", "data": [1, 2, 3] }]
+      },
+      {
+        "name": "b.csv",
+        "columns": [{ "posName": "Pos.1", "data": [10, 20, 30] }]
+      },
+      {
+        "name": "c.csv",
+        "columns": [{ "posName": "Pos.1", "data": [100, 200, 300] }]
+      }
+    ],
+    "ports": [
+      { "portId": "in:0", "varName": "A", "source": 0 },
+      { "portId": "in:1", "varName": "B", "source": 1 },
+      { "portId": "in:2", "varName": "C", "source": 2 }
+    ],
+    "wire": [
+      { "portId": "in:0", "varName": "A", "mode": "matrix", "source": 0 },
+      { "portId": "in:1", "varName": "B", "mode": "matrix", "source": 1 },
+      { "portId": "in:2", "varName": "C", "mode": "matrix", "source": 2 }
+    ]
+  }
+}

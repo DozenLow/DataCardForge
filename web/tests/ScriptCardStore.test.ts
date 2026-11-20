@@ -17,8 +17,17 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
 import { MatrixData } from '../src/core/MatrixData.ts';
-import { useWorkspace, emptyScriptRun, outputMatrixId } from '../src/ui/workspaceStore.ts';
+import {
+  useWorkspace,
+  emptyScriptRun,
+  outputMatrixId,
+  scriptDeclarationError,
+} from '../src/ui/workspaceStore.ts';
 import {
   PINNED_WORKSPACE_ENV,
   PYTHON_SIGNATURE,
@@ -26,6 +35,7 @@ import {
   type ChartCardModel,
   type FunctionCardModel,
   type MatrixCardModel,
+  type PortConnection,
 } from '../src/ui/types.ts';
 import { initialTrust } from '../src/ui/workspaceTrust.ts';
 
@@ -459,30 +469,436 @@ describe('output declaration — out:N', () => {
   });
 });
 
-describe('input ports', () => {
-  it('adds a port on the same source, with a fresh identity and a fresh name', async () => {
+/** One entry of the wire list a node is created/patched with (a `PortBindingDto`). */
+interface PortConnectionWire {
+  portId: string;
+  varName: string;
+  mode: string;
+  sourceMatrixId: number | null;
+}
+
+describe('input ports — 加口 / 改接 / 删口', () => {
+  /** The displayed table of a data card — what a port's `target` names. */
+  function localMatrixOf(cardId: number): number {
+    const card = store().cards.find((entry) => entry.id === cardId) as MatrixCardModel;
+    return card.sources[card.activeSource].matrixId;
+  }
+
+  /** A port target reading one data card's displayed table. */
+  function targetOf(cardId: number): PortConnection['target'] {
+    return { type: 'matrix', cardId, matrixId: localMatrixOf(cardId) };
+  }
+
+  /** Body of the last PATCH the store sent (the wire side of a declaration). */
+  function lastPush(): { params: Record<string, unknown>; inputs: PortConnectionWire[] } {
+    const call = client.patchNode.mock.calls.at(-1) as unknown as [
+      number,
+      { params: Record<string, unknown>; inputs: PortConnectionWire[] },
+    ];
+    return call[1];
+  }
+
+  it('adds a third port on a DIFFERENT source, and only that source gains an edge', async () => {
+    const a = await loadSource('a.csv', [[1], [2]]);
+    const b = await loadSource('b.csv', [[3], [4]]);
+    const c = await loadSource('c.csv', [[5], [6]]);
+    const cardId = await makeScriptCard([a, b]);
+    client.patchNode.mockClear();
+
+    expect(store().addScriptInput(cardId, targetOf(c))).toBe('in:2');
+
+    const card = scriptCardOf(cardId);
+    expect(card.inputs.map((input) => input.portId)).toEqual(['in:0', 'in:1', 'in:2']);
+    // Three ports, three different upstreams — the point of the whole lane: a new port is a
+    // new VARIABLE, not a second name for the first source's numbers.
+    expect(card.inputs.map((input) => input.target.cardId)).toEqual([a, b, c]);
+    expect(card.inputs[2].target).toEqual(targetOf(c));
+    expect(card.params.portNames).toEqual(['A', 'B', 'C']);
+    // One edge per source card, each carrying exactly its own port.
+    expect(store().dependencies.getPorts(cardId, a)).toEqual(['in:0']);
+    expect(store().dependencies.getPorts(cardId, b)).toEqual(['in:1']);
+    expect(store().dependencies.getPorts(cardId, c)).toEqual(['in:2']);
+
+    await flush();
+    const serverId = (cardId: number): number | null =>
+      store().backendMatrixId(localMatrixOf(cardId));
+    expect(lastPush().params.portNames).toEqual(['A', 'B', 'C']);
+    expect(lastPush().inputs).toEqual([
+      { portId: 'in:0', varName: 'A', mode: 'matrix', sourceMatrixId: serverId(a) },
+      { portId: 'in:1', varName: 'B', mode: 'matrix', sourceMatrixId: serverId(b) },
+      { portId: 'in:2', varName: 'C', mode: 'matrix', sourceMatrixId: serverId(c) },
+    ]);
+    // 加口 is a declaration change: pushed, never run.
+    expect(client.computeNode).not.toHaveBeenCalled();
+  });
+
+  it('re-binds one port: script and params stay byte-identical, the edge moves the port', async () => {
+    const a = await loadSource('a.csv', [[1], [2]]);
+    const b = await loadSource('b.csv', [[3], [4]]);
+    const c = await loadSource('c.csv', [[5], [6]]);
+    const cardId = await makeScriptCard([a, b]);
+    store().setScriptText(cardId, '# A and B are two tables\nresult = A + B\n');
+    await flush();
+    const paramsBefore = JSON.stringify(scriptCardOf(cardId).params);
+    const scriptBefore = scriptCardOf(cardId).params.script;
+    client.patchNode.mockClear();
+
+    expect(store().rebindScriptInput(cardId, 'in:1', targetOf(c))).toBe(true);
+
+    const card = scriptCardOf(cardId);
+    // 改接 is a DATA change: `in:1` is still the port's identity, the injected variable is
+    // still `B`, and not one byte of params moves.
+    expect(card.inputs.map((input) => input.portId)).toEqual(['in:0', 'in:1']);
+    expect(JSON.stringify(card.params)).toBe(paramsBefore);
+    expect(card.params.script).toBe(scriptBefore);
+    expect(card.params.portNames).toEqual(['A', 'B']);
+    expect(card.inputs.map((input) => input.target.cardId)).toEqual([a, c]);
+    // The old source's edge loses the port (it only carried that one, so the edge goes); the
+    // new source's edge gains it.
+    expect(store().dependencies.getDependents(b)).toEqual([]);
+    expect(store().dependencies.getDependents(a)).toEqual([cardId]);
+    expect(store().dependencies.getPorts(cardId, a)).toEqual(['in:0']);
+    expect(store().dependencies.getPorts(cardId, c)).toEqual(['in:1']);
+
+    await flush();
+    // The wire follows: same port, same variable name, new source matrix.
+    expect(lastPush().inputs[1]).toEqual({
+      portId: 'in:1',
+      varName: 'B',
+      mode: 'matrix',
+      sourceMatrixId: store().backendMatrixId(localMatrixOf(c)),
+    });
+    // A re-bind is a discrete action, not an `upstreamChanged`: nothing runs by itself.
+    expect(client.computeNode).not.toHaveBeenCalled();
+  });
+
+  it('treats a re-bind onto the source it already reads as a no-op', async () => {
+    const a = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([a]);
+    // Run once so the card holds numbers: a spurious definition change would drop them and
+    // turn the lamp grey for nothing.
+    store().runScriptCard(cardId);
+    await flush();
+    await flush();
+    expect(scriptCardOf(cardId).node?.state).toBe('done');
+    client.patchNode.mockClear();
+
+    expect(store().rebindScriptInput(cardId, 'in:0', targetOf(a))).toBe(true);
+    await flush();
+    // Same source: the graph does not move, so there is nothing to PATCH and nothing to mark
+    // stale — the lamp keeps saying "done" and the numbers stay.
+    expect(client.patchNode).not.toHaveBeenCalled();
+    expect(scriptCardOf(cardId).node?.state).toBe('done');
+    expect(scriptCardOf(cardId).inputs[0].target).toEqual(targetOf(a));
+  });
+
+  it('refuses a re-bind that would close a cycle: card, params and edges all stay put', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const upstreamId = await makeScriptCard([source]);
+    // A second script card reading the first one's output: upstreamId → downstreamId.
+    const downstreamId = await makeScriptCard([upstreamId]);
+    const downstreamMatrix = scriptCardOf(downstreamId).displayMatrixId;
+    client.patchNode.mockClear();
+
+    const read = scriptCardOf(upstreamId);
+    const inputsBefore = JSON.stringify(read.inputs);
+    const paramsBefore = JSON.stringify(read.params);
+    const edgesBefore = JSON.stringify(store().dependencies.edges());
+
+    // Pointing the upstream card at its own downstream closes the loop.
+    expect(
+      store().rebindScriptInput(upstreamId, 'in:0', {
+        type: 'matrix',
+        cardId: downstreamId,
+        matrixId: downstreamMatrix,
+      }),
+    ).toBe(false);
+
+    // The WHOLE change is rolled back: no half-wired card, no half-wired edges.
+    expect(JSON.stringify(scriptCardOf(upstreamId).inputs)).toBe(inputsBefore);
+    expect(JSON.stringify(scriptCardOf(upstreamId).params)).toBe(paramsBefore);
+    expect(JSON.stringify(store().dependencies.edges())).toBe(edgesBefore);
+    expect(store().dependencies.getPorts(upstreamId, source)).toEqual(['in:0']);
+    // The refusal speaks through the existing `status.cycle` toast — no second mechanism.
+    expect(store().toast?.kind).toBe('error');
+    expect(store().toast?.message).toContain('循环依赖');
+    expect(store().toast?.message).toContain(`${downstreamId} → ${upstreamId}`);
+
+    // The same rule guards 加口: a NEW port onto a downstream source is refused, and leaves
+    // no port, no name and no edge behind.
+    expect(
+      store().addScriptInput(upstreamId, {
+        type: 'matrix',
+        cardId: downstreamId,
+        matrixId: downstreamMatrix,
+      }),
+    ).toBeNull();
+    expect(scriptCardOf(upstreamId).inputs.map((input) => input.portId)).toEqual(['in:0']);
+    expect(scriptCardOf(upstreamId).params.portNames).toEqual(['A']);
+    expect(JSON.stringify(store().dependencies.edges())).toBe(edgesBefore);
+
+    await flush();
+    expect(client.patchNode).not.toHaveBeenCalled();
+  });
+
+  it('re-binds to a table with no server id yet, then pushes once it registers', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    /** The chained card reading `source` — its output table has no id until its node lands. */
+    const upstreamCard = (): FunctionCardModel =>
+      store().cards.find((entry) => entry.id === upstream) as FunctionCardModel;
+
+    // An upstream whose FIRST push failed: it has no node, so its output table has no server
+    // id — exactly the "already imported, not registered yet" window.
+    client.createNode.mockImplementationOnce(async () => ({ ok: false, code: 'internalError' }));
+    const upstream = store().addFormulaCard(source) as number;
+    await flush();
+    const upstreamMatrix = upstreamCard().displayMatrixId;
+    expect(upstreamCard().outputs[0].resultMatrixId).toBe(-1);
+
+    const cardId = await makeScriptCard([source]);
+    client.patchNode.mockClear();
+
+    // The re-bind is legal and lands LOCALLY. No PATCH goes out: binding the node to a matrix
+    // id the server does not have would be worse than a late binding.
+    expect(
+      store().rebindScriptInput(cardId, 'in:0', {
+        type: 'matrix',
+        cardId: upstream,
+        matrixId: upstreamMatrix,
+      }),
+    ).toBe(true);
+    await flush();
+    expect(scriptCardOf(cardId).inputs[0].target).toEqual({
+      type: 'matrix',
+      cardId: upstream,
+      matrixId: upstreamMatrix,
+    });
+    expect(client.patchNode).not.toHaveBeenCalled();
+
+    // The upstream's node finally lands (a definition edit retries its create) and publishes
+    // its output table. The script card ALREADY has a node, so a retry keyed on "has no node
+    // yet" would skip it and it would silently keep reading the old table forever.
+    store().setFormula(upstream, 0, 'double', 'A * 2');
+    await flush();
+    await flush();
+
+    const upstreamServerId = upstreamCard().outputs[0].resultMatrixId;
+    expect(upstreamServerId).toBeGreaterThan(0);
+    expect(client.patchNode).toHaveBeenCalled();
+    expect(lastPush().inputs[0]).toEqual({
+      portId: 'in:0',
+      varName: 'A',
+      mode: 'matrix',
+      sourceMatrixId: upstreamServerId,
+    });
+  });
+
+  it('removes a middle port: surviving ids and names stay, and the live hole is not reused', async () => {
+    const a = await loadSource('a.csv', [[1], [2]]);
+    const b = await loadSource('b.csv', [[3], [4]]);
+    const c = await loadSource('c.csv', [[5], [6]]);
+    const cardId = await makeScriptCard([a, b]);
+    store().addScriptInput(cardId, targetOf(c));
+    await flush();
+
+    expect(store().removeScriptInput(cardId, 'in:1')).toBe(true);
+
+    const card = scriptCardOf(cardId);
+    // The survivors are untouched: `in:0`/`in:2` keep their ids, `A`/`C` keep their names.
+    expect(card.inputs.map((input) => input.portId)).toEqual(['in:0', 'in:2']);
+    expect(card.params.portNames).toEqual(['A', 'C']);
+    // `b`'s edge is gone (it only carried that port); the others keep theirs.
+    expect(store().dependencies.getDependents(b)).toEqual([]);
+    expect(store().dependencies.getPorts(cardId, a)).toEqual(['in:0']);
+    expect(store().dependencies.getPorts(cardId, c)).toEqual(['in:2']);
+
+    // A new port takes max(live) + 1: `in:1` is a HOLE and stays one while `in:2` lives, so
+    // no surviving edge can be re-pointed by an id that starts meaning something else.
+    expect(store().addScriptInput(cardId, targetOf(b))).toBe('in:3');
+    // A freed NAME may come back (`B` is the first free letter again) — the declaration is
+    // positional by index and the identity is the id, so nothing is re-pointed by a name.
+    expect(scriptCardOf(cardId).params.portNames).toEqual(['A', 'C', 'B']);
+    await flush();
+    expect(lastPush().params.portNames).toEqual(['A', 'C', 'B']);
+    expect(lastPush().inputs).toHaveLength(3);
+  });
+
+  it('removes a port the script still names (ruling #3: the run reports the NameError)', async () => {
+    const a = await loadSource('a.csv', [[1], [2]]);
+    const b = await loadSource('b.csv', [[3], [4]]);
+    const cardId = await makeScriptCard([a, b]);
+    store().setScriptText(cardId, 'result = A + B\n');
+    await flush();
+    const scriptBefore = scriptCardOf(cardId).params.script;
+
+    // Allowed unconditionally: the script is the user's, so a store-side veto would refuse
+    // the edit the user asked for. The stale reference fails loudly at run time instead.
+    expect(store().removeScriptInput(cardId, 'in:1')).toBe(true);
+
+    const card = scriptCardOf(cardId);
+    expect(card.params.script).toBe(scriptBefore);
+    expect(card.params.portNames).toEqual(['A']);
+    expect(card.inputs.map((input) => input.portId)).toEqual(['in:0']);
+    expect(store().dependencies.getDependents(b)).toEqual([]);
+    await flush();
+    expect(lastPush().inputs).toHaveLength(1);
+  });
+
+  it('leaves a 0-port card a VALID declaration (inputs [] and portNames [])', async () => {
     const source = await loadSource('a.csv', [[1], [2]]);
     const cardId = await makeScriptCard([source]);
 
-    const portId = store().addScriptPort(cardId);
-    expect(portId).toBe('in:1');
+    expect(store().removeScriptInput(cardId, 'in:0')).toBe(true);
+
     const card = scriptCardOf(cardId);
-    expect(card.inputs.map((input) => input.portId)).toEqual(['in:0', 'in:1']);
-    // Both ports read the same table — the v1 rule (a NEW source is a canvas gesture, not a
-    // second kind of connection invented inside the card).
-    expect(card.inputs[1].target).toEqual(card.inputs[0].target);
-    expect(card.params.portNames).toEqual(['A', 'B']);
-    // The edge grew a port instead of growing a second edge.
-    expect(store().dependencies.getPorts(cardId, source)).toEqual(['in:0', 'in:1']);
+    expect(card.inputs).toEqual([]);
+    expect(card.params.portNames).toEqual([]);
+    // "Nothing to bind" is not an error: the declaration is empty on both sides.
+    expect(scriptDeclarationError(card)).toBeNull();
+    expect(store().dependencies.getDependents(source)).toEqual([]);
     await flush();
-    // The declaration is still valid, so the next push sends both names in order.
-    const patch = client.patchNode.mock.calls.at(-1) as unknown as [number, { params: Record<string, unknown> }];
-    expect(patch[1].params.portNames).toEqual(['A', 'B']);
+    expect(lastPush().inputs).toEqual([]);
+    expect(lastPush().params.portNames).toEqual([]);
+
+    // …and the card takes a port again. With no live id there is no hole to protect, so the
+    // first port of the fresh declaration is `in:0` once more.
+    expect(store().addScriptInput(cardId, targetOf(source))).toBe('in:0');
+    expect(scriptCardOf(cardId).params.portNames).toEqual(['A']);
   });
 
-  it('has nothing to add to when the card has no ports at all', () => {
+  it('cannot clone the first source any more: a port with no source declares nothing', async () => {
+    const source = await loadSource('a.csv', [[1], [2]]);
+    const cardId = await makeScriptCard([source]);
+
+    // `addScriptPort(cardId)` used to bind the new port to `inputs[0].target` — the temporary
+    // rule this lane retires. A port IS a variable, so it needs the source the user chose.
+    expect(store().addScriptPort(cardId)).toBeNull();
+    const card = scriptCardOf(cardId);
+    expect(card.inputs.map((input) => input.portId)).toEqual(['in:0']);
+    expect(card.params.portNames).toEqual(['A']);
+    expect(store().dependencies.getPorts(cardId, source)).toEqual(['in:0']);
+  });
+
+  it('refuses a birth binding with no source at all', () => {
     // A script card can only be born from a source, so this is the empty-selection path.
     expect(store().addScriptCard([])).toBeNull();
+  });
+});
+
+/**
+ * The multi-source fixture (`web/tests/fixtures/cards/script-card.multi-input.json`) has two
+ * halves that must agree: `ports` is the card side (`inputs[]` + `params.portNames`) and
+ * `wire` is what the backend is told (`portId`/`varName`/`mode`/`source`). The store builds
+ * the card through the real actions, and BOTH halves are compared against the live state —
+ * a rule that drifts on either side of the wire fails here.
+ */
+describe('multi-source fixture (script-card.multi-input.json)', () => {
+  interface FixtureSource {
+    name: string;
+    columns: Array<{ posName: string; data: number[] }>;
+  }
+  interface FixturePort {
+    portId: string;
+    varName: string;
+    source: number;
+  }
+  interface FixtureWire extends FixturePort {
+    mode: string;
+  }
+  interface MultiInputCase {
+    script: string;
+    sources: FixtureSource[];
+    ports: FixturePort[];
+    wire: FixtureWire[];
+  }
+
+  const here = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'cards');
+  const fixture = (
+    JSON.parse(readFileSync(join(here, 'script-card.multi-input.json'), 'utf8')) as {
+      case: MultiInputCase;
+    }
+  ).case;
+
+  function matrixOf(source: FixtureSource): MatrixData {
+    const data = new MatrixData();
+    for (const column of source.columns) data.appendColumn(column.posName, column.data.slice());
+    return data;
+  }
+
+  function localMatrixOf(cardId: number): number {
+    const card = store().cards.find((entry) => entry.id === cardId) as MatrixCardModel;
+    return card.sources[card.activeSource].matrixId;
+  }
+
+  it('is coherent with itself before it judges anything', () => {
+    // A fixture whose two halves disagree is a broken judge, not a test.
+    expect(fixture.wire.map((entry) => entry.portId)).toEqual(
+      fixture.ports.map((port) => port.portId),
+    );
+    expect(fixture.wire.map((entry) => entry.varName)).toEqual(
+      fixture.ports.map((port) => port.varName),
+    );
+    expect(fixture.wire.map((entry) => entry.source)).toEqual(
+      fixture.ports.map((port) => port.source),
+    );
+    // Three ports, three DIFFERENT sources: that is what makes this case a multi-input case.
+    expect(new Set(fixture.ports.map((port) => port.source)).size).toBe(fixture.ports.length);
+    expect(fixture.ports.length).toBe(fixture.sources.length);
+  });
+
+  it('reproduces the fixture on both sides of the wire', async () => {
+    const sourceCards: number[] = [];
+    for (const source of fixture.sources) {
+      sourceCards.push(
+        store().addMatrixCard([{ name: source.name, matrix: matrixOf(source) }]),
+      );
+    }
+    await flush();
+
+    // Born from the first two sources, the third port arrives through 加口 — exactly the
+    // path a user (or the wire gesture) takes.
+    const cardId = store().addScriptCard([
+      sourceCards[fixture.ports[0].source],
+      sourceCards[fixture.ports[1].source],
+    ]);
+    expect(cardId).not.toBeNull();
+    await flush();
+    store().setScriptText(cardId as number, fixture.script);
+    await flush();
+    const added = store().addScriptInput(cardId as number, {
+      type: 'matrix',
+      cardId: sourceCards[fixture.ports[2].source],
+      matrixId: localMatrixOf(sourceCards[fixture.ports[2].source]),
+    });
+    await flush();
+
+    const card = scriptCardOf(cardId as number);
+    // ── card side ──
+    expect(added).toBe(fixture.ports[2].portId);
+    expect(card.inputs.map((input) => input.portId)).toEqual(
+      fixture.ports.map((port) => port.portId),
+    );
+    expect(card.params.portNames).toEqual(fixture.ports.map((port) => port.varName));
+    expect(card.params.script).toBe(fixture.script);
+    fixture.ports.forEach((port, index) => {
+      expect(card.inputs[index].target.cardId).toBe(sourceCards[port.source]);
+      expect(card.inputs[index].target.matrixId).toBe(localMatrixOf(sourceCards[port.source]));
+    });
+
+    // ── wire side ──
+    const push = client.patchNode.mock.calls.at(-1) as unknown as [
+      number,
+      { params: Record<string, unknown>; inputs: unknown[] },
+    ];
+    expect(push[1].params.portNames).toEqual(fixture.wire.map((entry) => entry.varName));
+    expect(push[1].inputs).toEqual(
+      fixture.wire.map((entry) => ({
+        portId: entry.portId,
+        varName: entry.varName,
+        mode: entry.mode,
+        sourceMatrixId: store().backendMatrixId(localMatrixOf(sourceCards[entry.source])),
+      })),
+    );
   });
 });
 
