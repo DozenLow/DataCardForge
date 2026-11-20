@@ -749,11 +749,14 @@ body {
 /* ── Chart card ─────────────────────────────────────────────────────── */
 
 .chart-card {
-  display: flex;
-  flex-direction: row;
+  /* Same shape as `.formula-card__zones`: a fixed side column and a fluid work area, so the
+     chart's left zone can never squeeze the plot by growing its content. */
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
   align-items: stretch;
   flex: 1 1 auto;
   min-height: 0;
+  overflow: hidden;
 }
 
 /* The main column: toolbar, plot and footer stack vertically beside the dock. */
@@ -796,6 +799,15 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
+/* The toolbar's right-hand hint is a caption, like every zone title: same size, weight and
+   letter-spacing as `.side-panel__title`, so a chart card reads as the same family. */
+.chart-card .chart-card__hint {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
 .chart-card__tp {
   position: relative;
   flex: 0 0 auto;
@@ -803,8 +815,8 @@ body {
 
 .chart-card__tbutton {
   font: inherit;
-  font-size: 12px;
-  padding: 3px 9px;
+  font-size: 11px;
+  padding: 2px 8px;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -956,6 +968,15 @@ body {
   border-top: 1px solid var(--border);
 }
 
+/* Footer captions (the "columns" label, the pair-order note) use the zone-title metrics. */
+.chart-card__label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
 .chart-card__columns {
   display: flex;
   align-items: center;
@@ -963,11 +984,6 @@ body {
   gap: 5px;
   padding: 5px 8px;
   border-bottom: 1px solid var(--border);
-}
-
-.chart-card__label {
-  font-size: 11px;
-  color: var(--text-dim);
 }
 
 .chart-card__chip-label {
@@ -983,12 +999,12 @@ body {
   gap: 3px;
   max-width: 200px;
   padding: 1px 4px 1px 8px;
-  font-size: 11px;
+  font-size: 10px;
   font-family: var(--mono);
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 9px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1010,103 +1026,51 @@ body {
   background: var(--danger);
 }
 
-/* Collapsible column picker on the left edge of the chart card. Collapsed it is a
-   thin rail with a vertical label; expanded it lists the table's columns. */
+/*
+ * The chart's left zone is the shared `.side-panel` (same component, same language as the
+ * formula card's inputs). These classes only carry its WIDTH, the way
+ * `.formula-card__inputs` carries the formula card's — every metric inside comes from the
+ * `side-panel` / `formula-card__port*` rules, so the two cards' columns line up.
+ */
 .chart-card__dock {
-  flex: 0 0 auto;
-  width: 22px;
+  width: 176px;
+  min-width: 0;
+  background: var(--surface-alt);
+  border-right: 1px solid var(--border);
+}
+
+.chart-card__dock.side-panel--rail {
+  width: 30px;
+}
+
+/* Groups stack inside the panel body; each is a heading plus its port rows. */
+.chart-card__dock-groups {
   display: flex;
   flex-direction: column;
-  border-right: 1px solid var(--border);
-  background: var(--surface-alt);
-  overflow: hidden;
-  transition: width 140ms ease;
-}
-
-.chart-card__dock--open {
-  width: 200px;
-}
-
-.chart-card__dock-toggle {
-  flex: 1 1 auto;
-  font: inherit;
-  font-size: 11px;
-  letter-spacing: 2px;
-  color: var(--text-dim);
-  background: transparent;
-  border: 0;
-  cursor: pointer;
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  padding: 8px 0;
-}
-
-.chart-card__dock-toggle:hover {
-  color: var(--text);
-  background: var(--accent-soft);
-}
-
-.chart-card__dock-head {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  padding: 4px 6px;
-  border-bottom: 1px solid var(--border);
-  font-size: 11px;
-  color: var(--text-dim);
-}
-
-.chart-card__dock-title {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chart-card__dock-collapse {
-  font: inherit;
-  line-height: 1;
-  padding: 2px 6px;
-  color: var(--text-dim);
-  background: transparent;
-  border: 0;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.chart-card__dock-collapse:hover {
-  color: var(--text);
-  background: var(--accent-soft);
-}
-
-.chart-card__dock-list {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow-y: auto;
-  padding: 4px 6px;
+  gap: 6px;
+  min-width: 0;
 }
 
 .chart-card__dock-group + .chart-card__dock-group {
-  margin-top: 6px;
+  margin-top: 2px;
 }
 
+/* The group's source (a file name, or a card plus its output): a caption over the rows. */
 .chart-card__dock-group-title {
-  font-size: 11px;
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.4;
   color: var(--text-dim);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  padding: 2px 0;
+  padding: 0 1px 2px;
 }
 
+/* A listed column IS a port row: it reuses `.formula-card__port` metrics and only differs
+   in being selectable — the checkbox leads, the label is the source line, the badges trail. */
 .chart-card__dock-item {
-  display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 1px 0;
-  font-size: 12px;
-  color: var(--text);
   cursor: pointer;
 }
 
@@ -1117,38 +1081,42 @@ body {
 }
 
 .chart-card__dock-item-label {
+  /* Line 1 with the checkbox; the badges wrap after it, as the formula card's do. */
   flex: 1 1 auto;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.chart-card__dock-badge {
-  flex: 0 0 auto;
-  font-size: 10px;
-  line-height: 1;
-  padding: 1px 4px;
+/* An unchecked row is a choice, not a port: it stays quiet next to the ones in use. */
+.chart-card__dock-item:not(.chart-card__dock-item--port) .chart-card__dock-item-label {
   color: var(--text-dim);
-  background: var(--surface);
+}
+
+/* Order number and X badge share the formula port id's mono/metrics. */
+.chart-card__dock-badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  line-height: 1.3;
+  padding: 0 4px;
+  color: var(--text-dim);
+  background: var(--surface-alt);
   border: 1px solid var(--border);
-  border-radius: 6px;
+  border-radius: 9px;
+}
+
+.chart-card__dock-x {
+  cursor: pointer;
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-soft);
+}
+
+.chart-card__dock-x:hover {
+  border-color: var(--accent);
 }
 
 .chart-card__dock-order {
-  flex: 0 0 auto;
   margin: 0;
-  padding: 4px 6px;
+  padding-top: 3px;
   border-top: 1px solid var(--border);
-  font-size: 10px;
-  color: var(--text-dim);
-}
-
-.chart-card__dock-empty {
-  flex: 1 1 auto;
-  padding: 10px 6px;
-  font-size: 11px;
-  color: var(--text-dim);
 }
 
 .chart-card__controls {
@@ -1164,15 +1132,15 @@ body {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-dim);
 }
 
 .chart-card__control select,
 .chart-card__number {
   font: inherit;
-  font-size: 12px;
-  padding: 2px 4px;
+  font-size: 11px;
+  padding: 1px 4px;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -1594,6 +1562,22 @@ body {
   font-family: var(--mono);
   font-size: 10px;
   color: var(--text-dim);
+}
+
+/*
+ * The chips listed INSIDE the `src` matrix port: they are that port's contents, so the frame
+ * grows around them and a divider marks where the port's own identity ends. As a sibling
+ * below the list they read as a separate block belonging to no port at all.
+ */
+.formula-card__port--with-cols {
+  padding-bottom: 4px;
+}
+
+.formula-card__port--with-cols .formula-card__cols {
+  flex: 1 1 100%;
+  margin: 4px 0 0;
+  padding-top: 4px;
+  border-top: 1px solid var(--border);
 }
 
 /* The "available columns" line became chips: a truncated string cannot be read back, and

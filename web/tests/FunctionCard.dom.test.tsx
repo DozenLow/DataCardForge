@@ -807,3 +807,69 @@ describe('relation-enumeration card', () => {
     expect(selects[1].value).toBe('1');
   });
 });
+
+// ── the available-column chips live inside the `src` matrix frame (2026-11-19) ───────────
+//
+// `sourceColumnNames` describes the matrix one port reads, so the chips belonged to that
+// port's frame, not to the column as a whole. A card without a matrix port has no frame to
+// nest them into and keeps them below the list — that is the relation card, and it must not
+// change.
+
+describe('available-column chips', () => {
+  const matrixPort = (portId = 'src'): ResolvedInput => ({
+    portId,
+    mode: 'matrix',
+    label: 'b.csv',
+    matrixId: 7,
+    rows: 5,
+    cols: 3,
+    missing: false,
+  });
+
+  it('renders the chips inside the matrix port box, after the shape', async () => {
+    const card = makeCard();
+    const host = await mount(card, {
+      inputs: [matrixPort()],
+      sourceColumnNames: ['时间_秒', 'Pos.2', '推力_kN'],
+    });
+
+    const port = host.querySelector('.formula-card__port')!;
+    expect(port.classList.contains('formula-card__port--with-cols')).toBe(true);
+    const cols = port.querySelector('.formula-card__cols');
+    expect(cols).not.toBeNull();
+    // Part of the frame: the port is the chip block's ancestor, and the block follows the
+    // shape readout rather than floating beside it.
+    expect(port.contains(cols!)).toBe(true);
+    expect(port.querySelector('.formula-card__port-shape')!.nextElementSibling).toBe(cols);
+
+    const chips = [...port.querySelectorAll('.formula-card__col-chip')];
+    expect(chips.map((chip) => chip.querySelector('.formula-card__col-chip-pos')!.textContent))
+      .toEqual(['Pos.1', 'Pos.2', 'Pos.3']);
+    // A header-less column prints its position once, not twice.
+    expect(chips[1].querySelector('.formula-card__col-chip-name')).toBeNull();
+
+    // No sibling copy below the list any more.
+    expect(host.querySelectorAll('.formula-card__cols')).toHaveLength(1);
+  });
+
+  it('keeps the chips below the list when the card has only cell ports', async () => {
+    const card = makeCard();
+    const host = await mount(card, {
+      inputs: [
+        { portId: 'x', mode: 'cell', label: 'a', matrixId: 7, column: 0, columns: ['a', 'b'], rows: 5, cols: 2, missing: false },
+        { portId: 'y', mode: 'cell', label: 'b', matrixId: 7, column: 1, columns: ['a', 'b'], rows: 5, cols: 2, missing: false },
+      ],
+      sourceColumnNames: ['a', 'b'],
+    });
+
+    const ports = [...host.querySelectorAll('.formula-card__port')];
+    expect(ports).toHaveLength(2);
+    for (const port of ports) expect(port.querySelector('.formula-card__cols')).toBeNull();
+
+    const list = host.querySelector('.formula-card__port-list')!;
+    const cols = host.querySelector('.formula-card__cols')!;
+    expect(cols).not.toBeNull();
+    expect(list.contains(cols)).toBe(false);
+    expect(list.nextElementSibling).toBe(cols);
+  });
+});

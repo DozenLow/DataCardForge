@@ -14,6 +14,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MatrixData } from '../src/core/MatrixData.ts';
 import { translatorFor } from '../src/ui/i18n.ts';
+import { portAnchor } from '../src/ui/cardMetrics.ts';
+import { CHART_PORT_X, chartPortId } from '../src/ui/migrate.ts';
 import { useWorkspace } from '../src/ui/workspaceStore.ts';
 import type { ChartCardModel, FunctionCardModel } from '../src/ui/types.ts';
 import { ColumnDock } from '../src/ui/components/ColumnDock.tsx';
@@ -119,10 +121,13 @@ describe('collapsed rail', () => {
     const onToggle = vi.fn();
     const host = await mount(chartOf(chartId), false, onToggle);
 
-    const toggle = host.querySelector<HTMLButtonElement>('.chart-card__dock-toggle');
+    const toggle = host.querySelector<HTMLButtonElement>('.side-panel__rail-title');
     expect(toggle).not.toBeNull();
     expect(toggle!.getAttribute('aria-expanded')).toBe('false');
-    expect(host.querySelector('.chart-card__dock--open')).toBeNull();
+    expect(host.querySelector('.chart-card__dock')!.getAttribute('data-open')).toBe('false');
+    // Folded, the dock still offers one chip per registered port: the chip IS the endpoint.
+    const chips = [...host.querySelectorAll<HTMLElement>('.rail-port')];
+    expect(chips.map((chip) => chip.textContent)).toEqual(['Pos.1 sensor 0']);
 
     await act(async () => {
       toggle!.click();
@@ -136,11 +141,16 @@ describe('expanded picker', () => {
     const { chartId } = setupScene();
     const host = await mount(chartOf(chartId), true);
 
-    expect(host.querySelector('.chart-card__dock--open')).not.toBeNull();
-    expect(host.querySelector('.chart-card__dock-list')).not.toBeNull();
+    // The zone is the shared SidePanel: same head, same port rows as the formula card.
+    const panel = host.querySelector('.chart-card__dock')!;
+    expect(panel.getAttribute('data-open')).toBe('true');
+    expect(panel.querySelector('.side-panel__title')!.textContent).toBe(
+      translatorFor(store().locale)('chart.columnDock'),
+    );
+    expect(panel.querySelector('.node-light')).not.toBeNull();
     expect(host.querySelector('.chart-card__dock-group-title')!.textContent).toBe('a.csv');
 
-    const items = host.querySelectorAll('.chart-card__dock-item');
+    const items = host.querySelectorAll('.formula-card__port.chart-card__dock-item');
     expect(items).toHaveLength(4);
     const labels = [...items].map((item) => item.querySelector('.chart-card__dock-item-label')!.textContent);
     expect(labels).toEqual(['Pos.1 sensor 0', 'Pos.2 sensor 1', 'Pos.3 sensor 2', 'Pos.4 sensor 3']);
@@ -149,6 +159,9 @@ describe('expanded picker', () => {
     const first = items[0].querySelector<HTMLInputElement>('input[type="checkbox"]')!;
     expect(first.checked).toBe(true);
     expect(items[0].querySelector('.chart-card__dock-badge')!.textContent).toBe('1');
+    // The checked row is a port row (the wire's endpoint), the unchecked ones are not.
+    expect(items[0].classList.contains('chart-card__dock-item--port')).toBe(true);
+    expect(items[1].classList.contains('chart-card__dock-item--port')).toBe(false);
   });
 
   it('checks and unchecks a column through the store', async () => {
@@ -230,7 +243,9 @@ describe('expanded picker', () => {
     };
 
     const host = await mount(plottingNothing, true);
-    expect(host.querySelector('.chart-card__dock-empty')).not.toBeNull();
+    expect(host.querySelector('.side-panel__body')!.textContent).toContain(
+      translatorFor(store().locale)('chart.columnDockEmpty'),
+    );
     expect(host.querySelectorAll('.chart-card__dock-item')).toHaveLength(0);
   });
 
@@ -436,5 +451,105 @@ describe('dock scope', () => {
     const chart = chartOf(chartId);
     expect(chart.config.sources.some((source) => source.matrixId === secondMatrixId)).toBe(true);
     expect(new Set(chart.inputs.map((input) => input.target.cardId)).size).toBe(2);
+  });
+});
+
+// ── the dock registers the chart's input ports (2026-11-19) ───────────────────────────────
+//
+// A chart registered no port, so `resolveEdgeAnchors` fell back to the card edge and the wire
+// landed on the frame instead of on the row of the column it carries. These cases pin the
+// registry the connection layer measures: the same ids the dependency edge names
+// (`chartPortId` per source, `CHART_PORT_X` for an explicit X axis), on the row when the
+// panel is open and on the rail chip when it is folded.
+
+/** Give an element the rectangle `portAnchor` will read (jsdom reports zeros otherwise). */
+function stubRect(
+  element: Element,
+  r: { left: number; top: number; width: number; height: number },
+): void {
+  element.getBoundingClientRect = () =>
+    ({
+      left: r.left,
+      top: r.top,
+      width: r.width,
+      height: r.height,
+      right: r.left + r.width,
+      bottom: r.top + r.height,
+      x: r.left,
+      y: r.top,
+      toJSON: () => ({}),
+    }) as DOMRect;
+}
+
+/** The card root `portAnchor` clamps into — the `CardShell` window. */
+function cardRoot(host: HTMLElement): HTMLElement {
+  return host.closest<HTMLElement>('[data-card-id]') ?? host.firstElementChild as HTMLElement;
+}
+
+describe('chart input ports', () => {
+  it('anchors a plotted column on its dock row, not on the card edge', async () => {
+    const { matrixId, chartId } = setupScene();
+    store().addChartSource(chartId, matrixId, 1);
+    const host = await mount(chartOf(chartId), true);
+
+    const rows = [...host.querySelectorAll<HTMLElement>('.chart-card__dock-item--port')];
+    expect(rows).toHaveLength(2);
+    // Element ids used for measurement; only the first is stubbed so the second cannot
+    // disguise a fallback by averaging in at the same place.
+    stubRect(cardRoot(host), { left: 100, top: 100, width: 640, height: 480 });
+    stubRect(rows[0], { left: 104, top: 200, width: 160, height: 30 });
+
+    // Left edge, vertical centre: the row is the endpoint the wire enters.
+    expect(portAnchor(chartId, chartPortId(matrixId, 0))).toEqual({ x: 104, y: 215, side: 'left' });
+  });
+
+  it('registers the X-axis port only when an explicit X axis is set', async () => {
+    const { matrixId, chartId } = setupScene();
+    let host = await mount(chartOf(chartId), true);
+    expect(host.querySelector('.chart-card__dock-x')).toBeNull();
+    expect(portAnchor(chartId, CHART_PORT_X)).toBeNull();
+
+    await act(async () => {
+      store().setChartConfig(chartId, {
+        xAxisSource: { matrixId, columnIndex: 1, label: 'Pos.2 sensor 1', raw: [1, 2, 3, 4, 5] },
+      });
+    });
+    host = await mount(chartOf(chartId), true);
+    const xBadge = host.querySelector<HTMLElement>('.chart-card__dock-x')!;
+    expect(xBadge).not.toBeNull();
+    stubRect(cardRoot(host), { left: 100, top: 100, width: 640, height: 480 });
+    stubRect(xBadge, { left: 210, top: 300, width: 20, height: 14 });
+    expect(portAnchor(chartId, CHART_PORT_X)).toEqual({ x: 210, y: 307, side: 'left' });
+
+    // Clicking the badge clears the axis in the store, and with it the port.
+    await act(async () => {
+      xBadge.click();
+    });
+    expect(chartOf(chartId).config.xAxisSource).toBeNull();
+  });
+
+  it('hands the anchor to the rail chip when the panel is folded', async () => {
+    const { matrixId, chartId } = setupScene();
+    const host = await mount(chartOf(chartId), false);
+
+    const chip = host.querySelector<HTMLElement>('.chart-card__dock .rail-port')!;
+    expect(chip).not.toBeNull();
+    stubRect(cardRoot(host), { left: 100, top: 100, width: 640, height: 480 });
+    stubRect(chip, { left: 102, top: 150, width: 26, height: 80 });
+
+    // Same port id, same side; only the measured element changed (the formula card's rule).
+    expect(portAnchor(chartId, chartPortId(matrixId, 0))).toEqual({ x: 102, y: 190, side: 'left' });
+  });
+
+  it('drops the registry entry when the panel unmounts', async () => {
+    const { matrixId, chartId } = setupScene();
+    await mount(chartOf(chartId), true);
+    expect(portAnchor(chartId, chartPortId(matrixId, 0))).not.toBeNull();
+    for (const root of roots.splice(0)) {
+      await act(async () => {
+        root.unmount();
+      });
+    }
+    expect(portAnchor(chartId, chartPortId(matrixId, 0))).toBeNull();
   });
 });

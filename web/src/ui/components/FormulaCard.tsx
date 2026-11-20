@@ -266,6 +266,60 @@ export function FormulaCard({
       target.setSelectionRange(caret, caret);
     }, 0);
   };
+  /**
+   * The available-column chips, rendered as ONE block in two possible places.
+   *
+   * They belong INSIDE the `src` matrix port: `sourceColumnNames` describes that port's
+   * matrix, so the columns read as the content of the matrix frame instead of as a sibling
+   * block floating under the whole port list. A card whose ports are all `cell` (the
+   * relation card) has no such frame, so there they stay below the list exactly as before.
+   */
+  const columnChips =
+    sourceColumnNames.length > 0 ? (
+      // Clickable chips rather than a truncated text line: the one thing a new user
+      // needs is "the column is called Pos.3", and typing that by hand from a
+      // truncated string is where the placeholder used to fail them. The list order
+      // is column order, so each chip knows its own `Pos.N`.
+      //
+      // The chip prints the spelling it inserts (`Pos.1`) *next to* the printed
+      // name, because "this column is Pos.1 and its name is 时间_秒" is the whole
+      // lesson; printing only the name taught nothing, and only the first six
+      // columns were reachable at all — a 10-column table left columns 7–10 with no
+      // way to discover their number.
+      <div className="formula-card__cols" {...columnsHover.anchorProps}>
+        {sourceColumnNames.map((name, index) => {
+          const pos = `Pos.${index + 1}`;
+          return (
+            <button
+              key={`${index}:${name}`}
+              type="button"
+              className="formula-card__col-chip card__control"
+              aria-label={t('help.chip.insert', { pos, name })}
+              // Keep the caret where the user left it: without this the mousedown
+              // moves focus to the chip and the expression input blurs first.
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => insertPositionRef(pos)}
+              disabled={!expressionShaped}
+            >
+              <span className="formula-card__col-chip-pos">{pos}</span>
+              {/* A header-less table's annotation *is* "Pos.3"; printing it twice
+                  says nothing. */}
+              {name === pos ? null : (
+                <span className="formula-card__col-chip-name">{name}</span>
+              )}
+            </button>
+          );
+        })}
+        {columnsHover.tooltip}
+      </div>
+    ) : null;
+  /**
+   * Index of the port the chips are nested into: the FIRST `matrix` port.
+   *
+   * `-1` keeps the chips below the list (no matrix frame to put them in, e.g. the relation
+   * card's two cell ports).
+   */
+  const chipHostIndex = inputs.findIndex((input) => input.mode === 'matrix');
   const identityRef = useRef({ id: card.id, count: (formulas ?? []).length });
 
   // Re-sync only when the card itself or the number of formulas changes; re-syncing on
@@ -436,10 +490,14 @@ export function FormulaCard({
               <p className="formula-card__zone-empty">{t('formula.noInput')}</p>
             ) : (
               <ul className="formula-card__port-list">
-                {inputs.map((input) => (
+                {inputs.map((input, index) => (
                   <li
                     key={input.portId}
-                    className="formula-card__port"
+                    // A nested chip block makes this port the matrix frame the columns
+                    // belong to (see `columnChips`).
+                    className={`formula-card__port${
+                      index === chipHostIndex ? ' formula-card__port--with-cols' : ''
+                    }`}
                     ref={portRef(input.portId, 'left')}
                   >
                     <span className="formula-card__port-id" title={input.portId}>
@@ -483,48 +541,12 @@ export function FormulaCard({
                         {input.rows}×{input.cols}
                       </span>
                     ) : null}
+                    {index === chipHostIndex ? columnChips : null}
                   </li>
                 ))}
               </ul>
             )}
-            {sourceColumnNames.length > 0 ? (
-              // Clickable chips rather than a truncated text line: the one thing a new user
-              // needs is "the column is called Pos.3", and typing that by hand from a
-              // truncated string is where the placeholder used to fail them. The list order
-              // is column order, so each chip knows its own `Pos.N`.
-              //
-              // The chip prints the spelling it inserts (`Pos.1`) *next to* the printed
-              // name, because "this column is Pos.1 and its name is 时间_秒" is the whole
-              // lesson; printing only the name taught nothing, and only the first six
-              // columns were reachable at all — a 10-column table left columns 7–10 with no
-              // way to discover their number.
-              <div className="formula-card__cols" {...columnsHover.anchorProps}>
-                {sourceColumnNames.map((name, index) => {
-                  const pos = `Pos.${index + 1}`;
-                  return (
-                    <button
-                      key={`${index}:${name}`}
-                      type="button"
-                      className="formula-card__col-chip card__control"
-                      aria-label={t('help.chip.insert', { pos, name })}
-                      // Keep the caret where the user left it: without this the mousedown
-                      // moves focus to the chip and the expression input blurs first.
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => insertPositionRef(pos)}
-                      disabled={!expressionShaped}
-                    >
-                      <span className="formula-card__col-chip-pos">{pos}</span>
-                      {/* A header-less table's annotation *is* "Pos.3"; printing it twice
-                          says nothing. */}
-                      {name === pos ? null : (
-                        <span className="formula-card__col-chip-name">{name}</span>
-                      )}
-                    </button>
-                  );
-                })}
-                {columnsHover.tooltip}
-              </div>
-            ) : null}
+            {chipHostIndex < 0 ? columnChips : null}
           </SidePanel>
 
           {/* ── zone 2: expressions above, the result grid below ── */}

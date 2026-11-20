@@ -13,6 +13,14 @@
  * draw any card's output — including the very table a script card consumes — which the
  * dataflow contract forbids.
  *
+ * Since 2026-11-19 the zone is the SHARED `SidePanel` in the formula card's visual language
+ * rather than a bespoke dock: the same head, the same rotated rail, the same port-row
+ * metrics. That is not only cosmetic — a chart that rendered no port had its wires land on
+ * its card edge (`resolveEdgeAnchors` falls back when nothing is registered), while every
+ * other card met its wire at the row the data actually belongs to. Each chart source is now
+ * a real port (`chartPortId`), registered on its row when the panel is open and on its rail
+ * chip when it is folded — exactly what FormulaCard does with its inputs.
+ *
  * It deliberately imports nothing from ChartCard or the ECharts stack, so it stays
  * inexpensive and testable on its own.
  */
@@ -20,13 +28,21 @@ import { useMemo } from 'react';
 
 import { chartTypeDef, minimumColumns } from '../../charts/chartTypes.ts';
 import { publishedMatrices, useTranslator, useWorkspace } from '../workspaceStore.ts';
+import { registerPort, unregisterPort, type AnchorSide } from '../cardMetrics.ts';
+import { CHART_PORT_X, chartPortId } from '../migrate.ts';
 import type { ChartCardModel } from '../types.ts';
+import { SidePanel } from './SidePanel.tsx';
 
 interface ColumnDockProps {
   card: ChartCardModel;
-  /** Controls visibility of the whole chart's header, mirroring the footer. */
+  /** Visibility of the left zone, persisted with the card (`columnPanelOpen`). */
   open: boolean;
   onToggle: (open: boolean) => void;
+  /**
+   * Scrolling the dock moves its ports. Wired to one `invalidateLayout`, so the connection
+   * layer re-measures on the same schedule the formula card uses.
+   */
+  onScroll?: () => void;
 }
 
 interface DockColumn {
@@ -51,12 +67,13 @@ function dockColumnLabel(column: { posName: string; annotation: string }): strin
   return column.annotation !== '' ? `${column.posName} ${column.annotation}` : column.posName;
 }
 
-export function ColumnDock({ card, open, onToggle }: ColumnDockProps) {
+export function ColumnDock({ card, open, onToggle, onScroll }: ColumnDockProps) {
   const { t } = useTranslator();
   const cards = useWorkspace((s) => s.cards);
   const matrices = useWorkspace((s) => s.matrices);
   const addChartSource = useWorkspace((s) => s.addChartSource);
   const removeChartSource = useWorkspace((s) => s.removeChartSource);
+  const setChartConfig = useWorkspace((s) => s.setChartConfig);
 
   const typeDef = chartTypeDef(card.config.type);
   // A chart must always keep at least one column, and a paired type needs two.
@@ -150,43 +167,102 @@ export function ColumnDock({ card, open, onToggle }: ColumnDockProps) {
     card.config.xAxisSource.matrixId === matrixId &&
     card.config.xAxisSource.columnIndex === columnIndex;
 
-  if (!open) {
-    return (
-      <div className="chart-card__dock">
-        <button
-          type="button"
-          className="chart-card__dock-toggle"
-          aria-expanded={false}
-          aria-controls={`chart-dock-${card.id}`}
-          title={t('chart.columnDock')}
-          onClick={() => onToggle(true)}
-        >
-          {t('chart.columnDockToggle')}
-        </button>
-      </div>
+  /**
+   * Port ids this card's dependency edges name — the ids the connection layer looks up.
+   *
+   * Derived from the display config with the same rule the store uses to build `inputs[]`
+   * (`chartInputsFromConfig`), so the registry and the edges can never disagree: one
+   * `chartPortId` per attached column, plus `CHART_PORT_X` when an explicit X axis is set.
+   */
+  const portIds = useMemo<string[]>(() => {
+    const ids = card.config.sources.map((source) =>
+      chartPortId(source.matrixId, source.columnIndex),
     );
-  }
+    if (card.config.xAxisSource) ids.push(CHART_PORT_X);
+    return ids;
+  }, [card.config.sources, card.config.xAxisSource]);
+
+  /**
+   * Register one rendered element as the endpoint of `portId`.
+   *
+   * Memoised by port identity on purpose: a fresh callback per render would make React
+   * detach and re-attach the ref (unregister + register), and every registration bumps the
+   * layout version — one wire re-measure per render for nothing.
+   */
+  const portRefFor = useMemo(() => {
+    const callbacks = new Map<
+      string,
+      (element: HTMLElement | null) => (() => void) | undefined
+    >();
+    return (portId: string, side: AnchorSide) => {
+      const key = `${side}:${portId}`;
+      const existing = callbacks.get(key);
+      if (existing) return existing;
+      const callback = (element: HTMLElement | null) => {
+        if (!element) return undefined;
+        registerPort(card.id, portId, element, side);
+        // A stale rect would leave a wire pointing at nothing once the row leaves the list
+        // (or the column folds, which hands the id to the rail chip).
+        return () => unregisterPort(card.id, portId);
+      };
+      callbacks.set(key, callback);
+      return callback;
+    };
+  }, [card.id]);
+
+  /** The port id a listed column stands for — the key the folded rail registers. */
+  const portIdOfColumn = (matrixId: number, columnIndex: number): string =>
+    chartPortId(matrixId, columnIndex);
+
+  /**
+   * The lamp describes whether the chart has something to draw, which is the one piece of
+   * state this zone owns: `done` once it has the columns its type needs, `dirty` otherwise.
+   */
+  const drawable = card.config.sources.length >= floor;
 
   const empty = groups.every((group) => group.columns.length === 0);
 
-  return (
-    <div className="chart-card__dock chart-card__dock--open" id={`chart-dock-${card.id}`}>
-      <div className="chart-card__dock-head">
-        <span className="chart-card__dock-title">{t('chart.columnDock')}</span>
+  /** Folded rail: one chip per registered port, and the chip IS the port element. */
+  const rail =
+    portIds.length === 0 ? (
+      <span className="side-panel__rail-empty">—</span>
+    ) : (
+      card.config.sources.map((source) => (
         <button
           type="button"
-          className="chart-card__dock-collapse card__control"
-          aria-label={t('chart.columnDockCollapse')}
-          title={t('chart.columnDockCollapse')}
-          onClick={() => onToggle(false)}
+          className="rail-port"
+          key={portIdOfColumn(source.matrixId, source.columnIndex)}
+          ref={portRefFor(portIdOfColumn(source.matrixId, source.columnIndex), 'left')}
+          title={source.label}
+          onClick={() => onToggle(true)}
         >
-          ‹
+          {source.label}
         </button>
-      </div>
+      ))
+    );
+
+  return (
+    <SidePanel
+      side="left"
+      open={open}
+      onToggle={onToggle}
+      title={t('chart.columnDock')}
+      panelId={`chart-dock-${card.id}`}
+      className="chart-card__dock"
+      onScroll={onScroll}
+      headExtra={
+        <span
+          className={`node-light node-light--${drawable ? 'done' : 'dirty'}`}
+          title={drawable ? t('chart.columnDockReady') : t('chart.columnDockMissing')}
+          aria-hidden
+        />
+      }
+      rail={rail}
+    >
       {empty ? (
-        <div className="chart-card__dock-empty">{t('chart.columnDockEmpty')}</div>
+        <p className="formula-card__zone-empty">{t('chart.columnDockEmpty')}</p>
       ) : (
-        <div className="chart-card__dock-list">
+        <div className="chart-card__dock-groups">
           {groups.map((group, groupIndex) => (
             // A group name is not unique: two cards can publish outputs called the same
             // thing, and the fallback group's title is a fixed string.
@@ -194,50 +270,82 @@ export function ColumnDock({ card, open, onToggle }: ColumnDockProps) {
               <div className="chart-card__dock-group-title" title={group.name}>
                 {group.name}
               </div>
-              {group.columns.map((column) => {
-                const checked = isChecked(column.matrixId, column.columnIndex);
-                const atFloor = card.config.sources.length <= floor;
-                return (
-                  <label
-                    key={`${column.matrixId}:${column.columnIndex}`}
-                    className="chart-card__dock-item"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      disabled={checked && atFloor}
-                      title={
-                        checked && atFloor
-                          ? t('chart.columnDockRequired', { type: t(typeDef.labelKey), n: floor })
-                          : column.label
-                      }
-                      onChange={(event) => {
-                        if (event.target.checked) {
-                          addChartSource(card.id, column.matrixId, column.columnIndex);
-                        } else {
-                          removeChartSource(card.id, column.matrixId, column.columnIndex);
+              <ul className="formula-card__port-list">
+                {group.columns.map((column) => {
+                  const checked = isChecked(column.matrixId, column.columnIndex);
+                  const xAxis = isXAxis(column.matrixId, column.columnIndex);
+                  const atFloor = card.config.sources.length <= floor;
+                  const portId = portIdOfColumn(column.matrixId, column.columnIndex);
+                  return (
+                    <li
+                      key={portId}
+                      // A checked column IS a port this chart reads, so its row is the
+                      // wire's endpoint — the metric the formula card's `src` row uses.
+                      className={`formula-card__port chart-card__dock-item${
+                        checked ? ' chart-card__dock-item--port' : ''
+                      }`}
+                      ref={checked ? portRefFor(portId, 'left') : undefined}
+                      data-port-id={portId}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={checked && atFloor}
+                        title={
+                          checked && atFloor
+                            ? t('chart.columnDockRequired', {
+                                type: t(typeDef.labelKey),
+                                n: floor,
+                              })
+                            : column.label
                         }
-                      }}
-                    />
-                    <span className="chart-card__dock-item-label">{column.label}</span>
-                    {checked ? (
-                      <span className="chart-card__dock-badge">
-                        {orderOf(column.matrixId, column.columnIndex)}
+                        onChange={(event) => {
+                          if (event.target.checked) {
+                            addChartSource(card.id, column.matrixId, column.columnIndex);
+                          } else {
+                            removeChartSource(card.id, column.matrixId, column.columnIndex);
+                          }
+                        }}
+                      />
+                      <span className="formula-card__port-src chart-card__dock-item-label">
+                        {column.label}
                       </span>
-                    ) : null}
-                    {isXAxis(column.matrixId, column.columnIndex) ? (
-                      <span className="chart-card__dock-badge">X</span>
-                    ) : null}
-                  </label>
-                );
-              })}
+                      {checked ? (
+                        <span className="formula-card__port-id chart-card__dock-badge">
+                          {orderOf(column.matrixId, column.columnIndex)}
+                        </span>
+                      ) : null}
+                      {xAxis ? (
+                        <button
+                          type="button"
+                          className="formula-card__port-id chart-card__dock-badge chart-card__dock-x card__control"
+                          ref={portRefFor(CHART_PORT_X, 'left')}
+                          title={t('chart.xAxisPort')}
+                          aria-label={t('chart.xAxisPort')}
+                          onClick={() => {
+                            // The X axis is a presentation choice like the plotted
+                            // columns, so it is set (and cleared) from this zone.
+                            if (xAxis) {
+                              setChartConfig(card.id, { xAxisSource: null });
+                            }
+                          }}
+                        >
+                          X
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
           ))}
         </div>
       )}
       {typeDef.columnArity === 'pairs' ? (
-        <p className="chart-card__dock-order">{t('chart.columnDockOrder')}</p>
+        <p className="formula-card__zone-empty chart-card__dock-order">
+          {t('chart.columnDockOrder')}
+        </p>
       ) : null}
-    </div>
+    </SidePanel>
   );
 }

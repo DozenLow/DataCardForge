@@ -20,6 +20,7 @@ import type * as echartsNamespace from 'echarts';
 
 import { applySmoothing, MAX_SG_DEGREE, type SmoothingMode } from '../../core/Smoothing.ts';
 import { columnUnitResolutions } from '../../core/units.ts';
+import { invalidateLayout } from '../cardMetrics.ts';
 import { formatBytes } from '../i18n.ts';
 import { useTranslator, useWorkspace } from '../workspaceStore.ts';
 import { isChartCard, isMatrixCard, type ChartCardModel } from '../types.ts';
@@ -75,7 +76,6 @@ export function ChartCard({
   const setChartType = useWorkspace((s) => s.setChartType);
   const setChartConfig = useWorkspace((s) => s.setChartConfig);
   const setChartColumnPanel = useWorkspace((s) => s.setChartColumnPanel);
-  const removeChartSource = useWorkspace((s) => s.removeChartSource);
   const matrices = useWorkspace((s) => s.matrices);
   const cards = useWorkspace((s) => s.cards);
   const showToast = useWorkspace((s) => s.showToast);
@@ -252,6 +252,14 @@ export function ChartCard({
 
   const dismissPanel = useCallback(() => setPanel(null), []);
 
+  /**
+   * The dock's ports scroll with its body, so the layer re-measures after a scroll.
+   *
+   * Same schedule the formula card measures its input rows on: one `invalidateLayout` per
+   * scroll event, not a manual re-registration of every port.
+   */
+  const handleDockScroll = useCallback(() => invalidateLayout(), []);
+
   /** Return both value axes to their full data range. */
   const resetZoom = useCallback(() => {
     if (!chart) return;
@@ -367,6 +375,7 @@ export function ChartCard({
           card={card}
           open={Boolean(card.columnPanelOpen)}
           onToggle={(open) => setChartColumnPanel(card.id, open)}
+          onScroll={handleDockScroll}
         />
         <div className="chart-card__main">
         {/* Toolbar: chart type, options, export. */}
@@ -692,16 +701,9 @@ export function ChartCard({
                 {/* A span is required for the ellipsis: `text-overflow` has no effect on
                     an anonymous flex item, so a long label would be cut mid-glyph. */}
                 <span className="chart-card__chip-label">{source.label}</span>
-                {card.config.sources.length > Math.max(1, minimumColumns(card.config.type)) ? (
-                  <button
-                    type="button"
-                    className="chart-card__chip-x card__control"
-                    title={t('chart.removeColumn')}
-                    onClick={() => removeChartSource(card.id, source.matrixId, source.columnIndex)}
-                  >
-                    ×
-                  </button>
-                ) : null}
+                {/* No × here: removing a column is the column picker's job, and the dock's
+                    X badge doubles as the toggle for the explicit X axis. Two controls that
+                    both read "X" in one card taught nothing about which does what. */}
               </span>
             ))}
           </div>
