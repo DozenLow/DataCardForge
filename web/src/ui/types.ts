@@ -169,6 +169,21 @@ export interface OutputBinding {
 export interface FormulaColumn {
   name: string;
   expression: string;
+  /**
+   * Explicit OUTPUT unit — the user's own assertion about this column (units L1a,
+   * docs/tasks/2026-11-19-units-l1.md §2).
+   *
+   * Optional and `''`/absent both mean "assert nothing": the column resolves exactly as it
+   * did before this field existed. A non-empty value must be a registered unit (the picker
+   * only offers registry scalar units); it is a DECLARATION, never a transform — no number
+   * is converted or rewritten by setting it. The value is remembered in the ordinary
+   * confirmation memory once the result is pulled (`unitConfirmations[resultSignature][i]`),
+   * which is how every downstream chip/axis/convert reads it with no new wire channel.
+   *
+   * The backend does not read this key; it is stripped on push so an older server that
+   * validates its parameters strictly keeps accepting the card.
+   */
+  unit?: string;
 }
 
 /**
@@ -456,6 +471,16 @@ export interface WorkspaceSnapshot {
    * The matrix data itself carries no unit — resolution is always annotation + this memory.
    */
   unitConfirmations?: Record<string, Record<number, string>>;
+  /**
+   * Workspace-level units policy override (units L1a), absent = inherit the global tier.
+   *
+   * Deliberately part of the WORKSPACE, not of the app settings: the decision
+   * (docs/decisions/2026-11-19-units-awareness-p3-and-formula-output.md §五) keeps the
+   * workspace layer inside its own snapshot so an embedded workspace carries its own policy
+   * and never inherits the host's. Optional so every file written before this field existed
+   * keeps opening — a missing value simply means "no override".
+   */
+  unitPolicyOverride?: 'strict' | 'auto' | 'free';
   cards: CardSnapshot[];
   matrices: MatrixSnapshot[];
   nextCardId: number;

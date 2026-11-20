@@ -324,6 +324,14 @@ const dictionaries = {
     'unit.cancel': '取消',
     'unit.unnamedColumn': '第 {n} 列',
     'unit.labelOnly': '仅标签',
+    // Units L1a — explicit output unit of a formula column, and the strict-tier drift hint.
+    // `?` in {before}/{after} means "the header became ambiguous"; `—` means "no unit".
+    'unit.outputUnit': '输出单位',
+    'unit.outputUnitNone': '不断言',
+    'unit.outputUnitHint': '这是你的断言：结果列按此单位显示，供图轴与换算读取；不会换算或改写任何数值。',
+    'unit.sourceAsserted': '断言',
+    'unit.driftToast':
+      '单位变化：{n} 列的表头单位与上次不同（如「{column}」{before} → {after}），请在列头确认单位',
 
     // ── 单位换算卡（builtin:unit-convert；units v1 P2）────────────────────
     // 换算必须显式：选目标单位、点「换算」，产出新表；源表的数值与表头都不动（决策 §四）。
@@ -762,6 +770,15 @@ const dictionaries = {
     'unit.cancel': 'Cancel',
     'unit.unnamedColumn': 'Column {n}',
     'unit.labelOnly': 'label only',
+    // Units L1a — explicit output unit of a formula column, and the strict-tier drift hint.
+    // `?` in {before}/{after} means "the header became ambiguous"; `—` means "no unit".
+    'unit.outputUnit': 'Output unit',
+    'unit.outputUnitNone': 'Not asserted',
+    'unit.outputUnitHint':
+      'Your assertion: the result column is shown with this unit, and charts/convert read it. No value is converted or rewritten.',
+    'unit.sourceAsserted': 'asserted',
+    'unit.driftToast':
+      'Units changed: {n} column(s) now resolve differently (e.g. "{column}" {before} → {after}) — confirm them in the table header',
 
     // ── unit conversion card (builtin:unit-convert; units v1 P2) ─────────
     // Conversion is explicit: pick a target unit, press 换算, get a NEW table. The source's

@@ -1695,6 +1695,25 @@ body {
   outline: none;
 }
 
+/* Explicit output unit (units L1a): a narrow picker that sits after the expression. It is
+   quiet until the user asserts something — an empty control must not read as a warning. */
+.formula-card__unit {
+  flex: 0 1 74px;
+  min-width: 58px;
+  font-size: 11px;
+  padding: 2px 2px;
+  color: var(--text-dim);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+}
+
+.formula-card__unit--set {
+  color: var(--text);
+  border-color: var(--accent);
+  font-family: var(--mono);
+}
+
 .formula-card__remove {
   flex: 0 0 auto;
   font-size: 14px;

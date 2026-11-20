@@ -83,6 +83,11 @@ import {
 } from './bindings.ts';
 import { translatorFor, detectLocale, type Locale } from './i18n.ts';
 import { initialTrust, scriptTrusted, type WorkspaceTrust } from './workspaceTrust.ts';
+// Application-level settings (units L1a): the GLOBAL layer of the three scope layers. The
+// store reads it live through `effectiveUnitPolicy` instead of copying it, so a settings
+// change applies to the open workspace without a reload.
+import { getGlobalSettings, type UnitPolicy } from './globalSettings.ts';
+import { detectUnitDrift, type UnitDrift } from './unitDrift.ts';
 // Type-only: the store owns *whether* the reference is open, the content module owns what
 // is in it. Importing the type alone keeps the catalogue out of the store's runtime.
 import type { HelpSection } from './formulaHelp.ts';
@@ -365,6 +370,20 @@ export interface Toast {
   id: number;
   kind: 'info' | 'error';
   message: string;
+}
+
+/**
+ * The policy tier that applies to THIS workspace (units L1a §1).
+ *
+ * Precedence is card > workspace > global per the decision §二; L1a implements the lower two
+ * layers, so this is `workspace.unitPolicyOverride ?? global.unitPolicy`. The global tier is
+ * read through `getGlobalSettings()` — the store never caches it, because the settings panel
+ * (L1b) may change it while a workspace is open and a cached copy would win over the user.
+ */
+export function effectiveUnitPolicy(
+  state: Pick<WorkspaceState, 'unitPolicyOverride'>,
+): UnitPolicy {
+  return state.unitPolicyOverride ?? getGlobalSettings().unitPolicy;
 }
 
 /**
@@ -1384,6 +1403,21 @@ interface WorkspaceState {
   confirmUnitGroup: (matrixId: number, token: string, unit: string) => number;
   /** Override or clear ONE column's unit (`NO_UNIT` clears). Writes the same signature memory. */
   setColumnUnit: (matrixId: number, columnIndex: number, unit: string) => void;
+  /**
+   * Workspace-level policy override (units L1a §1). `null`/`undefined` = inherit the global
+   * tier; the value travels in the snapshot so a reopened workspace keeps its own answer.
+   * Card-level overrides are a later slice and are deliberately absent here.
+   */
+  unitPolicyOverride?: UnitPolicy;
+  /** Set or clear this workspace's policy override (persisted with the snapshot). */
+  setUnitPolicyOverride: (policy: UnitPolicy | null) => void;
+  /**
+   * Explicit OUTPUT unit of one formula column (units L1a §2).
+   *
+   * Stored in `params.formulas[i].unit` and re-asserted into the confirmation memory
+   * after every result pull; `''` clears the assertion. Never a transform.
+   */
+  setFormulaUnit: (cardId: number, index: number, unit: string) => void;
 
   // ── summary panel (`builtin:summary`; session-only, plan A lazy node) ─
   /**
@@ -1643,7 +1677,93 @@ function formulaReference(column: { posName: string; annotation: string }): stri
   return label;
 }
 
+/**
+ * A snapshot's workspace policy override, or `undefined` when it is absent/unreadable.
+ *
+ * The field is data from a file, so it is validated like every other restored value: an
+ * unknown string is dropped (inherit the global tier) instead of being forwarded into a
+ * comparison that would then quietly treat "strict" as "anything else".
+ */
+function normalizeUnitPolicyOverride(raw: unknown): UnitPolicy | undefined {
+  return raw === 'strict' || raw === 'auto' || raw === 'free' ? raw : undefined;
+}
 
+/**
+ * One drift, worded (units L1a §3).
+ *
+ * Both callers — the file replacement and the restore — speak the same sentence through the
+ * same channel, so the wording lives here instead of being assembled twice. `?` states "the
+ * header is ambiguous" and `—` states "no unit", which is what the user needs to see before
+ * opening the header to answer.
+ */
+function unitDriftMessage(locale: Locale, drift: readonly UnitDrift[]): string {
+  const first = drift[0];
+  const before = first.before.unit !== '' ? first.before.unit : first.before.ambiguous ? '?' : '—';
+  const after = first.after.unit !== '' ? first.after.unit : first.after.ambiguous ? '?' : '—';
+  return translatorFor(locale)('unit.driftToast', {
+    n: drift.length,
+    column: first.after.name,
+    before,
+    after,
+  });
+}
+
+/**
+ * Say something when a same-name column's derived unit changed across a file switch or a
+ * workspace restore (units L1a §3).
+ *
+ * Two gates, in this order, because both are requirements rather than optimisations:
+ *   1. `effectiveUnitPolicy(state) === 'strict'`. auto/free never prompt — that is the whole
+ *      difference between the tiers, and L1a must not invent behaviour for the other two.
+ *   2. The old and the new table must both exist and carry the same column names.
+ *
+ * The drift itself is `detectUnitDrift`'s decision (a pure function with its own tests); this
+ * only pairs the tables up and words the result. The wording goes through the existing toast
+ * channel: it is a statement of fact about the file that just arrived, and the next action
+ * (confirm each column in the header) is already one click away — L1b adds the dedicated
+ * `warnings` channel, and nothing here pre-empts it.
+ */
+function reportUnitDrift(
+  previousCards: readonly CardModel[],
+  previousMatrices: ReadonlyMap<number, MatrixData>,
+  previousConfirmations: UnitConfirmations,
+  restoredCards: readonly CardModel[],
+  restoredMatrices: ReadonlyMap<number, MatrixData>,
+  read: () => WorkspaceState,
+): void {
+  if (effectiveUnitPolicy(read()) !== 'strict') return;
+
+  const collected: UnitDrift[] = [];
+  const seen = new Set<string>();
+  for (const card of restoredCards) {
+    if (!isMatrixCard(card)) continue;
+    const before = previousCards.find((entry) => entry.id === card.id);
+    if (!before || !isMatrixCard(before)) continue;
+    for (const source of card.sources) {
+      const next = restoredMatrices.get(source.matrixId);
+      if (!next) continue;
+      // The matching OLD table: the same file name in the same card. Pairing by name (not by
+      // slot index) is what makes a restored file comparison meaningful — a save leaves the
+      // sources in the same order, but a dropped/added file does not have to.
+      const oldSource = before.sources.find((entry) => entry.name === source.name);
+      const old = oldSource ? previousMatrices.get(oldSource.matrixId) : undefined;
+      if (!old) continue;
+      for (const drift of detectUnitDrift(
+        { columns: old.columns(), confirmations: previousConfirmations },
+        { columns: next.columns(), confirmations: read().unitConfirmations },
+      )) {
+        // Two files of one card can share a quantity name; the same drift is reported once.
+        const key = `${card.id}:${source.name}:${drift.stem}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        collected.push(drift);
+      }
+    }
+  }
+  if (collected.length === 0) return;
+  const state = read();
+  state.showToast('info', unitDriftMessage(state.locale, collected));
+}
 
 /**
  * Sanitise unit-confirmation memory read from a save file.
@@ -1916,9 +2036,27 @@ function wireParams(card: FunctionCardModel): Record<string, unknown> {
   for (const [key, value] of Object.entries(card.params)) {
     // `undefined` is "the card has nothing to say about this parameter"; JSON would drop it
     // anyway, but an explicit skip keeps the object inspectable in tests.
-    if (value !== undefined) out[key] = value;
+    if (value === undefined) continue;
+    out[key] = key === 'formulas' ? wireFormulas(value) : value;
   }
   return out;
+}
+
+/**
+ * `params.formulas` as the backend accepts it.
+ *
+ * `formulas[].unit` is a CLIENT-side assertion (units L1a): the backend never reads it and
+ * an older server validating its parameters would reject the extra key. Dropping it here —
+ * at the single point where a card's parameters become a request — keeps the card model the
+ * source of truth while the wire stays exactly what it was before the field existed.
+ */
+function wireFormulas(value: unknown): unknown {
+  if (!Array.isArray(value)) return value;
+  return value.map((entry) => {
+    if (!entry || typeof entry !== 'object') return entry;
+    const { unit: _unit, ...rest } = entry as Record<string, unknown>;
+    return rest;
+  });
 }
 
 async function pushFunctionCard(cardId: number): Promise<void> {
@@ -2513,6 +2651,55 @@ async function fetchResultRows(resultMatrixId: number, rowBudget: number): Promi
   return { matrix, shownRows: fetched, totalRows: Math.max(totalRows, fetched), truncated };
 }
 
+/**
+ * Remember the user's explicit OUTPUT units for the table that just arrived (units L1a §2).
+ *
+ * This is the ONE line that carries the assertion downstream: the confirmation memory is
+ * keyed by column-unit signature, and every consumer (header chips, chart axis, the convert
+ * card) already derives its unit through `columnUnitResolutions`, so writing
+ * `unitConfirmations[resultSignature][i] = formulas[i].unit` is what makes the asserted unit
+ * visible everywhere — no new wire channel, no DCM2 change, no annotation rewrite.
+ *
+ * Called after EVERY pull (§2 "re-assert after recompute"): a recompute can change the column
+ * NAMES, which changes the signature, so the answer has to be written under the new key. The
+ * key is the signature of the result's own annotations — the same expression the card's chips
+ * compute — so the two can never disagree about which table the assertion belongs to.
+ *
+ * Nothing is written for an empty assertion, and nothing is ever removed: `params.formulas[]`
+ * stays the source of truth, so clearing the picker only stops future assertions.
+ */
+function assertFormulaUnits(cardId: number): void {
+  const state = useWorkspace.getState();
+  const card = state.cards.find((entry) => entry.id === cardId);
+  if (!card || !isFormulaCard(card)) return;
+  const formulas = card.params.formulas;
+  const matrix = state.matrices.get(card.displayMatrixId);
+  if (!formulas || !matrix || matrix.columnCount() === 0) return;
+  const annotations = matrix.columns().map((column) => column.annotation);
+  const signature = unitSignature(annotations);
+  const existing = state.unitConfirmations[signature] ?? {};
+  const next: Record<number, string> = { ...existing };
+  let changed = false;
+  formulas.forEach((formula, index) => {
+    const unit = typeof formula.unit === 'string' ? formula.unit.trim() : '';
+    if (unit === '') return;
+    // Same guard as every other writer of this memory: an unregistered unit is never
+    // remembered (the picker cannot produce one, a hand-edited file can).
+    if (!candidateByUnit(unit)) return;
+    if (index >= annotations.length) return;
+    if (next[index] === unit) return;
+    next[index] = unit;
+    changed = true;
+  });
+  if (!changed) return;
+  useWorkspace.setState((current) => ({
+    unitConfirmations: { ...current.unitConfirmations, [signature]: next },
+  }));
+  // The numbers are unchanged, but the axis/chip labels of every dependent are derived from
+  // this memory — so a chart reading the output must re-derive its axis unit now.
+  useWorkspace.getState().refreshDependentsOf(cardId);
+}
+
 /** Store a fetched result in the card's display cache and record how much of it we hold. */
 function applyResultCache(cardId: number, result: ResultFetch): void {
   useWorkspace.setState((state) => {
@@ -2535,6 +2722,10 @@ function applyResultCache(cardId: number, result: ResultFetch): void {
     );
     return { matrices, cards };
   });
+  // The user's explicit output units are re-asserted against the table that just arrived
+  // (units L1a §2) — before the dependents are refreshed, so a chart re-derives the axis
+  // unit from the assertion in the same wave that gives it the numbers.
+  assertFormulaUnits(cardId);
   // A chart drawn from this output must show the numbers that just arrived — the same
   // "dependents follow their source" rule a data card's file switch follows.
   useWorkspace.getState().refreshDependentsOf(cardId);
@@ -3326,6 +3517,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     trust: initialTrust(),
     // No confirmations yet: every ambiguous header starts un-asked.
     unitConfirmations: {},
+    // No override yet: a new workspace inherits the global tier.
+    unitPolicyOverride: undefined,
     propagationFrozen: false,
     blockers: [],
     blockedCardId: null,
@@ -3428,6 +3621,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
 
       const allocated = allocateMatrices(entries);
       const previous = card.sources;
+      // What the replaced slot's columns resolved to BEFORE the swap — the other half of the
+      // drift comparison below (units L1a §3). Read now: `pruneMatrixIfUnreferenced` can drop
+      // the old parse before the function returns.
+      const replacedSource = index !== undefined ? previous[index] : undefined;
+      const beforeMatrix = replacedSource ? state.matrices.get(replacedSource.matrixId) : undefined;
+      const beforeConfirmations = state.unitConfirmations;
       const nextSources =
         index === undefined
           ? entries.map((entry, entryIndex) => ({
@@ -3491,6 +3690,21 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         matrixIdByIdentity: allocated.matrixIdByIdentity,
         nextMatrixId: allocated.nextMatrixId,
       });
+
+      // A same-NAME, same-POSITION column whose derived unit changed (or became contested) is
+      // worth one sentence in a strict workspace; clean data and auto/free stay silent.
+      // Scoped to the「替换文件…」path (which always names the slot): a drop replaces the whole
+      // file set, so there is no single "this table, new contents" pair to compare against.
+      if (replacedSource && beforeMatrix && effectiveUnitPolicy(get()) === 'strict') {
+        const afterMatrix = allocated.matrices.get(allocated.ids[0]);
+        const drift = afterMatrix
+          ? detectUnitDrift(
+              { columns: beforeMatrix.columns(), confirmations: beforeConfirmations },
+              { columns: afterMatrix.columns(), confirmations: get().unitConfirmations },
+            )
+          : [];
+        if (drift.length > 0) get().showToast('info', unitDriftMessage(get().locale, drift));
+      }
 
       // Charts are views: they follow the file the card now shows.
       refreshDependentsOf(cardId, [...oldToNew.keys()]);
@@ -4321,7 +4535,15 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
 
       const formulas = (card.params.formulas ?? []).slice();
       if (index >= 0 && index < formulas.length) {
-        formulas[index] = { name, expression };
+        // The expression editor owns `name` + `expression` only. Rebuilding the row from
+        // those two used to be indistinguishable from the row itself; since units L1a a row
+        // also carries the user's explicit OUTPUT `unit`, which this edit must not drop —
+        // an unrelated keystroke is not a reason to withdraw an assertion.
+        const current = formulas[index];
+        formulas[index] =
+          current.unit === undefined
+            ? { name, expression }
+            : { name, expression, unit: current.unit };
       } else {
         formulas.push({ name, expression });
       }
@@ -4664,6 +4886,45 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       const signature = unitSignature(matrix.columns().map((col) => col.annotation));
       const next = { ...(state.unitConfirmations[signature] ?? {}), [columnIndex]: unit };
       set({ unitConfirmations: { ...state.unitConfirmations, [signature]: next } });
+    },
+
+    setUnitPolicyOverride(policy) {
+      // `null` clears the override (back to inheriting the global tier). The field is
+      // REMOVED rather than set to `undefined` so a saved file never carries a dead key —
+      // `JSON.stringify` would drop it anyway, but an in-memory `{unitPolicyOverride:
+      // undefined}` makes `'unitPolicyOverride' in snapshot` answer yes about nothing.
+      const state = get();
+      if ((state.unitPolicyOverride ?? null) === (policy ?? null)) return;
+      // `set` merges, so "clear" has to carry the key explicitly as `undefined`: spreading the
+      // whole state back would re-add the very key being removed.
+      set({ unitPolicyOverride: policy === null ? undefined : policy });
+    },
+
+    setFormulaUnit(cardId, index, unit) {
+      const state = get();
+      const card = state.cards.find((c) => c.id === cardId);
+      if (!card || !isFormulaCard(card)) return;
+      const formulas = card.params.formulas?.slice();
+      if (!formulas || index < 0 || index >= formulas.length) return;
+      // An assertion must name a registered unit; `''` withdraws it. Anything else is a
+      // typo the resolver could not act on, so it is refused instead of stored.
+      const next = unit.trim();
+      if (next !== '' && !candidateByUnit(next)) return;
+      const current = formulas[index];
+      if ((current.unit ?? '') === next) return;
+      formulas[index] = next === '' ? { name: current.name, expression: current.expression } : { ...current, unit: next };
+      set({
+        cards: state.cards.map((entry) =>
+          entry.id === cardId && isFormulaCard(entry)
+            ? { ...entry, params: { ...entry.params, formulas } }
+            : entry,
+        ),
+      });
+      // The assertion is a card parameter, but it does not change a single number: the node
+      // is NOT pushed (the backend never reads `formulas[].unit`). What does change is the
+      // label of the output table, so the existing cache is re-asserted immediately — the
+      // user must see the unit on the result without waiting for a recompute.
+      assertFormulaUnits(cardId);
     },
 
     // ── summary panel (`builtin:summary`) ─────────────────────────────
@@ -5665,6 +5926,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // Written unconditionally (like `env`): the file shape never depends on whether a
         // unit happened to be confirmed, and a legacy reader simply ignores the field.
         unitConfirmations: state.unitConfirmations,
+        // Present only when this workspace overrides the global tier (units L1a): a file
+        // that never set one carries no key at all, so "absent" and "inherit" are the same
+        // statement and an older build reads the file unchanged.
+        ...(state.unitPolicyOverride !== undefined
+          ? { unitPolicyOverride: state.unitPolicyOverride }
+          : {}),
         nextCardId: state.nextCardId,
         nextMatrixId: state.nextMatrixId,
       };
@@ -5678,6 +5945,14 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // for pulls still in flight — they carry the old epoch and answer nobody.
       outputSlotCache.clear();
       outputSlotPulls.clear();
+
+      // Unit drift is a comparison between the OLD and the NEW version of a same-name table
+      // (units L1a §3), so it has to be collected before `set` replaces `matrices`. The
+      // previous workspace's matrices are gone by the time the restore finishes otherwise.
+      const previousMatrices = get().matrices;
+      const previousConfirmations = get().unitConfirmations;
+      const previousCards = get().cards;
+
       const matrices = new Map<number, MatrixData>();
       for (const entry of snapshot.matrices) {
         const matrix = new MatrixData();
@@ -5729,7 +6004,15 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         summaries: {},
         // Unit confirmations travel with the file (sanitised): the same headers must not be
         // re-asked after a restore. A legacy file without the block starts empty.
+        //
+        // NESTING RULE (units L1a §1 / decision §五): this REPLACES the memory, it never
+        // merges it. The previous workspace's answers describe the previous workspace's
+        // matrices — same-signature headers in another file can mean something else — so a
+        // restore is a {0} boundary and nothing from outside the snapshot may leak across it.
         unitConfirmations: sanitizeUnitConfirmations(snapshot.unitConfirmations),
+        // The workspace layer travels with its own snapshot; `null` when the file carries no
+        // override (inherit the global tier — never the previous workspace's override).
+        unitPolicyOverride: normalizeUnitPolicyOverride(snapshot.unitPolicyOverride),
         // A restored script card has no run of its own: the traceback, duration and previews
         // belonged to a node that no longer exists.
         scriptRuns: {},
@@ -5755,6 +6038,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           translatorFor(get().locale)('status.cycleDropped', { n: droppedEdges }),
         );
       }
+
+      // Re-validate the units of every table that the previous workspace also had (units L1a
+      // §3): only a changed/contested resolution is worth a word, and only in strict mode.
+      // Clean data, and any auto/free workspace, stay silent — opening a file must never
+      // become a confirmation ritual.
+      reportUnitDrift(previousCards, previousMatrices, previousConfirmations, restored, matrices, get);
 
       // Bring the restored state back to the server: the backend's matrix and node ids do
       // not survive a restart, so a restore has to re-register the matrices first and can
@@ -5829,6 +6118,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         unitRuns: {},
         // Confirmations belonged to the matrices that were just dropped.
         unitConfirmations: {},
+        // …and so did the workspace's policy override: a reset is an empty workspace, which
+        // inherits the global tier like a brand-new one.
+        unitPolicyOverride: undefined,
         trust: initialTrust(),
         propagationFrozen: false,
         blockers: [],

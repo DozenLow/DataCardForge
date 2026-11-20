@@ -25,6 +25,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAccuracyHint } from '../useAccuracyHint.ts';
 import { MatrixData } from '../../core/MatrixData.ts';
 import { useTranslator, useWorkspace } from '../workspaceStore.ts';
+import { convertibleUnits } from '../../core/units.ts';
 import { registerPort, unregisterPort, type AnchorSide } from '../cardMetrics.ts';
 import { flushOperations, settleOperation } from '../operationSettle.ts';
 import type { FunctionCardModel, NodeStatus } from '../types.ts';
@@ -58,6 +59,30 @@ const RELATION_STAT_KEYS: Record<string, MessageKey> = {
   r2: 'relation.stat.r2',
   n: 'relation.stat.n',
 };
+
+/**
+ * Units an OUTPUT assertion may name, grouped by dimension (units L1a §2).
+ *
+ * `convertibleUnits()` is the registry's own scalar list, filtered exactly like the convert
+ * card's target picker: a unit with no dimension (`AU`) has no other spelling to assert and
+ * would only re-state the header. Non-scalar labels (°C/dB/HRC) are excluded by the registry
+ * for the same reason they cannot be conversion targets. Built once — the registry is static.
+ */
+const OUTPUT_UNIT_GROUPS: ReadonlyArray<{ dimension: string; units: readonly string[] }> = (() => {
+  const byDimension = new Map<string, string[]>();
+  for (const candidate of convertibleUnits()) {
+    if (candidate.dimension === null) continue;
+    const list = byDimension.get(candidate.dimension) ?? [];
+    if (!list.includes(candidate.unit)) list.push(candidate.unit);
+    byDimension.set(candidate.dimension, list);
+  }
+  return [...byDimension.entries()].map(([dimension, units]) => ({ dimension, units }));
+})();
+
+/** The assertion stored on one formula row — `''` means "assert nothing". */
+function formulaUnitOf(formula: { unit?: string } | undefined): string {
+  return typeof formula?.unit === 'string' ? formula.unit : '';
+}
 
 /** One resolved input port, as the left zone displays it. */
 export interface ResolvedInput {
@@ -124,6 +149,9 @@ export function FormulaCard({
   const outputsOpen = card.outputsPanelOpen ?? true;
   const setFormula = useWorkspace((s) => s.setFormula);
   const removeFormula = useWorkspace((s) => s.removeFormula);
+  // Explicit OUTPUT unit (units L1a): the user's assertion about a result column. Stored on
+  // the formula row; it never changes a number, it only labels the output downstream.
+  const setFormulaUnit = useWorkspace((s) => s.setFormulaUnit);
   // The reference dialog is store-owned: the Help menu opens the same one, and this card
   // must not need a prop relayed through CardCanvas to reach it.
   const openHelp = useWorkspace((s) => s.openHelp);
@@ -144,6 +172,7 @@ export function FormulaCard({
   const expressionHover = useHoverHelp(t('help.hover.expr'));
   const addHover = useHoverHelp(t('help.hover.addColumn'));
   const columnsHover = useHoverHelp(t('help.columns.hint'));
+  const unitHover = useHoverHelp(t('unit.outputUnitHint'));
   /** One ref per rendered expression input, so a column chip can insert at its caret. */
   const expressionRefs = useRef<Array<HTMLInputElement | null>>([]);
   /**
@@ -332,6 +361,32 @@ export function FormulaCard({
   }, [card.id, formulas]);
 
   /**
+   * Adopt the stored output units into the draft (units L1a §2).
+   *
+   * The draft owns the two fields the user types (`name`, `expression`) and is deliberately
+   * NOT re-synced from the store, because that would fight the typing. `unit` is different:
+   * it is set by a discrete picker, and the region above renders `draft`. Without this effect
+   * the picker would show a stale value until some unrelated change rebuilt the draft — the
+   * store already holds the answer, so the draft follows it.
+   *
+   * Only values that DIFFER are written, so an untouched row keeps its object identity and
+   * the commit effect below stays quiet.
+   */
+  useEffect(() => {
+    const stored = formulas ?? [];
+    setDraft((rows) => {
+      let changed = false;
+      const next = rows.map((row, index) => {
+        const unit = stored[index]?.unit;
+        if ((row.unit ?? '') === (unit ?? '')) return row;
+        changed = true;
+        return unit === undefined ? { name: row.name, expression: row.expression } : { ...row, unit };
+      });
+      return changed ? next : rows;
+    });
+  }, [formulas]);
+
+  /**
    * Commit on the workspace-wide 200 ms settle, not on a per-card timer.
    *
    * The settle belongs to the USER OPERATION (`operationSettle.ts`): once it fires, this
@@ -344,7 +399,12 @@ export function FormulaCard({
       draft.forEach((formula, index) => {
         const current = formulas?.[index];
         if (!current) return;
-        if (current.name === formula.name && current.expression === formula.expression) return;
+        if (current.name === formula.name && current.expression === formula.expression) {
+          // The synthesiser keeps the row's OTHER fields intact, so an unchanged name and
+          // expression must not re-send the row: that would drop `unit` (the synthesised
+          // parameters carry only name + expression). The unit has its own commit path.
+          return;
+        }
         setFormula(card.id, index, formula.name, formula.expression);
       });
     });
@@ -641,6 +701,41 @@ export function FormulaCard({
                       )
                     }
                   />
+                  {/* Explicit OUTPUT unit (units L1a §2). Empty = assert nothing, which is
+                      what every row did before this control existed. The choice is stored on
+                      the row (`params.formulas[i].unit`) and re-asserted into the confirmation
+                      memory after every result pull, so charts/convert read it for free. */}
+                  <select
+                    className={`formula-card__unit card__control${
+                      formulaUnitOf(formula) !== '' ? ' formula-card__unit--set' : ''
+                    }`}
+                    aria-label={t('unit.outputUnit')}
+                    title={
+                      formulaUnitOf(formula) !== ''
+                        ? `${t('unit.outputUnit')}: ${formulaUnitOf(formula)}`
+                        : t('unit.outputUnitHint')
+                    }
+                    value={formulaUnitOf(formula)}
+                    {...unitHover.anchorProps}
+                    onChange={(e) => {
+                      // The assertion is not part of the debounced expression draft: it is a
+                      // discrete choice, and sending it through the settle wave would make the
+                      // chip appear a keystroke later than the click.
+                      flushOperations();
+                      setFormulaUnit(card.id, index, e.target.value);
+                    }}
+                  >
+                    <option value="">{t('unit.outputUnitNone')}</option>
+                    {OUTPUT_UNIT_GROUPS.map((group) => (
+                      <optgroup key={group.dimension} label={group.dimension}>
+                        {group.units.map((unit) => (
+                          <option key={unit} value={unit}>
+                            {unit}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                  </select>
                   {draft.length > 1 ? (
                     <button
                       type="button"
@@ -661,6 +756,7 @@ export function FormulaCard({
                   sentence, and a hook cannot be called inside the map above. */}
               {nameHover.tooltip}
               {expressionHover.tooltip}
+              {unitHover.tooltip}
               {expressionShaped ? (
                 <button
                   type="button"
