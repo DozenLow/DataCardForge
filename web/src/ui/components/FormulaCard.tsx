@@ -455,9 +455,15 @@ export function FormulaCard({
    *   - `strict` (default) — show the mismatches, attributed to the row that produced them;
    *   - `free`            — the tier means "do not check", so nothing is shown at all: a
    *                         warning would be the very checking the user turned off;
-   *   - `auto`            — show what WILL happen ("will auto-convert"), stated as a promise
-   *                         of a later slice: the conversion is L2 and nothing is converted
-   *                         here (numbers are never rewritten in this build).
+   *   - `auto`            — the backend CONVERTED the same-dimension pairs before computing,
+   *                         so the banner says 「已自动换算」 and explains that the source table
+   *                         was not rewritten. A cross-dimension pair is still never converted
+   *                         (the tier refuses to guess), and the entry says so.
+   *
+   * A card only carries warnings for pairs the tier could NOT convert: a converted pair agrees
+   * in dimension, and `unitMismatch` is defined as a dimension disagreement. So under `auto`
+   * every listed entry is by construction one that was left alone — the same key still renders
+   * an unknown future warning code without inventing a converted one.
    */
   const unitNotice = useMemo(() => {
     const warnings = card.node?.warnings ?? [];
@@ -924,7 +930,7 @@ export function FormulaCard({
                 >
                   <p className="formula-card__unit-warn-title">
                     {unitNotice.policy === 'auto'
-                      ? t('unit.warn.autoTitle')
+                      ? t('unit.warn.convertedTitle')
                       : t('unit.warn.title', { n: unitNotice.count })}
                   </p>
                   <ul className="formula-card__unit-warn-list">

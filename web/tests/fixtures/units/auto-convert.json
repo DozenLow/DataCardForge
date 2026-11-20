@@ -1,0 +1,255 @@
+{
+  "comment": "Auto-convert fixtures (units L2b) — read by BOTH backend/tests/units_autoconvert_test.cpp and web/tests/unitsAutoConvert.test.ts, so the C++ engine and the TS reference must agree on every number here. Each case is one table (`columns` = posName + annotation + data) and an expression evaluated under a `policy`. `columnUnits` is the CONVERTIBLE unit carried into the engine for each column — the resolution hierarchy (constant > confirmed > inherited > pre-confirmed > parsed) belongs to the caller in production; pinning it here keeps the case about arithmetic instead of about parsing. Expectation fields: `expectDefault` is the value the engine has always produced (policy absent, and the plain evaluate() call, both checked), `expect` is the value under `policy` ('auto' converts a same-dimension + / - pair of direct column operands, everything else is unchanged), and `conversions` is the COMPLETE ordered list of rewrites (pair index, factor, from/to units) — [] means nothing was touched. The rules the cases pin, verbatim from the task: same dimension converts as value*factorRight/factorLeft (two left-to-right operations, never a precomputed ratio); cross-dimension NEVER converts; strict / free / absent / an unknown policy never convert; nested or non-direct operands never convert.",
+  "cases": [
+    {
+      "name": "same-dim-add-converts-cm-to-m",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_km", "data": [1, 2] },
+        { "posName": "Pos.2", "annotation": "height_cm", "data": [150, 200] }
+      ],
+      "columnUnits": ["m", "cm"],
+      "expression": "src.pos.1 + src.pos.2",
+      "policy": "auto",
+      "expectDefault": [151, 202],
+      "expect": [2.5, 4],
+      "conversions": [{ "pair": 0, "factor": 0.01, "fromUnit": "cm", "toUnit": "m" }]
+    },
+    {
+      "name": "same-dim-sub-converts-cm-to-m",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_km", "data": [1, 2] },
+        { "posName": "Pos.2", "annotation": "height_cm", "data": [150, 200] }
+      ],
+      "columnUnits": ["m", "cm"],
+      "expression": "src.pos.1 - src.pos.2",
+      "policy": "auto",
+      "expectDefault": [-149, -198],
+      "expect": [-0.5, 0],
+      "conversions": [{ "pair": 0, "factor": 0.01, "fromUnit": "cm", "toUnit": "m" }]
+    },
+    {
+      "name": "same-dim-sub-converts-pressure-mpa-to-kpa",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "pressure_kpa", "data": [100, 200, 300] },
+        { "posName": "Pos.2", "annotation": "load_mpa", "data": [0.5, 1, 1.25] }
+      ],
+      "columnUnits": ["kPa", "MPa"],
+      "expression": "src.pos.1 - src.pos.2",
+      "policy": "auto",
+      "expectDefault": [99.5, 199, 298.75],
+      "expect": [-400, -800, -950],
+      "conversions": [{ "pair": 0, "factor": 1000, "fromUnit": "MPa", "toUnit": "kPa" }]
+    },
+    {
+      "name": "left-to-right-order-pins-the-exact-double",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "mass_g", "data": [1, 2, 3] },
+        { "posName": "Pos.2", "annotation": "mass_kg", "data": [0.001, 0.002, 0.003] }
+      ],
+      "columnUnits": ["g", "kg"],
+      "expression": "src.pos.1 - src.pos.2",
+      "policy": "auto",
+      "expectDefault": [0.999, 1.998, 2.997],
+      "expect": [0, 0, 0],
+      "conversions": [{ "pair": 0, "factor": 1000, "fromUnit": "kg", "toUnit": "g" }]
+    },
+    {
+      "name": "cross-dimension-never-converts",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "load_kpa", "data": [100, 200] },
+        { "posName": "Pos.2", "annotation": "height_cm", "data": [1, 2] }
+      ],
+      "columnUnits": ["kPa", "cm"],
+      "expression": "src.pos.1 + src.pos.2",
+      "policy": "auto",
+      "expectDefault": [101, 202],
+      "expect": [101, 202],
+      "conversions": []
+    },
+    {
+      "name": "same-unit-columns-do-nothing",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_km", "data": [1, 2] },
+        { "posName": "Pos.2", "annotation": "height_cm", "data": [0.003, 0.004] }
+      ],
+      "columnUnits": ["km", "km"],
+      "expression": "src.pos.1 - src.pos.2",
+      "policy": "auto",
+      "expectDefault": [0.997, 1.996],
+      "expect": [0.997, 1.996],
+      "conversions": []
+    },
+    {
+      "name": "default-policy-does-not-convert",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_km", "data": [1, 2] },
+        { "posName": "Pos.2", "annotation": "height_cm", "data": [150, 200] }
+      ],
+      "columnUnits": ["m", "cm"],
+      "expression": "src.pos.1 + src.pos.2",
+      "policy": "strict",
+      "expectDefault": [151, 202],
+      "expect": [151, 202],
+      "conversions": []
+    },
+    {
+      "name": "absent-policy-does-not-convert",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_km", "data": [1, 2] },
+        { "posName": "Pos.2", "annotation": "height_cm", "data": [150, 200] }
+      ],
+      "columnUnits": ["m", "cm"],
+      "expression": "src.pos.1 + src.pos.2",
+      "expectDefault": [151, 202],
+      "expect": [151, 202],
+      "conversions": []
+    },
+    {
+      "name": "free-policy-does-not-convert",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_km", "data": [1, 2] },
+        { "posName": "Pos.2", "annotation": "height_cm", "data": [150, 200] }
+      ],
+      "columnUnits": ["m", "cm"],
+      "expression": "src.pos.1 - src.pos.2",
+      "policy": "free",
+      "expectDefault": [-149, -198],
+      "expect": [-149, -198],
+      "conversions": []
+    },
+    {
+      "name": "nested-operand-does-not-convert",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_km", "data": [1, 2] },
+        { "posName": "Pos.2", "annotation": "height_cm", "data": [150, 200] }
+      ],
+      "columnUnits": ["m", "cm"],
+      "expression": "(src.pos.1 * 2) + src.pos.2",
+      "policy": "auto",
+      "expectDefault": [152, 204],
+      "expect": [152, 204],
+      "conversions": []
+    },
+    {
+      "name": "nested-function-operand-does-not-convert",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_km", "data": [1, 2, 3] },
+        { "posName": "Pos.2", "annotation": "height_cm", "data": [150, 200, 250] }
+      ],
+      "columnUnits": ["m", "cm"],
+      "expression": "ABS(src.pos.1) + src.pos.2",
+      "policy": "auto",
+      "expectDefault": [151, 202, 253],
+      "expect": [151, 202, 253],
+      "conversions": []
+    },
+    {
+      "name": "negated-operand-does-not-convert",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_km", "data": [1, 2] },
+        { "posName": "Pos.2", "annotation": "height_cm", "data": [150, 200] }
+      ],
+      "columnUnits": ["m", "cm"],
+      "expression": "-src.pos.1 + src.pos.2",
+      "policy": "auto",
+      "expectDefault": [149, 198],
+      "expect": [149, 198],
+      "conversions": []
+    },
+    {
+      "name": "literal-operand-does-not-convert",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_km", "data": [1, 2] },
+        { "posName": "Pos.2", "annotation": "height_cm", "data": [150, 200] }
+      ],
+      "columnUnits": ["m", "cm"],
+      "expression": "src.pos.1 + 5",
+      "policy": "auto",
+      "expectDefault": [6, 7],
+      "expect": [6, 7],
+      "conversions": []
+    },
+    {
+      "name": "multiplication-is-not-a-conversion-site",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_km", "data": [1, 2] },
+        { "posName": "Pos.2", "annotation": "height_cm", "data": [3, 4] }
+      ],
+      "columnUnits": ["m", "cm"],
+      "expression": "src.pos.1 * src.pos.2",
+      "policy": "auto",
+      "expectDefault": [3, 8],
+      "expect": [3, 8],
+      "conversions": []
+    },
+    {
+      "name": "comparison-is-not-a-conversion-site",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_km", "data": [1, 3] },
+        { "posName": "Pos.2", "annotation": "height_cm", "data": [150, 200] }
+      ],
+      "columnUnits": ["m", "cm"],
+      "expression": "src.pos.1 > src.pos.2",
+      "policy": "auto",
+      "expectDefault": [0, 0],
+      "expect": [0, 0],
+      "conversions": []
+    },
+    {
+      "name": "column-without-a-unit-is-not-converted",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_km", "data": [1, 2] },
+        { "posName": "Pos.2", "annotation": "sensor", "data": [150, 200] }
+      ],
+      "columnUnits": ["m", ""],
+      "expression": "src.pos.1 + src.pos.2",
+      "policy": "auto",
+      "expectDefault": [151, 202],
+      "expect": [151, 202],
+      "conversions": []
+    },
+    {
+      "name": "two-sites-both-convert",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_km", "data": [1, 2] },
+        { "posName": "Pos.2", "annotation": "height_cm", "data": [150, 200] },
+        { "posName": "Pos.3", "annotation": "height_nm", "data": [500, 1000] }
+      ],
+      "columnUnits": ["m", "cm", "mm"],
+      "expression": "(src.pos.1 + src.pos.2) + (src.pos.1 - src.pos.3)",
+      "policy": "auto",
+      "expectDefault": [-348, -796],
+      "expect": [3, 5],
+      "conversions": [
+        { "pair": 0, "factor": 0.01, "fromUnit": "cm", "toUnit": "m" },
+        { "pair": 1, "factor": 0.001, "fromUnit": "mm", "toUnit": "m" }
+      ]
+    },
+    {
+      "name": "direction-is-left-to-right",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_cm", "data": [150, 200] },
+        { "posName": "Pos.2", "annotation": "height_km", "data": [1, 2] }
+      ],
+      "columnUnits": ["cm", "m"],
+      "expression": "src.pos.1 + src.pos.2",
+      "policy": "auto",
+      "expectDefault": [151, 202],
+      "expect": [250, 400],
+      "conversions": [{ "pair": 0, "factor": 100, "fromUnit": "m", "toUnit": "cm" }]
+    },
+    {
+      "name": "ratio-units-convert-exactly",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "gain_ppm", "data": [1, 2] },
+        { "posName": "Pos.2", "annotation": "gain_ppb", "data": [1000, 2000] }
+      ],
+      "columnUnits": ["ppm", "ppb"],
+      "expression": "src.pos.1 + src.pos.2",
+      "policy": "auto",
+      "expectDefault": [1001, 2002],
+      "expect": [2, 4],
+      "conversions": [{ "pair": 0, "factor": 0.001, "fromUnit": "ppb", "toUnit": "ppm" }]
+    }
+  ]
+}

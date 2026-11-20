@@ -1532,6 +1532,9 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
   // Unit warnings (builtin:expression-columns only): additive advice, collected in the same
   // pass as the numbers and published with them. Never consulted by the error path.
   Json unitWarnings = Json::array();
+  // What the auto-conversion tier converted (units L2b): `{formula, pair, factor, from, to}`
+  // per rewrite. Empty for `strict`/`free`/absent, which never convert.
+  Json unitConversions = Json::array();
 
   // Qualified column references for a multi-input card: `A.pos.1`, `B.温度`,
   // `A.[地面速度_μm/s]`. The letter follows the port declaration order (A, B, C …) and the
@@ -1554,6 +1557,44 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
       ++ordinal;
     }
   }
+  // Auto-conversion input (units L2b): only `params.unitPolicy == "auto"` reads it, and the
+  // expression engine ignores the request entirely for every other value, so a card without
+  // the parameter keeps computing exactly the numbers it always did.
+  //
+  // The unit of each column comes from the same resolver the unit-convert card uses. The
+  // label is the flattened `Pos.N annotation`, so it is split with labelParsed first; the
+  // output column's NEW annotation (the left operand's unit) is published by the UI — this
+  // node derives a table, it never rewrites its source columns.
+  std::string unitPolicy = params.find("unitPolicy") != nullptr && params["unitPolicy"].isString()
+                               ? params["unitPolicy"].asString()
+                               : std::string();
+  ExprEngine::AutoConvertRequest autoConvert;
+  autoConvert.policy = unitPolicy;
+  if (unitPolicy == "auto") {
+    autoConvert.context.columnUnits.resize(names.size());
+    autoConvert.context.columnDimensions.resize(names.size());
+    autoConvert.context.columnFactors.resize(names.size(), 0.0);
+    for (size_t c = 0; c < names.size(); ++c) {
+      std::string posName;
+      std::string annotation;
+      Matrix::labelParsed(names[c], &posName, &annotation);
+      if (annotation.empty()) continue;
+      const UnitResolution resolution = resolveUnit(annotation);
+      // Only a provably convertible unit (recognised, scalar, with a positive factor) may
+      // enter the conversion. Ambiguous and label-only units stay empty: "convert only what
+      // the header proves" is the same rule the warning check follows.
+      UnitCandidate candidate;
+      if (resolution.state != UnitState::Recognized || !resolution.scalar ||
+          !candidateByUnit(resolution.unit, &candidate)) {
+        continue;
+      }
+      if (candidate.dimension.empty() || !(candidate.factor > 0.0)) continue;
+      autoConvert.context.columnUnits[c] = candidate.unit;
+      autoConvert.context.columnDimensions[c] = candidate.dimension;
+      autoConvert.context.columnFactors[c] = candidate.factor;
+    }
+  }
+
   const size_t rowLength = length == 0 ? 1 : length;
   try {
     if (!signatureId.empty()) {
@@ -1645,7 +1686,11 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
             Column col;
             col.posName = "Pos." + std::to_string(i + 1);
             col.annotation = name;
-            col.data = ExprEngine::evaluate(expression, names, data, rowLength, aliases);
+            // One evaluation path for every tier: `evaluateAuto` takes the plain route when
+            // the policy is not `auto`, which is why the default numbers cannot move.
+            std::vector<ExprEngine::UnitConversion> conversions;
+            col.data = ExprEngine::evaluateAuto(expression, names, data, rowLength, aliases,
+                                               &autoConvert, &conversions);
             // Static unit check of the SAME expression, on the SAME column labels the
             // engine just resolved. It reads the annotations only (no values, no
             // confirmation memory) and only reports what it can prove, so a column with no
@@ -1656,6 +1701,16 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
               Json entry = unitWarningToJson(warning);
               entry.set("formula", Json(static_cast<int64_t>(i)));
               unitWarnings.push(std::move(entry));
+            }
+            // What the `auto` tier actually did, so the UI can say 「已自动换算」 about a
+            // specific row instead of guessing from a warning. Absent for every other tier.
+            for (const ExprEngine::UnitConversion& conversion : conversions) {
+              Json entry = Json::object({{"formula", Json(static_cast<int64_t>(i))},
+                                         {"pair", Json(conversion.pair)},
+                                         {"factor", Json(conversion.factor)},
+                                         {"from", Json(conversion.fromUnit)},
+                                         {"to", Json(conversion.toUnit)}});
+              unitConversions.push(std::move(entry));
             }
             columns.push_back(std::move(col));
           }
@@ -1873,6 +1928,8 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
                             {"matrixId", Json(node.resultMatrixIds[0])}});
   // Only present when there is something to say, so a clean card's payload does not grow.
   if (!node.warnings.items().empty()) done.set("warnings", node.warnings);
+  // Additive: a non-auto card's payload is byte-identical to what it was before L2b.
+  if (!unitConversions.items().empty()) done.set("unitConversions", unitConversions);
   if (node.resultMatrixIds.size() > 1) {
     Json ids = Json::array();
     for (int64_t id : node.resultMatrixIds) ids.push(Json(id));

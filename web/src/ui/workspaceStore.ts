@@ -101,6 +101,7 @@ import type { HelpSection } from './formulaHelp.ts';
 import {
   BackendClient,
   REQUIRED_CAPABILITIES,
+  normalizeUnitConversions,
   normalizeUnitWarnings,
   type DirtyReasonName,
   type NodeEvent,
@@ -961,6 +962,9 @@ async function ensureScriptNode(
       nodeId,
       state: result.state ?? 'dirty',
       ...(result.warnings !== undefined ? { warnings: result.warnings } : {}),
+      ...(result.unitConversions !== undefined
+        ? { unitConversions: result.unitConversions }
+        : {}),
     });
     const ids =
       result.resultMatrixIds ?? (result.resultMatrixId !== undefined ? [result.resultMatrixId] : []);
@@ -1080,6 +1084,9 @@ async function runScriptCardNow(cardId: number, mode: 'clean' | 'debug'): Promis
       nodeId: node.nodeId,
       state: 'done',
       ...(computed.warnings !== undefined ? { warnings: computed.warnings } : {}),
+      ...(computed.unitConversions !== undefined
+        ? { unitConversions: computed.unitConversions }
+        : {}),
     });
     applyScriptOutputIds(
       cardId,
@@ -2129,6 +2136,12 @@ function releaseServerMatrix(serverId: number): void {
  * and a signature with no parameters sends an empty bag. Picking keys by signature here
  * would be the card layer second-guessing the signature layer — and it is precisely why a
  * `builtin:python` card could not have worked through the generic push at all.
+ *
+ * The one exception is `unitPolicy` (units L2b): it is INJECTED here rather than stored on the
+ * card, because the tier is a workspace/global setting read live through `effectiveUnitPolicy`
+ * and copying it into every card would create a second source of truth that drifts the moment
+ * the user changes the setting. It is sent for the expression signature only — the only one
+ * whose numbers the tier can move; for any other card it would be a promise nobody keeps.
  */
 function wireParams(card: FunctionCardModel): Record<string, unknown> {
   const out: Record<string, unknown> = {};
@@ -2137,6 +2150,9 @@ function wireParams(card: FunctionCardModel): Record<string, unknown> {
     // anyway, but an explicit skip keeps the object inspectable in tests.
     if (value === undefined) continue;
     out[key] = key === 'formulas' ? wireFormulas(value) : value;
+  }
+  if (card.signatureId === EXPRESSION_COLUMNS_SIGNATURE) {
+    out.unitPolicy = effectiveUnitPolicy(useWorkspace.getState());
   }
   return out;
 }
@@ -2220,6 +2236,10 @@ async function pushFunctionCard(cardId: number): Promise<void> {
     // Advice about the numbers this answer published (units L1b / B1). Absent when the
     // answer left the node dirty/uncomputed, which clears the previous result's advice.
     ...(result.warnings !== undefined ? { warnings: result.warnings } : {}),
+    // What the `auto` tier converted for those numbers (units L2b). Same lifetime.
+    ...(result.unitConversions !== undefined
+      ? { unitConversions: result.unitConversions }
+      : {}),
   });
   lastPushedSignature.set(cardId, pushSignature);
   if (resultMatrixIds.length > 0) applyOutputIds(cardId, resultMatrixIds);
@@ -2280,11 +2300,19 @@ function warningsSurvive(state: NodeStatus['state']): boolean {
  * what every path without a fresh DTO (create, PATCH, a push) actually means.
  */
 function applyNodeSnapshot(cardId: number, status: NodeStatus): void {
+  const survives = status.warnings !== undefined || status.unitConversions !== undefined;
   const warnings = status.warnings === undefined || !warningsSurvive(status.state)
     ? []
     : normalizeUnitWarnings(status.warnings);
-  const next: NodeStatus = warnings.length > 0 ? { ...status, warnings } : { ...status };
-  if (warnings.length === 0) delete next.warnings;
+  // Conversions share the warning lifetime (units L2b): they describe the same result.
+  const conversions = !survives || !warningsSurvive(status.state)
+    ? []
+    : normalizeUnitConversions(status.unitConversions);
+  const next: NodeStatus = { ...status };
+  if (warnings.length > 0) next.warnings = warnings;
+  else delete next.warnings;
+  if (conversions.length > 0) next.unitConversions = conversions;
+  else delete next.unitConversions;
   useWorkspace.setState((state) => ({
     cards: state.cards.map((card) =>
       card.id === cardId && isFormulaCard(card) ? { ...card, node: next } : card,
@@ -2729,9 +2757,13 @@ const outputSlotPulls = new Map<number, Promise<boolean>>();
  * has been part of the file shape all along.
  */
 function persistedCard(card: CardModel): CardModel {
-  if (!('node' in card) || !card.node || card.node.warnings === undefined) return card;
+  if (!('node' in card) || !card.node) return card;
+  // The conversion report is the same kind of transient as the advice that produced it, so
+  // it leaves the file with it (units L2b).
+  if (card.node.warnings === undefined && card.node.unitConversions === undefined) return card;
   const node: NodeStatus = { ...card.node };
   delete node.warnings;
+  delete node.unitConversions;
   return { ...card, node };
 }
 
@@ -5169,6 +5201,15 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // `set` merges, so "clear" has to carry the key explicitly as `undefined`: spreading the
       // whole state back would re-add the very key being removed.
       set({ unitPolicyOverride: policy === null ? undefined : policy });
+      // The tier is a node parameter (units L2b), so every expression card must be re-declared
+      // under the new one — otherwise the setting would change what the banner SAYS while the
+      // numbers kept being computed under the old tier. Only the expression signature reads
+      // the parameter; every other card's push is unchanged and therefore skipped.
+      for (const card of get().cards) {
+        if (isFormulaCard(card) && card.signatureId === EXPRESSION_COLUMNS_SIGNATURE) {
+          void syncFunctionCard(card.id);
+        }
+      }
     },
 
     addUnitConstant(token, constant) {
@@ -5533,6 +5574,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
             nodeId,
             state: 'done',
             ...(computed.warnings !== undefined ? { warnings: computed.warnings } : {}),
+            ...(computed.unitConversions !== undefined
+              ? { unitConversions: computed.unitConversions }
+              : {}),
           });
           // Publish: display cache first, then the lamp, so "done" is never claimed while the
           // numbers are still on the wire (the summary panel's rule, applied here).
@@ -6126,6 +6170,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // A `done` push carries the advice about the numbers it just published (units L1b /
         // B1); every other push means the numbers are gone, so the warnings go with them.
         ...(event.warnings !== undefined ? { warnings: event.warnings } : {}),
+        // `auto`-tier conversions ride the same `done` push (units L2b).
+        ...(event.unitConversions !== undefined
+          ? { unitConversions: event.unitConversions }
+          : {}),
       });
       // A finished computation is the trigger to pull the numbers — the display cache is
       // refreshed from the window endpoint, never from a local evaluation.

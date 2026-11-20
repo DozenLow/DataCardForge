@@ -268,6 +268,111 @@ export type ASTNode =
   | { kind: 'unary'; op: string; operand: ASTNode }
   | { kind: 'call'; name: string; args: ASTNode[] };
 
+// ── Auto unit conversion (units L2b) ───────────────────────────────────
+
+/**
+ * The unit context an `auto` policy needs: the CONVERTIBLE unit of every column of the flat
+ * column list, or empty when the column's unit is not provable. Mirrors
+ * `ExprEngine::AutoConvertContext` — the engine never parses a header, the caller owns the
+ * resolution hierarchy (constant > confirmed > inherited > pre-confirmed > parsed).
+ */
+export interface AutoConvertContext {
+  columnUnits: string[];
+  columnDimensions: string[];
+  columnFactors: number[];
+}
+
+/** One conversion the `auto` policy performs, named after what it changed. */
+export interface UnitConversion {
+  /** Index of the pair in the depth-first walk (same order in the C++ engine). */
+  pair: number;
+  factor: number;
+  fromUnit: string;
+  toUnit: string;
+}
+
+/**
+ * Mirror of `autoConvertFactor` in `backend/src/expression.cpp`.
+ *
+ * A pair converts only when BOTH operands are direct column references (the caller has
+ * already checked that), both carry a convertible unit of the SAME dimension, and the units
+ * actually differ. Cross-dimension is never converted, and nothing undecidable converts.
+ */
+function autoConvertFactor(
+  ctx: AutoConvertContext,
+  leftColumn: number,
+  rightColumn: number,
+): number {
+  const factorOf = (column: number): number => {
+    if (column < 0 || column >= ctx.columnUnits.length) return 0;
+    if (column >= ctx.columnDimensions.length || column >= ctx.columnFactors.length) return 0;
+    if (ctx.columnUnits[column] === '' || ctx.columnDimensions[column] === '') return 0;
+    const factor = ctx.columnFactors[column];
+    return factor > 0 && Number.isFinite(factor) ? factor : 0;
+  };
+  const scaleLeft = factorOf(leftColumn);
+  const scaleRight = factorOf(rightColumn);
+  if (scaleLeft === 0 || scaleRight === 0) return 0;
+  if (ctx.columnDimensions[leftColumn] !== ctx.columnDimensions[rightColumn]) return 0;
+  if (ctx.columnUnits[leftColumn] === ctx.columnUnits[rightColumn]) return 0;
+  return scaleRight / scaleLeft;
+}
+
+/**
+ * Rewrite every provable `+`/`-` pair of two DIRECT column operands so the RIGHT operand is
+ * expressed in the LEFT operand's unit.
+ *
+ * The rewrite is `col * factorRight / factorLeft` — two left-to-right operations per value,
+ * the same locked order the unit-convert card uses, never a precomputed ratio. It mutates a
+ * freshly parsed tree owned by this call: no column data is touched, so a source matrix cannot
+ * be rewritten by a policy tier.
+ */
+export function applyAutoConvert(
+  ast: ASTNode,
+  ctx: AutoConvertContext,
+): { ast: ASTNode; conversions: UnitConversion[] } {
+  const conversions: UnitConversion[] = [];
+
+  const visit = (node: ASTNode): void => {
+    if (node.kind === 'binary' && (node.op === '+' || node.op === '-')) {
+      const { left, right } = node;
+      if (left.kind === 'column' && right.kind === 'column') {
+        const factor = autoConvertFactor(ctx, left.index, right.index);
+        if (factor > 0) {
+          conversions.push({
+            pair: conversions.length,
+            factor,
+            fromUnit: ctx.columnUnits[right.index],
+            toUnit: ctx.columnUnits[left.index],
+          });
+          node.right = {
+            kind: 'binary',
+            op: '/',
+            left: {
+              kind: 'binary',
+              op: '*',
+              left: right,
+              right: { kind: 'number', value: ctx.columnFactors[right.index] },
+            },
+            right: { kind: 'number', value: ctx.columnFactors[left.index] },
+          };
+        }
+      }
+    }
+    if (node.kind === 'binary') {
+      visit(node.left);
+      visit(node.right);
+    } else if (node.kind === 'unary') {
+      visit(node.operand);
+    } else if (node.kind === 'call') {
+      for (const arg of node.args) visit(arg);
+    }
+  };
+
+  visit(ast);
+  return { ast, conversions };
+}
+
 // ── Shunting-yard parser ───────────────────────────────────────────────
 
 const PRECEDENCE: Record<string, number> = {
@@ -951,4 +1056,35 @@ export function evaluateExpression(
   if (length === 0) length = 1;
   const compiled = compile(expression, names);
   return compiled.evaluate(data, length);
+}
+
+/**
+ * `evaluateExpression` with an OPTIONAL auto-conversion policy (units L2b).
+ *
+ * `policy === 'auto'` and a context present ⇒ every provable `+`/`-` pair of two direct
+ * column operands converts its right side to the left side's unit. Every other combination
+ * (no request, `strict`, `free`, any other string) takes the plain path — the AST is not even
+ * walked — so the default result is bit-for-bit what `evaluateExpression` returns.
+ *
+ * `aliases` is the same port-range list `compile()` takes (`A.pos.1`, `B.温度`): a multi-table
+ * card addresses its columns through it, and an auto conversion must be provable on the very
+ * expression the card runs.
+ */
+export function evaluateExpressionWithPolicy(
+  expression: string,
+  columns: Array<{ name: string; data: number[] }>,
+  request?: { policy: string; context?: AutoConvertContext } | null,
+  aliases: AliasRange[] = [],
+): { values: number[]; conversions: UnitConversion[] } {
+  const names = columns.map((c) => c.name);
+  const data = columns.map((c) => c.data);
+  let length = data.reduce((max, col) => Math.max(max, col.length), 0);
+  if (length === 0) length = 1;
+  const compiled = compile(expression, names, aliases);
+  if (!request || request.policy !== 'auto' || !request.context) {
+    return { values: compiled.evaluate(data, length), conversions: [] };
+  }
+  const { ast, conversions } = applyAutoConvert(compiled.ast, request.context);
+  const evaluator = compileAST(ast);
+  return { values: evaluator(data, length), conversions };
 }

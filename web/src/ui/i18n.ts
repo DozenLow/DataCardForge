@@ -339,17 +339,20 @@ const dictionaries = {
 
     // ── 单位 L1b（三档显示 + 手动常量 + 全局预确认）──────────────────────
     // `warnings` 是后端随结果一起给出的建议：绝不改写数值，也不改变错误态。严格档把它
-    // 如实说出来；自由计算档不检查、因此不显示；自动换算档的「换算」是 L2 的事，这里只说明
-    // 将会发生什么（决策 §二「标『已换算』」之前的预告）。
+    // 如实说出来；自由计算档不检查、因此不显示；自动换算档（L2b）真的换算了同量纲的操作数，
+    // 所以这一档说的是「已自动换算」——源表不动，输出是派生新表。
     'unit.warn.title': '单位提示：{n} 处操作数单位不一致',
     'unit.warn.mismatch':
       '「{left}」{op}「{right}」：两侧单位不在同一量纲。数值按原样计算，已原样显示；如需要请在列头确认单位或改用单位换算卡',
     'unit.warn.mismatchUnknown': '单位不一致：{left} {op} {right}',
     'unit.warn.row': '第 {n} 行',
-    'unit.warn.autoTitle': '单位会自动换算（自动换算档）：数值未被改写',
-    'unit.warn.autoMismatch':
-      '「{left}」{op}「{right}」：同量纲换算将在后续版本自动完成；当前数值与表头均保持原样',
-    'unit.warn.autoNote': '自动换算档目前只做提示：本版本不会改写任何数值，换算在 L2 实现。',
+    // 自动换算档：标题就是结论「已自动换算」。
+    'unit.warn.convertedTitle': '已自动换算（自动换算档）',
+    // 跨量纲的一对：这一档也绝不换算，仍按原样计算并如实说出。
+    'unit.warn.autoMismatch': '「{left}」{op}「{right}」：两侧单位不在同一量纲，未换算，按原样计算',
+    // 同量纲的一对：说清楚换算方向（右换算到左的单位）。
+    'unit.warn.autoConverted': '「{left}」{op}「{right}」：同量纲，{right} 已换算为 {left} 的单位',
+    'unit.warn.autoNote': '源表未被改写：结果是派生出的新表，换算只作用于本卡的输出列。',
     // 「单位」设置对话框（顶部菜单）：全局默认档 + 歧义 token 的预确认 + 本工作区手动常量。
     'menu.units': '单位',
     'menu.unitsSettings': '单位设置…',
@@ -835,17 +838,23 @@ const dictionaries = {
     // ── units L1b (tier display + manual constants + global pre-confirm) ─
     // `warnings` is advice the backend publishes next to the numbers: it never rewrites a
     // value and never changes the error state. `strict` says it, `free` does not check and
-    // so does not show it, and `auto` states what WILL happen — the conversion itself is L2.
+    // so does not show it, and `auto` (L2b) really does convert same-dimension operands —
+    // which is why that tier says "auto-converted", not "will convert".
     'unit.warn.title': 'Unit warning: {n} operand pair(s) disagree',
     'unit.warn.mismatch':
       '"{left}" {op} "{right}": the two sides are in different dimensions. The numbers are computed and shown as-is; confirm the units in the table header or use the unit-conversion card',
     'unit.warn.mismatchUnknown': 'Unit mismatch: {left} {op} {right}',
     'unit.warn.row': 'Row {n}',
-    'unit.warn.autoTitle': 'Units will be auto-converted (auto tier): no value was rewritten',
+    // Auto tier: the headline IS the conclusion.
+    'unit.warn.convertedTitle': 'Auto-converted (auto tier)',
+    // A cross-dimension pair: this tier never converts it either — computed as-is and said so.
     'unit.warn.autoMismatch':
-      '"{left}" {op} "{right}": conversions within one dimension will happen automatically in a later version; today the values and headers stay exactly as they are',
+      '"{left}" {op} "{right}": the two sides are in different dimensions, so nothing was converted and the numbers are computed as-is',
+    // A same-dimension pair: name the direction (the right operand took the left one's unit).
+    'unit.warn.autoConverted':
+      '"{left}" {op} "{right}": same dimension, so {right} was converted to {left}\'s unit',
     'unit.warn.autoNote':
-      'The auto tier only advises today: nothing is converted in this version — that lands in L2.',
+      'The source table was not rewritten: the result is a derived table, and the conversion only affects this card\'s output column.',
     // The 「单位」 settings dialog (top bar): global default tier, pre-confirmations and this
     // workspace's manual constants.
     'menu.units': 'Units',

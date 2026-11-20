@@ -61,6 +61,11 @@ export interface NodeCreateResult {
    * whenever there is nothing to report.
    */
   warnings?: UnitWarningDto[];
+  /**
+   * Pairs the `auto` tier rewrote before computing (units L2b). Absent for every non-auto
+   * node, so the create/patch payload of an ordinary card is unchanged.
+   */
+  unitConversions?: UnitConversionDto[];
 }
 
 /** A compute node as the server reports it (`GET /api/nodes/{id}`). */
@@ -145,6 +150,45 @@ export function normalizeUnitWarnings(raw: unknown): UnitWarningDto[] {
   return out;
 }
 
+/**
+ * One conversion the `auto` tier actually performed (units L2b).
+ *
+ * Published by the backend beside the result it describes, only while that result exists and
+ * only when at least one pair was rewritten — a `strict`/`free`/absent card carries no such
+ * field at all. `from`/`to` are canonical unit spellings and `formula` is the 0-BASED index
+ * of the formula row the rewrite happened in.
+ */
+export interface UnitConversionDto {
+  formula?: number;
+  pair: number;
+  factor: number;
+  from: string;
+  to: string;
+}
+
+/** Coerce a node's wire `unitConversions`; anything malformed is dropped, never guessed. */
+export function normalizeUnitConversions(raw: unknown): UnitConversionDto[] {
+  if (!Array.isArray(raw)) return [];
+  const out: UnitConversionDto[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const record = entry as Record<string, unknown>;
+    if (typeof record.from !== 'string' || typeof record.to !== 'string') continue;
+    if (typeof record.factor !== 'number' || !Number.isFinite(record.factor)) continue;
+    const conversion: UnitConversionDto = {
+      pair: typeof record.pair === 'number' ? record.pair : 0,
+      factor: record.factor,
+      from: record.from,
+      to: record.to,
+    };
+    if (typeof record.formula === 'number' && Number.isInteger(record.formula) && record.formula >= 0) {
+      conversion.formula = record.formula;
+    }
+    out.push(conversion);
+  }
+  return out;
+}
+
 export interface NodeStatusDto {
   nodeId: number;
   state: NodeStateName;
@@ -160,6 +204,8 @@ export interface NodeStatusDto {
    * (dirty / error / cancel) — so an absent field and "nothing to report" are one statement.
    */
   warnings?: UnitWarningDto[];
+  /** Present only under the `auto` tier, and only when something was converted (units L2b). */
+  unitConversions?: UnitConversionDto[];
 }
 
 export type NodeStateName = 'dirty' | 'computing' | 'done' | 'error';
@@ -178,6 +224,8 @@ export interface NodeEvent {
   params?: Record<string, unknown>;
   /** Unit advice riding a `done` push (units L1b / B1); absent when there is none. */
   warnings?: UnitWarningDto[];
+  /** Conversions the `auto` tier performed, riding the same `done` push (units L2b). */
+  unitConversions?: UnitConversionDto[];
 }
 
 export interface MatrixWindow {
@@ -400,6 +448,7 @@ export class BackendClient {
         signatureId?: string;
         state: NodeStateName;
         warnings?: UnitWarningDto[];
+        unitConversions?: UnitConversionDto[];
       }>(this.base, '/nodes', { method: 'POST', body: JSON.stringify(body) });
       return { ok: true, ...r };
     } catch (e) {
@@ -421,6 +470,7 @@ export class BackendClient {
         nodeId: number;
         state: NodeStateName;
         warnings?: UnitWarningDto[];
+        unitConversions?: UnitConversionDto[];
       }>(this.base, `/nodes/${nodeId}`, {
         method: 'PATCH',
         body: JSON.stringify(patch),
@@ -520,6 +570,8 @@ export class BackendClient {
     code?: string;
     /** Unit advice published with this compute (units L1b / B1); absent when none. */
     warnings?: UnitWarningDto[];
+    /** Conversions the `auto` tier performed for this compute (units L2b); absent when none. */
+    unitConversions?: UnitConversionDto[];
   }> {
     try {
       const r = await jsonRequest<{
@@ -527,6 +579,7 @@ export class BackendClient {
         state: NodeStateName;
         resultMatrixIds?: number[];
         warnings?: UnitWarningDto[];
+        unitConversions?: UnitConversionDto[];
       }>(
         this.base,
         `/nodes/${nodeId}/compute`,

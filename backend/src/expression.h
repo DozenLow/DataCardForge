@@ -73,6 +73,54 @@ class ExprEngine {
                                       const std::vector<AliasRange>& aliases = {});
 
   /**
+   * The `+`/`-` conversions an `auto` unit policy performs, keyed by the INDEX of the pair in
+   * the depth-first walk (the order must be the same on the TypeScript side).
+   */
+  struct UnitConversion {
+    int64_t pair = -1;
+    double factor = 0.0;
+    std::string fromUnit;
+    std::string toUnit;
+  };
+
+  /**
+   * Auto-conversion input (units L2b). Present ⇒ the operator-level rewrite below may change
+   * numbers; absent/nullptr ⇒ `evaluate()` behaves exactly as it always has.
+   *
+   * `columnUnits[i]` is the CONVERTIBLE unit of column i (a `units.h` candidate: non-empty
+   * dimension, non-empty unit name), or empty for a column whose unit is not provable. The
+   * engine never parses a header itself — the caller owns the resolution hierarchy and this
+   * context only carries its answer.
+   */
+  struct AutoConvertContext {
+    std::vector<std::string> columnUnits;
+    std::vector<std::string> columnDimensions;
+    std::vector<double> columnFactors;  // multiplier to the dimension's base unit
+  };
+
+  /**
+   * Cell-mode evaluation with an optional auto-conversion policy.
+   *
+   * For EVERY `+`/`-` whose two operands are DIRECT column references, when both columns carry
+   * a convertible unit of the SAME dimension but different units, the right operand is
+   * converted to the left operand's unit (`value * factorRight / factorLeft`) before the
+   * operator runs. Nothing else changes: nested or non-direct operands are never converted,
+   * a cross-dimension pair is never converted (the warning path reports it instead), and
+   * `policy != "auto"` takes the plain path without even looking at `context`.
+   */
+  struct AutoConvertRequest {
+    std::string policy;
+    AutoConvertContext context;
+  };
+  static std::vector<double> evaluateAuto(const std::string& expression,
+                                          const std::vector<std::string>& columnNames,
+                                          const std::vector<std::vector<double>>& columns,
+                                          size_t length,
+                                          const std::vector<AliasRange>& aliases,
+                                          const AutoConvertRequest* request,
+                                          std::vector<UnitConversion>* conversions = nullptr);
+
+  /**
    * Matrix-mode evaluation. Each input is a full matrix (rows×cols). The formula uses
    * matrix semantics: `*` = matmul, TRANSPOSE/DET/INV/SOLVE available. Returns the
    * result as a flat column-major vector with shape written to outRows/outCols.

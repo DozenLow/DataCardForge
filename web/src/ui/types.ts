@@ -25,7 +25,7 @@ import type { SmoothingOptions } from '../core/Smoothing.ts';
 import type { MatrixData } from '../core/MatrixData.ts';
 import type { ChartConfig, ChartSource } from '../charts/chartModel.ts';
 import type { ChartTypeId } from '../charts/chartTypes.ts';
-import type { UnitWarningDto } from '../backend/client.ts';
+import type { UnitConversionDto, UnitWarningDto } from '../backend/client.ts';
 
 export type CardKind = 'matrix' | 'chart' | 'formula';
 
@@ -156,6 +156,12 @@ export interface NodeStatus {
    * there is nothing to report, which is also every card in a clean workspace.
    */
   warnings?: UnitWarningDto[];
+  /**
+   * Pairs the backend's `auto` tier rewrote for THIS result (units L2b). Same session-only
+   * lifetime as `warnings`, and absent unless the card ran under `auto`: it is a report of
+   * what happened to one table, not a promise about the next one.
+   */
+  unitConversions?: UnitConversionDto[];
 }
 
 /** One output declaration plus the server matrix that carries its values. */
@@ -218,11 +224,28 @@ export interface ColumnContract {
  * at all. Typing this as "must have formulas" would force every future signature to
  * pretend it has an empty formula list — the kind of lie that later reads as data.
  */
+/**
+ * The tier a formula card asks the backend to compute under (units L2b).
+ *
+ * `'auto'` is the ONLY value that changes a number: for a `+`/`-` whose operands are direct
+ * column references of the same dimension but different units, the right operand is
+ * converted to the left operand's unit before the operator runs. `strict`/`free`/absent are
+ * numeric no-ops by construction — the backend never reaches the conversion path for them —
+ * and the source table is never rewritten by any tier (the card publishes a derived table).
+ */
+export type UnitPolicy = 'strict' | 'auto' | 'free';
+
 export interface FunctionParams {
   /** Present for expression-shaped signatures (one expression per output column). */
   formulas?: FormulaColumn[];
   /** Present once the user has named an output column. */
   columnContract?: ColumnContract;
+  /**
+   * The effective unit tier this card was pushed under (units L2b). Written by the store on
+   * every push, never edited by the card; a saved file may carry an older value and is
+   * simply overwritten by the current `effectiveUnitPolicy`.
+   */
+  unitPolicy?: UnitPolicy;
   [key: string]: unknown;
 }
 

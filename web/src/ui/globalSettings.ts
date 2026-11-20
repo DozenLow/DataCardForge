@@ -21,8 +21,14 @@
 
 import { candidateByUnit } from '../core/units.ts';
 
-/** The three policy tiers of the decision §二. `strict` is the product default. */
-export type UnitPolicy = 'strict' | 'auto' | 'free';
+// The three policy tiers of the decision §二. `strict` is the product default.
+//
+// The union itself lives in `types.ts` (units L2b) because the tier now also travels to the
+// backend as a node parameter; it is re-exported here so every existing import keeps working
+// and there is exactly one definition of it.
+import type { UnitPolicy } from './types.ts';
+
+export type { UnitPolicy };
 
 export const UNIT_POLICIES: readonly UnitPolicy[] = ['strict', 'auto', 'free'];
 

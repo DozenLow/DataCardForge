@@ -10,8 +10,9 @@
  *     came from when the card has more than one formula;
  *   - `free` shows NOTHING — the tier means "do not check", and a banner would be the checking
  *     the user turned off;
- *   - `auto` shows a "will auto-convert" note and says in words that nothing is converted in
- *     this version (the conversion itself is L2, not this build);
+ *   - `auto` (units L2b) says 「已自动换算」: the backend really did convert the
+ *     same-dimension pairs before computing, the source table was not rewritten, and a
+ *     cross-dimension pair (which the tier refuses to convert) is still named as such;
  *   - every tier leaves the card's own error state alone: a warning is advice, never a failure.
  *
  * The card is mounted directly with an explicit `card.node`, because the DTO plumbing from
@@ -263,21 +264,39 @@ describe('free tier', () => {
 });
 
 describe('auto tier', () => {
-  it('shows a "will auto-convert" note rather than the strict wording', async () => {
+  it('says 「已自动换算」 rather than the strict wording', async () => {
     setGlobalSettings({ unitPolicy: 'auto' });
     const { host } = await mountCard({ warnings: [MISMATCH] });
     const element = banner(host);
     expect(element).not.toBeNull();
     expect(element!.dataset.unitPolicy).toBe('auto');
     const text = element!.textContent ?? '';
-    // The headline says what WILL happen…
-    expect(text).toContain('自动换算');
+    // The headline IS the conclusion (units L2b): the conversion happened.
+    expect(text).toContain('已自动换算');
     // …the entry still names the operands…
     expect(text).toContain('Pos.1 pressure_kpa');
-    // …and the note states plainly that nothing is converted in this build (L2 is later).
-    expect(text).toContain('L2');
-    // The strict sentence ("computed as-is, confirm the header") is not what auto says.
+    expect(text).toContain('Pos.2 height_cm');
+    // …and the note says the SOURCE was not rewritten.
+    expect(text).toContain('源表未被改写');
+    // The strict sentence ("computed as-is, confirm the header") is not what auto says, and
+    // the old "conversion lands in L2" promise is gone — L2b is what shipped.
     expect(text).not.toContain('数值按原样计算');
+    expect(text).not.toContain('换算在 L2 实现');
+  });
+
+  it('says a cross-dimension pair was NOT converted (the tier never guesses)', async () => {
+    setGlobalSettings({ unitPolicy: 'auto' });
+    const { host } = await mountCard({ warnings: [MISMATCH] });
+    const text = banner(host)?.textContent ?? '';
+    expect(text).toContain('不在同一量纲');
+    expect(text).toContain('未换算');
+  });
+
+  it('keeps the card green: a conversion report is not an error', async () => {
+    setGlobalSettings({ unitPolicy: 'auto' });
+    const { host } = await mountCard({ warnings: [MISMATCH] });
+    expect(host.querySelector('.formula-card__error')).toBeNull();
+    expect(host.querySelector('.node-light--done')).not.toBeNull();
   });
 
   it('a workspace override beats the global strict tier', async () => {

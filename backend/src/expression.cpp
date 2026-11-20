@@ -956,6 +956,86 @@ void collectRefs(const NodePtr& node, std::vector<std::string>* out) {
   }
 }
 
+// ── auto unit conversion (units L2b) ───────────────────────────────────
+// Mirrored one-for-one in web/src/core/expression.ts (`applyAutoConvert`). The visit order is
+// the node's own children in order (pre-order, left before right), which is both the order
+// `compileAst` builds the closures in and the order the TS side walks its AST — a conversion
+// list indexed by that order is therefore comparable across the two engines.
+NodePtr makeFactorNode(double factor) {
+  auto n = std::make_shared<Node>();
+  n->kind = NodeKind::Number;
+  n->number = factor;
+  return n;
+}
+
+bool convertibleUnit(const ExprEngine::AutoConvertContext& ctx, int64_t column, size_t* index) {
+  if (column < 0) return false;
+  const size_t i = static_cast<size_t>(column);
+  if (i >= ctx.columnUnits.size() || i >= ctx.columnDimensions.size() ||
+      i >= ctx.columnFactors.size()) {
+    return false;
+  }
+  if (ctx.columnUnits[i].empty() || ctx.columnDimensions[i].empty()) return false;
+  if (!(ctx.columnFactors[i] > 0.0) || !std::isfinite(ctx.columnFactors[i])) return false;
+  *index = i;
+  return true;
+}
+
+// 1 when the operator pair converts, 0 when it provably does not. Anything not decidable
+// (cross-dimension, equal unit, unknown unit, non-direct operand) is 0 — the rule is "convert
+// only what the headers prove", never "convert when in doubt".
+double autoConvertFactor(const ExprEngine::AutoConvertContext& ctx, int64_t leftColumn,
+                         int64_t rightColumn) {
+  size_t left = 0;
+  size_t right = 0;
+  if (!convertibleUnit(ctx, leftColumn, &left)) return 0.0;
+  if (!convertibleUnit(ctx, rightColumn, &right)) return 0.0;
+  // Cross-dimension is NEVER converted: `MPa + s` stays a warning, not a silent product.
+  if (ctx.columnDimensions[left] != ctx.columnDimensions[right]) return 0.0;
+  if (ctx.columnUnits[left] == ctx.columnUnits[right]) return 0.0;
+  // Multiplicative units only (both factors are strictly positive by construction).
+  return ctx.columnFactors[right] / ctx.columnFactors[left];
+}
+
+void applyAutoConvert(const NodePtr& node, const ExprEngine::AutoConvertContext& ctx,
+                      std::vector<ExprEngine::UnitConversion>* found) {
+  if (!node) return;
+  if (node->kind == NodeKind::Binary && node->children.size() == 2 &&
+      (node->op == "+" || node->op == "-")) {
+    NodePtr& left = node->children[0];
+    NodePtr& right = node->children[1];
+    // DIRECT column operands only: a nested call, a literal, a negation or a sub-expression
+    // has no unit of its own that this tier dares to name.
+    if (left && right && left->kind == NodeKind::Column && right->kind == NodeKind::Column) {
+      const double factor = autoConvertFactor(ctx, left->column, right->column);
+      if (factor > 0.0) {
+        size_t leftIndex = 0;
+        size_t rightIndex = 0;
+        convertibleUnit(ctx, left->column, &leftIndex);
+        convertibleUnit(ctx, right->column, &rightIndex);
+        found->push_back(ExprEngine::UnitConversion{
+            static_cast<int64_t>(found->size()), factor, ctx.columnUnits[rightIndex],
+            ctx.columnUnits[leftIndex]});
+        // TWO left-to-right operations per value — `value * factorRight / factorLeft` — the
+        // same locked order the unit-convert card uses. Precomputing a single ratio would
+        // change the last bit for some pairs, and the TS reference would then disagree.
+        const double factorRight = ctx.columnFactors[rightIndex];
+        const double factorLeft = ctx.columnFactors[leftIndex];
+        auto convert = std::make_shared<Node>();
+        convert->kind = NodeKind::Binary;
+        convert->op = "*";
+        convert->children = {right, makeFactorNode(factorRight)};
+        auto scale = std::make_shared<Node>();
+        scale->kind = NodeKind::Binary;
+        scale->op = "/";
+        scale->children = {convert, makeFactorNode(factorLeft)};
+        right = scale;
+      }
+    }
+  }
+  for (auto& child : node->children) applyAutoConvert(child, ctx, found);
+}
+
 }  // namespace
 
 std::vector<double> ExprEngine::evaluate(const std::string& expression,
@@ -966,6 +1046,28 @@ std::vector<double> ExprEngine::evaluate(const std::string& expression,
   auto tokens = tokenize(expression);
   auto colMap = buildColumnMap(columnNames, aliases);
   NodePtr ast = parseAst(tokens, colMap);
+  EvalFn fn = compileAst(ast);
+  return fn(columns, length);
+}
+
+std::vector<double> ExprEngine::evaluateAuto(const std::string& expression,
+                                             const std::vector<std::string>& columnNames,
+                                             const std::vector<std::vector<double>>& columns,
+                                             size_t length, const std::vector<AliasRange>& aliases,
+                                             const AutoConvertRequest* request,
+                                             std::vector<UnitConversion>* conversions) {
+  if (conversions != nullptr) conversions->clear();
+  auto tokens = tokenize(expression);
+  auto colMap = buildColumnMap(columnNames, aliases);
+  NodePtr ast = parseAst(tokens, colMap);
+  // Everything below only READS the tree. The `auto` rewrite is therefore confined to the
+  // returned numbers: it cannot touch a column vector owned by the caller, so the source table
+  // a card reads is never rewritten by a policy tier.
+  if (request != nullptr && request->policy == "auto") {
+    std::vector<UnitConversion> found;
+    applyAutoConvert(ast, request->context, &found);
+    if (conversions != nullptr) *conversions = found;
+  }
   EvalFn fn = compileAst(ast);
   return fn(columns, length);
 }

@@ -341,6 +341,19 @@ target_link_libraries(dc_units_warnings_test PRIVATE dc_core)
 add_test(NAME units_warnings
   COMMAND dc_units_warnings_test ${CMAKE_SOURCE_DIR}/../web/tests/fixtures/units/warnings.json)
 
+# Auto-conversion (units L2b, opt-in tier): `web/tests/fixtures/units/auto-convert.json` is
+# read by this test AND by web/tests/unitsAutoConvert.test.ts. Same-dimension `+`/`-` pairs of
+# direct column operands convert as value*factorRight/factorLeft; cross-dimension, nested and
+# non-auto policies never convert. The test also pins the property that makes the tier safe to
+# ship: `evaluate()` (no policy) is byte-identical to the values it always produced.
+add_executable(dc_units_autoconvert_test tests/units_autoconvert_test.cpp)
+target_link_libraries(dc_units_autoconvert_test PRIVATE dc_core)
+# The second argument is the xlayer expression fixture: replayed under `auto` with no provable
+# unit, it must reproduce `evaluate()` bit for bit (73 expressions).
+add_test(NAME units_autoconvert
+  COMMAND dc_units_autoconvert_test ${CMAKE_SOURCE_DIR}/../web/tests/fixtures/units/auto-convert.json
+          ${CMAKE_SOURCE_DIR}/../web/tests/fixtures/xlayer/expression.v1.json)
+
 # Engine-layer perf gate (docs/decisions/2026-10-29-perf-gate.md): dc_bench calls
 # ExprEngine::evaluate / evaluateMatrix directly — no HTTP, no server, no service restarts.
 # Opt-in like diff_fuzz / nodes_stress: without DC_RUN_BENCH=1 the binary itself exits 101 and
