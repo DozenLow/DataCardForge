@@ -18,7 +18,13 @@
  *   - Columns present on only one side are not reported. A file that gained a column has
  *     not contradicted anything we said before.
  */
-import { resolveConfirmed, resolveUnit, unitSignature, type UnitConfirmations } from '../core/units.ts';
+import {
+  columnUnitResolutions,
+  type UnitResolution,
+  resolveUnit,
+  type UnitConfirmations,
+  type UnitResolutionContext,
+} from '../core/units.ts';
 
 /** One column, as the comparison needs it: its display label plus its resolution state. */
 export interface DriftedColumn {
@@ -64,8 +70,7 @@ export function columnDriftKey(column: { posName: string; annotation: string }):
   return annotation;
 }
 
-function describe(column: { posName: string; annotation: string }, confirmed: string | undefined): DriftedColumn {
-  const resolution = resolveConfirmed(column.annotation, confirmed);
+function describe(column: { posName: string; annotation: string }, resolution: UnitResolution): DriftedColumn {
   return {
     name: column.annotation.trim() !== '' ? column.annotation.trim() : column.posName,
     unit: resolution.state === 'recognized' ? resolution.unit : '',
@@ -80,10 +85,23 @@ function describe(column: { posName: string; annotation: string }, confirmed: st
  * each with the confirmation memory that applied to it — the memory is passed separately
  * because it is keyed by signature, and two versions of a file normally have different
  * signatures.
+ *
+ * Each side resolves through `columnUnitResolutions` with ITS OWN context (units L1b §B2), so
+ * "the unit changed" is judged with the workspace constants and the global pre-confirmations
+ * — the same chain the header chips use. A workspace-level definition therefore never reads
+ * as a drift against itself, and the hint can never disagree with the chips it points at.
  */
 export function detectUnitDrift(
-  before: { columns: ReadonlyArray<{ posName: string; annotation: string }>; confirmations: UnitConfirmations },
-  after: { columns: ReadonlyArray<{ posName: string; annotation: string }>; confirmations: UnitConfirmations },
+  before: {
+    columns: ReadonlyArray<{ posName: string; annotation: string }>;
+    confirmations: UnitConfirmations;
+    context?: UnitResolutionContext;
+  },
+  after: {
+    columns: ReadonlyArray<{ posName: string; annotation: string }>;
+    confirmations: UnitConfirmations;
+    context?: UnitResolutionContext;
+  },
 ): UnitDrift[] {
   const beforeByKey = new Map<string, { column: { posName: string; annotation: string }; index: number }>();
   before.columns.forEach((column, index) => {
@@ -98,8 +116,8 @@ export function detectUnitDrift(
     const previous = beforeByKey.get(key);
     if (!previous || seen.has(key)) return;
     seen.add(key);
-    const old = describe(previous.column, confirmationFor(before.confirmations, before.columns, previous.index));
-    const next = describe(column, confirmationFor(after.confirmations, after.columns, index));
+    const old = describe(previous.column, resolutionAt(before, previous.index));
+    const next = describe(column, resolutionAt(after, index));
     // Nothing changed AND nothing became contested: clean data stays silent.
     if (old.unit === next.unit && old.ambiguous === next.ambiguous) return;
     // A column that had no unit and still has none is agreement (`unknown` twice). Going
@@ -111,24 +129,27 @@ export function detectUnitDrift(
   return drift;
 }
 
-/** The remembered answer for one column of one table — the same rule `columnUnitResolutions` uses. */
-function confirmationFor(
-  confirmations: UnitConfirmations,
-  columns: ReadonlyArray<{ posName: string; annotation: string }>,
-  index: number,
-): string | undefined {
-  const signature = signatureOf(columns);
-  return confirmations[signature]?.[index];
-}
-
 /**
- * Signature of a column list.
+ * The derived unit of one column of one version of a table.
  *
- * Re-exported shape of `unitSignature` so this module has one dependency: the annotations
- * in order, which is exactly the key the confirmation memory is stored under.
+ * Deliberately routed through `columnUnitResolutions` instead of re-deriving the chain here:
+ * the drift hint must use the SAME resolution (constants → confirmation → pre-confirmation →
+ * parse) as the header chips, or it would report a change the chips do not show.
  */
-function signatureOf(columns: ReadonlyArray<{ posName: string; annotation: string }>): string {
-  return unitSignature(columns.map((column) => column.annotation));
+function resolutionAt(
+  side: {
+    columns: ReadonlyArray<{ posName: string; annotation: string }>;
+    confirmations: UnitConfirmations;
+    context?: UnitResolutionContext;
+  },
+  index: number,
+): UnitResolution {
+  const view = columnUnitResolutions(
+    side.columns.map((column) => column.annotation),
+    side.confirmations,
+    side.context,
+  );
+  return view.resolutions[index];
 }
 
 /** Remove the spelling that introduced a unit slot: `_`, whitespace, an opening bracket. */

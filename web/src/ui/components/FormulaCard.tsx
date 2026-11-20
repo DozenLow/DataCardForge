@@ -24,7 +24,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { useAccuracyHint } from '../useAccuracyHint.ts';
 import { MatrixData } from '../../core/MatrixData.ts';
-import { useTranslator, useWorkspace } from '../workspaceStore.ts';
+import { effectiveUnitPolicy, useTranslator, useWorkspace } from '../workspaceStore.ts';
 import { convertibleUnits } from '../../core/units.ts';
 import { registerPort, unregisterPort, type AnchorSide } from '../cardMetrics.ts';
 import { flushOperations, settleOperation } from '../operationSettle.ts';
@@ -417,6 +417,28 @@ export function FormulaCard({
    * i18n key; an unknown code still shows something (generic sentence + raw code) rather
    * than silently swallowing the failure.
    */
+  /** The tier that applies to this workspace (card > workspace > global is a later slice). */
+  const unitPolicy = useWorkspace((state) => effectiveUnitPolicy(state));
+  /**
+   * Unit warnings of this node, presented according to the effective policy tier (units L1b
+   * §B2). The backend emits them beside the numbers it just published; they are ADVICE and
+   * never change a value, a state or a message.
+   *
+   * The three tiers are the decision's (§二), not the card's invention:
+   *   - `strict` (default) — show the mismatches, attributed to the row that produced them;
+   *   - `free`            — the tier means "do not check", so nothing is shown at all: a
+   *                         warning would be the very checking the user turned off;
+   *   - `auto`            — show what WILL happen ("will auto-convert"), stated as a promise
+   *                         of a later slice: the conversion is L2 and nothing is converted
+   *                         here (numbers are never rewritten in this build).
+   */
+  const unitNotice = useMemo(() => {
+    const warnings = card.node?.warnings ?? [];
+    if (warnings.length === 0) return null;
+    if (unitPolicy === 'free') return null;
+    return { policy: unitPolicy, warnings, count: warnings.length };
+  }, [card.node?.warnings, unitPolicy]);
+
   const error = useMemo(() => {
     const status: NodeStatus | null = card.node;
     if (!status || status.state !== 'error') return null;
@@ -787,6 +809,53 @@ export function FormulaCard({
               ) : null}
               {invalidated ? (
                 <p className="formula-card__stale">{t('formula.staleUpstream')}</p>
+              ) : null}
+              {/* Unit advice from the backend, tier-aware (units L1b §B2). It renders below
+                  the rows it is about, and every entry names its own row when the card has
+                  more than one — the `formula` index the server attaches is exactly that. */}
+              {unitNotice ? (
+                <div
+                  className={`formula-card__unit-warn formula-card__unit-warn--${unitNotice.policy}`}
+                  role="status"
+                  data-unit-policy={unitNotice.policy}
+                >
+                  <p className="formula-card__unit-warn-title">
+                    {unitNotice.policy === 'auto'
+                      ? t('unit.warn.autoTitle')
+                      : t('unit.warn.title', { n: unitNotice.count })}
+                  </p>
+                  <ul className="formula-card__unit-warn-list">
+                    {unitNotice.warnings.map((warning, index) => {
+                      const key = `${warning.code}:${warning.formula ?? 'x'}:${index}`;
+                      const op = warning.op;
+                      const messageKey =
+                        warning.code === 'unitMismatch'
+                          ? unitNotice.policy === 'auto'
+                            ? 'unit.warn.autoMismatch'
+                            : 'unit.warn.mismatch'
+                          : 'unit.warn.mismatchUnknown';
+                      return (
+                        <li key={key}>
+                          {warning.formula !== undefined && draft.length > 1 ? (
+                            <span className="formula-card__unit-warn-row">
+                              {t('unit.warn.row', { n: warning.formula + 1 })}{' '}
+                            </span>
+                          ) : null}
+                          <span className="formula-card__unit-warn-text">
+                            {t(messageKey, {
+                              left: warning.left,
+                              right: warning.right,
+                              op,
+                            })}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  {unitNotice.policy === 'auto' ? (
+                    <p className="formula-card__unit-warn-note">{t('unit.warn.autoNote')}</p>
+                  ) : null}
+                </div>
               ) : null}
             </section>
 

@@ -23,6 +23,7 @@ import { columnUnitResolutions } from '../../core/units.ts';
 import { invalidateLayout } from '../cardMetrics.ts';
 import { formatBytes } from '../i18n.ts';
 import { useTranslator, useWorkspace } from '../workspaceStore.ts';
+import { useGlobalSettings } from '../useGlobalSettings.ts';
 import { isChartCard, isMatrixCard, type ChartCardModel } from '../types.ts';
 import {
   CHART_TYPE_ORDER,
@@ -80,6 +81,9 @@ export function ChartCard({
   const cards = useWorkspace((s) => s.cards);
   const showToast = useWorkspace((s) => s.showToast);
   const unitConfirmations = useWorkspace((s) => s.unitConfirmations);
+  /** The workspace + global half of the units resolution chain (units L1b §B2). */
+  const unitConstants = useWorkspace((s) => s.unitConstants);
+  const globalUnitPreconfirm = useGlobalSettings().unitPreconfirm;
   const typeDef = useMemo(() => chartTypeDef(card.config.type), [card.config.type]);
   const tRef = useRef(t);
   tRef.current = t;
@@ -204,6 +208,9 @@ export function ChartCard({
       const { resolutions } = columnUnitResolutions(
         matrix.columns().map((entry) => entry.annotation),
         unitConfirmations,
+        // Identical context to the header chips: a constant that renames a dimension must
+        // move the axis label with it, or the same column would have two units on screen.
+        { constants: unitConstants, preconfirm: globalUnitPreconfirm },
       );
       const resolution = resolutions[source.columnIndex];
       if (!resolution) return undefined;
@@ -212,7 +219,15 @@ export function ChartCard({
       else if (shared !== resolution.unit) return undefined;
     }
     return shared ?? undefined;
-  }, [card.config.type, card.config.sources, typeDef.columnArity, matrices, unitConfirmations]);
+  }, [
+    card.config.type,
+    card.config.sources,
+    typeDef.columnArity,
+    matrices,
+    unitConfirmations,
+    unitConstants,
+    globalUnitPreconfirm,
+  ]);
 
   const option = useMemo(
     () =>

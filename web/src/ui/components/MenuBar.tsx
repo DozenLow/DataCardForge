@@ -2,12 +2,14 @@
  * Application menu bar.
  *
  * Mirrors the Qt menu structure (`File` / `View` + language) so the interaction model
- * stays familiar, with two web-side additions: workspace save/open and CSV export.
+ * stays familiar, with web-side additions: workspace save/open, CSV export and the
+ * 「单位」 menu (units L1b §B2) that opens the global settings + workspace constants dialog.
  */
 import { useEffect, useRef, useState } from 'react';
 
 import { useTranslator, useWorkspace } from '../workspaceStore.ts';
 import type { Locale } from '../i18n.ts';
+import { UnitSettingsDialog } from './UnitSettingsDialog.tsx';
 
 export interface MenuActions {
   onNewTable: () => void;
@@ -44,7 +46,9 @@ export function MenuBar({
   // The help modal is store state (the formula card's "?" opens the same dialog), so menu
   // entries only raise a request — the dialog itself is rendered once by App.
   const openHelp = useWorkspace((s) => s.openHelp);
-  const [open, setOpen] = useState<'file' | 'view' | 'language' | 'help' | null>(null);
+  const [open, setOpen] = useState<'file' | 'view' | 'units' | 'language' | 'help' | null>(null);
+  // The units dialog is owned here: this menu is its only opener (see UnitSettingsDialog).
+  const [unitsOpen, setUnitsOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
 
   // Click-outside / Escape closes whichever menu is open.
@@ -81,7 +85,7 @@ export function MenuBar({
   );
 
   const menu = (
-    id: 'file' | 'view' | 'language' | 'help',
+    id: 'file' | 'view' | 'units' | 'language' | 'help',
     label: string,
     children: React.ReactNode,
   ) => (
@@ -138,6 +142,11 @@ export function MenuBar({
         </>,
       )}
       {menu(
+        'units',
+        t('menu.units'),
+        <>{item(t('menu.unitsSettings'), () => setUnitsOpen(true))}</>,
+      )}
+      {menu(
         'language',
         t('menu.language'),
         <>
@@ -168,6 +177,7 @@ export function MenuBar({
           {item(t('menu.helpErrors'), () => openHelp('errors'))}
         </>,
       )}
+      <UnitSettingsDialog open={unitsOpen} onClose={() => setUnitsOpen(false)} />
     </div>
   );
 }

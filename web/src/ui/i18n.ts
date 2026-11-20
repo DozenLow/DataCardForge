@@ -333,6 +333,50 @@ const dictionaries = {
     'unit.driftToast':
       '单位变化：{n} 列的表头单位与上次不同（如「{column}」{before} → {after}），请在列头确认单位',
 
+    // ── 单位 L1b（三档显示 + 手动常量 + 全局预确认）──────────────────────
+    // `warnings` 是后端随结果一起给出的建议：绝不改写数值，也不改变错误态。严格档把它
+    // 如实说出来；自由计算档不检查、因此不显示；自动换算档的「换算」是 L2 的事，这里只说明
+    // 将会发生什么（决策 §二「标『已换算』」之前的预告）。
+    'unit.warn.title': '单位提示：{n} 处操作数单位不一致',
+    'unit.warn.mismatch':
+      '「{left}」{op}「{right}」：两侧单位不在同一量纲。数值按原样计算，已原样显示；如需要请在列头确认单位或改用单位换算卡',
+    'unit.warn.mismatchUnknown': '单位不一致：{left} {op} {right}',
+    'unit.warn.row': '第 {n} 行',
+    'unit.warn.autoTitle': '单位会自动换算（自动换算档）：数值未被改写',
+    'unit.warn.autoMismatch':
+      '「{left}」{op}「{right}」：同量纲换算将在后续版本自动完成；当前数值与表头均保持原样',
+    'unit.warn.autoNote': '自动换算档目前只做提示：本版本不会改写任何数值，换算在 L2 实现。',
+    // 「单位」设置对话框（顶部菜单）：全局默认档 + 歧义 token 的预确认 + 本工作区手动常量。
+    'menu.units': '单位',
+    'menu.unitsSettings': '单位设置…',
+    'unit.settings.title': '单位设置',
+    'unit.settings.close': '关闭',
+    'unit.settings.policyTitle': '默认档（全局）',
+    'unit.settings.policyHint':
+      '全局默认值；本工作区可在设置里覆盖。严格档只在单位变化/冲突时提示，自动换算档将在 L2 换算，自由计算档不检查。',
+    'unit.settings.policy.strict': '严格（提示冲突）',
+    'unit.settings.policy.auto': '自动换算（L2）',
+    'unit.settings.policy.free': '自由数值计算（不检查）',
+    'unit.settings.preconfirmTitle': '歧义 token 预确认（全局）',
+    'unit.settings.preconfirmHint':
+      '为多义写法（如 g、ms、N）给出应用级默认答案；本工作区的确认或手动常量永远优先。',
+    'unit.settings.preconfirmToken': 'token',
+    'unit.settings.preconfirmUnit': '单位',
+    'unit.settings.preconfirmEmpty': '还没有全局预确认。',
+    'unit.settings.add': '添加',
+    'unit.settings.remove': '删除',
+    'unit.settings.tokenRequired': '请填写 token',
+    'unit.settings.unitRequired': '请选择单位',
+    'unit.constantsTitle': '手动常量（本工作区）',
+    'unit.constantsHint':
+      '把多义写法定义成本项目的物理量（如 g → 加速度 9.80665）。只随本工作区保存，不并入其他工作区。',
+    'unit.constantsToken': 'token',
+    'unit.constantsDimension': '量纲',
+    'unit.constantsFactor': '换算系数',
+    'unit.constantsEmpty': '还没有手动常量。',
+    'unit.constantsInvalid': '量纲不能为空，系数必须是正数',
+    'unit.constantsRemove': '删除',
+
     // ── 单位换算卡（builtin:unit-convert；units v1 P2）────────────────────
     // 换算必须显式：选目标单位、点「换算」，产出新表；源表的数值与表头都不动（决策 §四）。
     'convert.card': '单位换算',
@@ -779,6 +823,52 @@ const dictionaries = {
     'unit.sourceAsserted': 'asserted',
     'unit.driftToast':
       'Units changed: {n} column(s) now resolve differently (e.g. "{column}" {before} → {after}) — confirm them in the table header',
+
+    // ── units L1b (tier display + manual constants + global pre-confirm) ─
+    // `warnings` is advice the backend publishes next to the numbers: it never rewrites a
+    // value and never changes the error state. `strict` says it, `free` does not check and
+    // so does not show it, and `auto` states what WILL happen — the conversion itself is L2.
+    'unit.warn.title': 'Unit warning: {n} operand pair(s) disagree',
+    'unit.warn.mismatch':
+      '"{left}" {op} "{right}": the two sides are in different dimensions. The numbers are computed and shown as-is; confirm the units in the table header or use the unit-conversion card',
+    'unit.warn.mismatchUnknown': 'Unit mismatch: {left} {op} {right}',
+    'unit.warn.row': 'Row {n}',
+    'unit.warn.autoTitle': 'Units will be auto-converted (auto tier): no value was rewritten',
+    'unit.warn.autoMismatch':
+      '"{left}" {op} "{right}": conversions within one dimension will happen automatically in a later version; today the values and headers stay exactly as they are',
+    'unit.warn.autoNote':
+      'The auto tier only advises today: nothing is converted in this version — that lands in L2.',
+    // The 「单位」 settings dialog (top bar): global default tier, pre-confirmations and this
+    // workspace's manual constants.
+    'menu.units': 'Units',
+    'menu.unitsSettings': 'Unit Settings…',
+    'unit.settings.title': 'Unit settings',
+    'unit.settings.close': 'Close',
+    'unit.settings.policyTitle': 'Default tier (global)',
+    'unit.settings.policyHint':
+      'The application default; a workspace may override it. Strict only speaks up when a unit changed or conflicts, auto will convert in L2, free never checks.',
+    'unit.settings.policy.strict': 'Strict (report conflicts)',
+    'unit.settings.policy.auto': 'Auto-convert (L2)',
+    'unit.settings.policy.free': 'Free numeric (no checks)',
+    'unit.settings.preconfirmTitle': 'Ambiguous-token pre-confirmations (global)',
+    'unit.settings.preconfirmHint':
+      'An application-wide default answer for ambiguous spellings (g, ms, N…). A workspace confirmation or manual constant always wins.',
+    'unit.settings.preconfirmToken': 'token',
+    'unit.settings.preconfirmUnit': 'unit',
+    'unit.settings.preconfirmEmpty': 'No global pre-confirmations yet.',
+    'unit.settings.add': 'Add',
+    'unit.settings.remove': 'Remove',
+    'unit.settings.tokenRequired': 'Enter a token',
+    'unit.settings.unitRequired': 'Choose a unit',
+    'unit.constantsTitle': 'Manual constants (this workspace)',
+    'unit.constantsHint':
+      'Define an ambiguous spelling as a physical quantity of this project (e.g. g → acceleration 9.80665). Saved with this workspace only and never merged into another.',
+    'unit.constantsToken': 'token',
+    'unit.constantsDimension': 'dimension',
+    'unit.constantsFactor': 'factor',
+    'unit.constantsEmpty': 'No manual constants yet.',
+    'unit.constantsInvalid': 'The dimension cannot be empty and the factor must be positive',
+    'unit.constantsRemove': 'Remove',
 
     // ── unit conversion card (builtin:unit-convert; units v1 P2) ─────────
     // Conversion is explicit: pick a target unit, press 换算, get a NEW table. The source's

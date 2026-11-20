@@ -55,6 +55,12 @@ export interface NodeCreateResult {
   /** Structured refusal data when ok=false (cycle path etc.). Never user prose. */
   code?: string;
   cyclePath?: number[];
+  /**
+   * Unit advice published with this answer (units L1b / B1): `POST /nodes` and `PATCH
+   * /nodes/{id}` both carry it when the node already has numbers to describe. Absent
+   * whenever there is nothing to report.
+   */
+  warnings?: UnitWarningDto[];
 }
 
 /** A compute node as the server reports it (`GET /api/nodes/{id}`). */
@@ -91,6 +97,54 @@ export interface TrustLookupDto {
   persistence: TrustPersistenceName;
 }
 
+/**
+ * One unit warning of a compute node (units L1b / B1, additive).
+ *
+ * Pure ADVICE: it never changes a number, an error code or a node state — the backend emits
+ * it beside the result it describes and drops it with that result. `left`/`right` are the
+ * table's own column labels (e.g. `Pos.1 pressure_kpa`), `op` is `+ - > < >= <= == !=` or
+ * `IF`, and `formula` is the 0-BASED index of the formula row the warning came from, which is
+ * what lets a multi-row card attach the sentence to the row that produced it.
+ */
+export interface UnitWarningDto {
+  code: string;
+  left: string;
+  right: string;
+  op: string;
+  formula?: number;
+}
+
+/**
+ * Coerce a node's wire `warnings` into the DTO list.
+ *
+ * Total and defensive for the usual reason: this field is data from the wire, a card must
+ * never fail to render because a warning was spelled oddly, and an entry missing a label or
+ * an operator could not be turned into a sentence. Unknown `code`s survive (the UI shows a
+ * generic phrasing) — dropping them would hide the fact that the server said something.
+ */
+export function normalizeUnitWarnings(raw: unknown): UnitWarningDto[] {
+  if (!Array.isArray(raw)) return [];
+  const out: UnitWarningDto[] = [];
+  for (const entry of raw) {
+    if (!entry || typeof entry !== 'object') continue;
+    const record = entry as Record<string, unknown>;
+    if (typeof record.code !== 'string' || record.code === '') continue;
+    if (typeof record.left !== 'string' || typeof record.right !== 'string') continue;
+    if (typeof record.op !== 'string' || record.op === '') continue;
+    const warning: UnitWarningDto = {
+      code: record.code,
+      left: record.left,
+      right: record.right,
+      op: record.op,
+    };
+    if (typeof record.formula === 'number' && Number.isInteger(record.formula) && record.formula >= 0) {
+      warning.formula = record.formula;
+    }
+    out.push(warning);
+  }
+  return out;
+}
+
 export interface NodeStatusDto {
   nodeId: number;
   state: NodeStateName;
@@ -100,6 +154,12 @@ export interface NodeStatusDto {
   /** Structured error identity, present only while `state === "error"`. */
   code?: string;
   params?: Record<string, unknown>;
+  /**
+   * Unit advice about the numbers this node published (units L1b / B1). Present ONLY when
+   * the server has something to say, and cleared by the server whenever those numbers are
+   * (dirty / error / cancel) — so an absent field and "nothing to report" are one statement.
+   */
+  warnings?: UnitWarningDto[];
 }
 
 export type NodeStateName = 'dirty' | 'computing' | 'done' | 'error';
@@ -116,6 +176,8 @@ export interface NodeEvent {
   reason?: DirtyReasonName;
   code?: string;
   params?: Record<string, unknown>;
+  /** Unit advice riding a `done` push (units L1b / B1); absent when there is none. */
+  warnings?: UnitWarningDto[];
 }
 
 export interface MatrixWindow {
@@ -337,6 +399,7 @@ export class BackendClient {
         resultMatrixIds?: number[];
         signatureId?: string;
         state: NodeStateName;
+        warnings?: UnitWarningDto[];
       }>(this.base, '/nodes', { method: 'POST', body: JSON.stringify(body) });
       return { ok: true, ...r };
     } catch (e) {
@@ -354,7 +417,11 @@ export class BackendClient {
     },
   ): Promise<NodeCreateResult> {
     try {
-      const r = await jsonRequest<{ nodeId: number; state: NodeStateName }>(this.base, `/nodes/${nodeId}`, {
+      const r = await jsonRequest<{
+        nodeId: number;
+        state: NodeStateName;
+        warnings?: UnitWarningDto[];
+      }>(this.base, `/nodes/${nodeId}`, {
         method: 'PATCH',
         body: JSON.stringify(patch),
       });
@@ -451,9 +518,16 @@ export class BackendClient {
     reason?: DirtyReasonName;
     resultMatrixIds?: number[];
     code?: string;
+    /** Unit advice published with this compute (units L1b / B1); absent when none. */
+    warnings?: UnitWarningDto[];
   }> {
     try {
-      const r = await jsonRequest<{ nodeId: number; state: NodeStateName; resultMatrixIds?: number[] }>(
+      const r = await jsonRequest<{
+        nodeId: number;
+        state: NodeStateName;
+        resultMatrixIds?: number[];
+        warnings?: UnitWarningDto[];
+      }>(
         this.base,
         `/nodes/${nodeId}/compute`,
         { method: 'POST' },

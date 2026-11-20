@@ -34,6 +34,9 @@ import {
   resolveConfirmed,
   unitSignature,
   type UnitConfirmations,
+  type UnitConstant,
+  type UnitConstants,
+  type UnitResolutionContext,
 } from '../core/units.ts';
 import { DEFAULT_SMOOTHING, type SmoothingOptions } from '../core/Smoothing.ts';
 import { defaultChartConfig, type ChartConfig, type ChartSource } from '../charts/chartModel.ts';
@@ -94,6 +97,7 @@ import type { HelpSection } from './formulaHelp.ts';
 import {
   BackendClient,
   REQUIRED_CAPABILITIES,
+  normalizeUnitWarnings,
   type DirtyReasonName,
   type NodeEvent,
   type NodeStateName,
@@ -384,6 +388,24 @@ export function effectiveUnitPolicy(
   state: Pick<WorkspaceState, 'unitPolicyOverride'>,
 ): UnitPolicy {
   return state.unitPolicyOverride ?? getGlobalSettings().unitPolicy;
+}
+
+/**
+ * The resolution context every unit consumer in this workspace must pass (units L1b §B2).
+ *
+ * Two layers, combined in the one direction the decision names (workspace > global):
+ *   - `constants` — this workspace's manual definitions (`g → acceleration 9.80665`). They are
+ *     workspace-private and travel with the snapshot; nothing here merges another workspace's.
+ *   - `preconfirm` — the GLOBAL pre-confirmation, read live from the settings layer rather
+ *     than copied into the store, so editing the 「单位」 dialog applies immediately.
+ *
+ * Derived at CALL time (never cached): a component that subscribes to `unitConstants` and
+ * the settings re-derives its chips, axis and targets from the same chain.
+ */
+export function unitResolutionContext(
+  state: Pick<WorkspaceState, 'unitConstants'>,
+): UnitResolutionContext {
+  return { constants: state.unitConstants, preconfirm: getGlobalSettings().unitPreconfirm };
 }
 
 /**
@@ -922,7 +944,11 @@ async function ensureScriptNode(
     return { aborted: true };
   }
   if (!existing) {
-    applyNodeSnapshot(card.id, { nodeId, state: result.state ?? 'dirty' });
+    applyNodeSnapshot(card.id, {
+      nodeId,
+      state: result.state ?? 'dirty',
+      ...(result.warnings !== undefined ? { warnings: result.warnings } : {}),
+    });
     const ids =
       result.resultMatrixIds ?? (result.resultMatrixId !== undefined ? [result.resultMatrixId] : []);
     if (ids.length > 0) applyScriptOutputIds(card.id, ids, []);
@@ -1037,7 +1063,11 @@ async function runScriptCardNow(cardId: number, mode: 'clean' | 'debug'): Promis
       return;
     }
 
-    applyNodeSnapshot(cardId, { nodeId: node.nodeId, state: 'done' });
+    applyNodeSnapshot(cardId, {
+      nodeId: node.nodeId,
+      state: 'done',
+      ...(computed.warnings !== undefined ? { warnings: computed.warnings } : {}),
+    });
     applyScriptOutputIds(
       cardId,
       computed.resultMatrixIds ?? [],
@@ -1412,6 +1442,21 @@ interface WorkspaceState {
   /** Set or clear this workspace's policy override (persisted with the snapshot). */
   setUnitPolicyOverride: (policy: UnitPolicy | null) => void;
   /**
+   * Manual unit constants of THIS workspace (units L1b §B2): header token → dimension/factor.
+   *
+   * The workspace-private half of the resolution chain (`g → {acceleration, 9.80665}`). They
+   * travel in the snapshot and are never merged with another workspace's (nesting rule of the
+   * decision §五), and they only ever EXTEND the reading of a header — no number is rewritten.
+   */
+  unitConstants: UnitConstants;
+  /**
+   * Define (or redefine) one manual constant. An unusable definition (empty token, empty
+   * dimension, non-positive factor) is refused and the previous value is kept.
+   */
+  addUnitConstant: (token: string, constant: UnitConstant) => boolean;
+  /** Remove one manual constant. Removing an absent token is a no-op. */
+  removeUnitConstant: (token: string) => void;
+  /**
    * Explicit OUTPUT unit of one formula column (units L1a §2).
    *
    * Stored in `params.formulas[i].unit` and re-asserted into the confirmation memory
@@ -1727,6 +1772,7 @@ function reportUnitDrift(
   previousCards: readonly CardModel[],
   previousMatrices: ReadonlyMap<number, MatrixData>,
   previousConfirmations: UnitConfirmations,
+  previousContext: UnitResolutionContext,
   restoredCards: readonly CardModel[],
   restoredMatrices: ReadonlyMap<number, MatrixData>,
   read: () => WorkspaceState,
@@ -1749,8 +1795,12 @@ function reportUnitDrift(
       const old = oldSource ? previousMatrices.get(oldSource.matrixId) : undefined;
       if (!old) continue;
       for (const drift of detectUnitDrift(
-        { columns: old.columns(), confirmations: previousConfirmations },
-        { columns: next.columns(), confirmations: read().unitConfirmations },
+        { columns: old.columns(), confirmations: previousConfirmations, context: previousContext },
+        {
+          columns: next.columns(),
+          confirmations: read().unitConfirmations,
+          context: unitResolutionContext(read()),
+        },
       )) {
         // Two files of one card can share a quantity name; the same drift is reported once.
         const key = `${card.id}:${source.name}:${drift.stem}`;
@@ -1787,6 +1837,31 @@ function sanitizeUnitConfirmations(raw: unknown): UnitConfirmations {
       columns[index] = unit;
     }
     if (Object.keys(columns).length > 0) out[signature] = columns;
+  }
+  return out;
+}
+
+/**
+ * Sanitise the manual unit constants of a save file (units L1b §B2).
+ *
+ * Same rule as every other restored value: validate, never guess. A token must be a
+ * non-empty string, the dimension a non-empty string and the factor a positive finite
+ * number — anything else is DROPPED rather than repaired, because a constant is the user
+ * telling the resolver what a spelling means and a repaired one would say something they
+ * never wrote. A legacy file without the block restores to `{}` (no definitions).
+ */
+function sanitizeUnitConstants(raw: unknown): UnitConstants {
+  if (!raw || typeof raw !== 'object') return {};
+  const out: Record<string, UnitConstant> = {};
+  for (const [token, value] of Object.entries(raw as Record<string, unknown>)) {
+    if (token.trim() === '') continue;
+    if (!value || typeof value !== 'object') continue;
+    const record = value as { dimension?: unknown; factor?: unknown };
+    if (typeof record.dimension !== 'string' || record.dimension.trim() === '') continue;
+    if (typeof record.factor !== 'number' || !Number.isFinite(record.factor) || record.factor <= 0) {
+      continue;
+    }
+    out[token] = { dimension: record.dimension.trim(), factor: record.factor };
   }
   return out;
 }
@@ -2115,6 +2190,9 @@ async function pushFunctionCard(cardId: number): Promise<void> {
   applyNodeSnapshot(cardId, {
     nodeId,
     state: result.state ?? 'dirty',
+    // Advice about the numbers this answer published (units L1b / B1). Absent when the
+    // answer left the node dirty/uncomputed, which clears the previous result's advice.
+    ...(result.warnings !== undefined ? { warnings: result.warnings } : {}),
   });
   lastPushedSignature.set(cardId, pushSignature);
   if (resultMatrixIds.length > 0) applyOutputIds(cardId, resultMatrixIds);
@@ -2153,11 +2231,36 @@ function syncUnboundReadersOfMatrix(localMatrixId: number): void {
   }
 }
 
-/** Record a node's state on its card (drives the four-state light). */
+/**
+ * Does this node state still describe published numbers? (units L1b / B1)
+ *
+ * The backend clears its warnings whenever it drops the result (`dirty`, `error`, cancel), so
+ * the mirror keeps the same rule: `done`/`computing` may carry advice about the result, every
+ * other state means the result is gone and so is the advice. Keeping a sentence about numbers
+ * nobody can see is the same lie the backend already refuses to tell.
+ */
+function warningsSurvive(state: NodeStatus['state']): boolean {
+  return state === 'done' || state === 'computing';
+}
+
+/**
+ * Record a node's state on its card (drives the four-state light).
+ *
+ * Unit warnings ride along (units L1b / B1) and are SESSION state: they are attached to the
+ * in-memory card only, filtered by `warningsSurvive`, and deliberately never written to a
+ * snapshot — they describe one result of one server node, and a restored workspace has
+ * neither. A caller that has nothing to say about warnings (`undefined`) CLEARS them, which is
+ * what every path without a fresh DTO (create, PATCH, a push) actually means.
+ */
 function applyNodeSnapshot(cardId: number, status: NodeStatus): void {
+  const warnings = status.warnings === undefined || !warningsSurvive(status.state)
+    ? []
+    : normalizeUnitWarnings(status.warnings);
+  const next: NodeStatus = warnings.length > 0 ? { ...status, warnings } : { ...status };
+  if (warnings.length === 0) delete next.warnings;
   useWorkspace.setState((state) => ({
     cards: state.cards.map((card) =>
-      card.id === cardId && isFormulaCard(card) ? { ...card, node: status } : card,
+      card.id === cardId && isFormulaCard(card) ? { ...card, node: next } : card,
     ),
   }));
 }
@@ -2580,6 +2683,24 @@ const outputSlotCache = new Map<
  * is still paging, and each duplicate ends by refreshing again.
  */
 const outputSlotPulls = new Map<number, Promise<boolean>>();
+
+/**
+ * The form of one card that belongs in a save file (units L1b / B1).
+ *
+ * `node` is the session's mirror of a SERVER node, and its `warnings` are advice about the
+ * numbers that particular node published. A save file stores cards, matrices and the
+ * workspace's unit layers — never a live node state — so a restored card starts from "no
+ * node" and re-registers (the same reason its `result` is rebuilt from a fresh pull). Advice
+ * written into the file would then describe numbers nobody has and outlive its own subject.
+ * Only that one field is removed: the rest of the node mirror (id, state) is unchanged and
+ * has been part of the file shape all along.
+ */
+function persistedCard(card: CardModel): CardModel {
+  if (!('node' in card) || !card.node || card.node.warnings === undefined) return card;
+  const node: NodeStatus = { ...card.node };
+  delete node.warnings;
+  return { ...card, node };
+}
 
 interface ResultFetch {
   matrix: MatrixData;
@@ -3519,6 +3640,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     unitConfirmations: {},
     // No override yet: a new workspace inherits the global tier.
     unitPolicyOverride: undefined,
+    // No manual constants yet: every header is read by the registry alone.
+    unitConstants: {},
     propagationFrozen: false,
     blockers: [],
     blockedCardId: null,
@@ -3627,6 +3750,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       const replacedSource = index !== undefined ? previous[index] : undefined;
       const beforeMatrix = replacedSource ? state.matrices.get(replacedSource.matrixId) : undefined;
       const beforeConfirmations = state.unitConfirmations;
+      const beforeContext = unitResolutionContext(state);
       const nextSources =
         index === undefined
           ? entries.map((entry, entryIndex) => ({
@@ -3699,8 +3823,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         const afterMatrix = allocated.matrices.get(allocated.ids[0]);
         const drift = afterMatrix
           ? detectUnitDrift(
-              { columns: beforeMatrix.columns(), confirmations: beforeConfirmations },
-              { columns: afterMatrix.columns(), confirmations: get().unitConfirmations },
+              {
+                columns: beforeMatrix.columns(),
+                confirmations: beforeConfirmations,
+                context: beforeContext,
+              },
+              {
+                columns: afterMatrix.columns(),
+                confirmations: get().unitConfirmations,
+                // This workspace's own constants/pre-confirmations: the swap did not change
+                // them, so both sides are judged by the same chain.
+                context: unitResolutionContext(get()),
+              },
             )
           : [];
         if (drift.length > 0) get().showToast('info', unitDriftMessage(get().locale, drift));
@@ -4900,6 +5034,30 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       set({ unitPolicyOverride: policy === null ? undefined : policy });
     },
 
+    addUnitConstant(token, constant) {
+      // The token is stored as the resolver spells it (trimmed), because it is looked up by
+      // `base.token` — the exact text the header carries. A definition that would make the
+      // resolver act on nothing (empty dimension, a zero/negative/NaN factor) is refused:
+      // inventing a factor is exactly the guessing this whole layer exists to avoid.
+      const key = token.trim();
+      if (key === '') return false;
+      const dimension = constant.dimension.trim();
+      if (dimension === '') return false;
+      if (!Number.isFinite(constant.factor) || constant.factor <= 0) return false;
+      set((state) => ({ unitConstants: { ...state.unitConstants, [key]: { dimension, factor: constant.factor } } }));
+      return true;
+    },
+
+    removeUnitConstant(token) {
+      const key = token.trim();
+      set((state) => {
+        if (!(key in state.unitConstants)) return state;
+        const next = { ...state.unitConstants };
+        delete next[key];
+        return { unitConstants: next };
+      });
+    },
+
     setFormulaUnit(cardId, index, unit) {
       const state = get();
       const card = state.cards.find((c) => c.id === cardId);
@@ -5234,7 +5392,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
             patchUnitRun(cardId, { status: 'idle', code: null, params: null });
             return;
           }
-          applyNodeSnapshot(cardId, { nodeId, state: 'done' });
+          applyNodeSnapshot(cardId, {
+            nodeId,
+            state: 'done',
+            ...(computed.warnings !== undefined ? { warnings: computed.warnings } : {}),
+          });
           // Publish: display cache first, then the lamp, so "done" is never claimed while the
           // numbers are still on the wire (the summary panel's rule, applied here).
           await pullResultIntoCache(cardId);
@@ -5824,6 +5986,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         state: event.state,
         ...(event.code !== undefined ? { code: event.code } : {}),
         ...(event.params !== undefined ? { params: event.params } : {}),
+        // A `done` push carries the advice about the numbers it just published (units L1b /
+        // B1); every other push means the numbers are gone, so the warnings go with them.
+        ...(event.warnings !== undefined ? { warnings: event.warnings } : {}),
       });
       // A finished computation is the trigger to pull the numbers — the display cache is
       // refreshed from the window endpoint, never from a local evaluation.
@@ -5921,11 +6086,15 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // the file shape never depends on which cards happen to be open, and opening one
         // script card later needs no migration.
         env: cloneWorkspaceEnv(state.workspaceEnv),
-        cards: state.cards,
+        cards: state.cards.map(persistedCard),
         matrices,
         // Written unconditionally (like `env`): the file shape never depends on whether a
         // unit happened to be confirmed, and a legacy reader simply ignores the field.
         unitConfirmations: state.unitConfirmations,
+        // Written unconditionally, like `env`: the manual constants are a workspace layer of
+        // their own (units L1b §B2), and a file that has none must still say so rather than
+        // leave a reader guessing whether the field was forgotten. `{}` is the neutral value.
+        unitConstants: state.unitConstants,
         // Present only when this workspace overrides the global tier (units L1a): a file
         // that never set one carries no key at all, so "absent" and "inherit" are the same
         // statement and an older build reads the file unchanged.
@@ -5950,8 +6119,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // (units L1a §3), so it has to be collected before `set` replaces `matrices`. The
       // previous workspace's matrices are gone by the time the restore finishes otherwise.
       const previousMatrices = get().matrices;
-      const previousConfirmations = get().unitConfirmations;
-      const previousCards = get().cards;
+      const previous = get();
+      const previousConfirmations = previous.unitConfirmations;
+      const previousCards = previous.cards;
 
       const matrices = new Map<number, MatrixData>();
       for (const entry of snapshot.matrices) {
@@ -6013,6 +6183,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // The workspace layer travels with its own snapshot; `null` when the file carries no
         // override (inherit the global tier — never the previous workspace's override).
         unitPolicyOverride: normalizeUnitPolicyOverride(snapshot.unitPolicyOverride),
+        // Likewise the manual constants: they describe THIS workspace's project conventions,
+        // so a restore REPLACES them (a legacy file without the block restores to none). A
+        // nested workspace keeps its own definitions and never inherits the parent's.
+        unitConstants: sanitizeUnitConstants(snapshot.unitConstants),
         // A restored script card has no run of its own: the traceback, duration and previews
         // belonged to a node that no longer exists.
         scriptRuns: {},
@@ -6043,7 +6217,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // §3): only a changed/contested resolution is worth a word, and only in strict mode.
       // Clean data, and any auto/free workspace, stay silent — opening a file must never
       // become a confirmation ritual.
-      reportUnitDrift(previousCards, previousMatrices, previousConfirmations, restored, matrices, get);
+      reportUnitDrift(
+        previousCards,
+        previousMatrices,
+        previousConfirmations,
+        // The OLD side is judged by the OLD workspace's constants: a restore replaces them,
+        // and comparing two tables with two different definitions would report a drift the
+        // user never made.
+        unitResolutionContext(previous),
+        restored,
+        matrices,
+        get,
+      );
 
       // Bring the restored state back to the server: the backend's matrix and node ids do
       // not survive a restart, so a restore has to re-register the matrices first and can
@@ -6121,6 +6306,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // …and so did the workspace's policy override: a reset is an empty workspace, which
         // inherits the global tier like a brand-new one.
         unitPolicyOverride: undefined,
+        // Manual constants are workspace data like the confirmations: a reset has none.
+        unitConstants: {},
         trust: initialTrust(),
         propagationFrozen: false,
         blockers: [],

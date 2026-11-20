@@ -17,6 +17,7 @@ import { MatrixData } from '../../core/MatrixData.ts';
 import { columnUnitResolutions, type UnitResolution } from '../../core/units.ts';
 import type { ChartTypeId } from '../../charts/chartTypes.ts';
 import { useTranslator, useWorkspace } from '../workspaceStore.ts';
+import { useGlobalSettings } from '../useGlobalSettings.ts';
 import type { MatrixCardModel } from '../types.ts';
 import { CardShell } from './CardShell.tsx';
 import {
@@ -101,6 +102,10 @@ export function MatrixCard({
 
   const activeMatrixId = card.sources[card.activeSource]?.matrixId ?? -1;
   const unitConfirmations = useWorkspace((s) => s.unitConfirmations);
+  /** This workspace's manual constants — part of the resolution chain (units L1b §B2). */
+  const unitConstants = useWorkspace((s) => s.unitConstants);
+  /** The GLOBAL fallback of that chain: token → pre-confirmed unit (decision §三). */
+  const globalUnitPreconfirm = useGlobalSettings().unitPreconfirm;
   const confirmUnitGroup = useWorkspace((s) => s.confirmUnitGroup);
 
   /**
@@ -113,9 +118,15 @@ export function MatrixCard({
         ? columnUnitResolutions(
             matrix.columns().map((column) => column.annotation),
             unitConfirmations,
+            // Same chain as every other consumer: workspace constants + global
+            // pre-confirmations (units L1b §B2). The chips must never disagree with the axis.
+            {
+              constants: unitConstants,
+              preconfirm: globalUnitPreconfirm,
+            },
           )
         : null,
-    [matrix, unitConfirmations],
+    [matrix, unitConfirmations, unitConstants, globalUnitPreconfirm],
   );
 
   /** Header label for a column, the same expression the table prints. */

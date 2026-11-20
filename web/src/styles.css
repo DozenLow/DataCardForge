@@ -1769,6 +1769,53 @@ body {
   color: var(--text-dim);
 }
 
+/* Unit advice from the backend (units L1b §B2). Amber, never red: a mismatch is a statement
+   about what the numbers MEAN, not a failure — the card still has a green light and every
+   value is shown exactly as computed. `auto` uses the same frame with a dashed edge so the
+   three tiers are distinguishable at a glance (strict = listed conflicts, auto = a promise
+   about a later conversion). */
+.formula-card__unit-warn {
+  margin: 4px 0 0;
+  padding: 4px 6px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--surface-alt);
+  border: 1px solid var(--state-amber);
+  border-radius: 5px;
+}
+
+.formula-card__unit-warn--auto {
+  border-style: dashed;
+}
+
+.formula-card__unit-warn-title {
+  margin: 0;
+  font-weight: 600;
+  color: var(--state-amber);
+}
+
+.formula-card__unit-warn-list {
+  margin: 2px 0 0;
+  padding-left: 16px;
+  list-style: disc;
+}
+
+.formula-card__unit-warn-row {
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.formula-card__unit-warn-text {
+  overflow-wrap: anywhere;
+}
+
+.formula-card__unit-warn-note {
+  margin: 3px 0 0;
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+
 /* The result grid lives in the middle column, under the expressions. */
 .formula-card__result {
   display: flex;
@@ -3596,6 +3643,92 @@ body {
   align-items: center;
   gap: 6px;
   flex: 0 0 auto;
+}
+
+/* ── Unit settings dialog (单位设置; units L1b §B2) ──────────────────── */
+
+.unit-settings__body {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.unit-settings__section + .unit-settings__section {
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.unit-settings__policies {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.unit-settings__policy {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.unit-settings__list {
+  margin: 4px 0 8px;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+}
+
+.unit-settings__entry {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.unit-settings__token {
+  font-weight: 600;
+}
+
+.unit-settings__arrow {
+  color: var(--text-dim);
+}
+
+.unit-settings__value {
+  flex: 1 1 auto;
+}
+
+.unit-settings__remove {
+  font-size: 10.5px;
+}
+
+.unit-settings__form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.unit-settings__input {
+  font-size: 12px;
+  min-width: 0;
+  flex: 0 1 130px;
+}
+
+.unit-settings__input--num {
+  flex: 0 1 90px;
+}
+
+.unit-settings__empty {
+  margin: 4px 0 8px;
+  font-size: 11.5px;
+  color: var(--text-dim);
+}
+
+.unit-settings__error {
+  margin: 4px 0 0;
+  font-size: 11px;
+  color: var(--danger);
 }
 
 .unit-convert__error {

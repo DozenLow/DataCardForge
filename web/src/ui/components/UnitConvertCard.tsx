@@ -41,6 +41,7 @@ import {
   useWorkspace,
   type UnitConvertTarget,
 } from '../workspaceStore.ts';
+import { useGlobalSettings } from '../useGlobalSettings.ts';
 import { CardShell } from './CardShell.tsx';
 import { ROW_HEADER_WIDTH, VirtualTable } from './VirtualTable.tsx';
 
@@ -136,6 +137,9 @@ export function UnitConvertCard({
   /** Own subscription to the display cache: the grid must follow the store, not the props. */
   const displayMatrix = useWorkspace((s) => s.matrices.get(card.displayMatrixId)) ?? resultMatrix;
   const unitConfirmations = useWorkspace((s) => s.unitConfirmations);
+  /** The workspace + global half of the units resolution chain (units L1b §B2). */
+  const unitConstants = useWorkspace((s) => s.unitConstants);
+  const globalUnitPreconfirm = useGlobalSettings().unitPreconfirm;
   const convertUnits = useWorkspace((s) => s.convertUnits);
   const loadFullResult = useWorkspace((s) => s.loadFullResult);
   const run = useWorkspace((s) => s.unitRuns[card.id]);
@@ -157,9 +161,12 @@ export function UnitConvertCard({
         ? columnUnitResolutions(
             sourceMatrix.columns().map((column) => column.annotation),
             unitConfirmations,
+            // A conversion target is only offered when the SOURCE unit is known, so the
+            // source must be read through the same chain as the chip that shows it.
+            { constants: unitConstants, preconfirm: globalUnitPreconfirm },
           ).resolutions
         : [],
-    [sourceMatrix, unitConfirmations],
+    [sourceMatrix, unitConfirmations, unitConstants, globalUnitPreconfirm],
   );
 
   const dimensions = useMemo(() => unitsByDimension(), []);

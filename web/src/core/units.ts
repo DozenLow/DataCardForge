@@ -518,19 +518,110 @@ export interface MatrixUnitView {
 }
 
 /**
+ * One manual unit constant of a WORKSPACE (units L1b §B2, decision §三).
+ *
+ * "g" is the textbook case: a gram or the standard gravity acceleration, and only the
+ * project's author knows which one their instrument means. The entry is the same information
+ * a registry entry carries (`dimension` + `factor` to that dimension's base unit), so a
+ * column whose header resolves to the token behaves exactly like a registered unit after it.
+ * A constant never converts anything by itself: it answers "what does this token MEAN".
+ */
+export interface UnitConstant {
+  readonly dimension: string;
+  readonly factor: number;
+}
+
+/** Manual constants keyed by the token a header carries (`g`, `Gs`, `N`…). */
+export type UnitConstants = Readonly<Record<string, UnitConstant>>;
+
+/**
+ * The EXTRA context a caller can hand `columnUnitResolutions` (units L1b §B2, additive).
+ *
+ * Layer order per column — the resolution chain of the decision §三 (card > workspace >
+ * global), expressed on the one function every consumer already calls:
+ *
+ *   1. a manual CONSTANT of this workspace whose token the header carries  → recognized with
+ *      that dimension/factor (a workspace definition always wins: it is the user saying what
+ *      the ambiguous spelling means in THIS project);
+ *   2. the confirmation memory `[signature][index]` (the workspace's own answers, including
+ *      the explicit output-unit assertions of L1a);
+ *   3. `preconfirm[token]` — the GLOBAL pre-confirmation, the application-wide default;
+ *   4. the resolver's own parse.
+ *
+ * `undefined` context (the two-argument call) must keep the pre-L1b behaviour exactly, so
+ * every step below is skipped when its input is absent.
+ */
+export interface UnitResolutionContext {
+  /** Global pre-confirmation: header token → registered unit (decision §三, global layer). */
+  readonly preconfirm?: Readonly<Record<string, string>>;
+  /** Manual constants of the workspace that owns the table. Never global, never merged. */
+  readonly constants?: UnitConstants;
+}
+
+/** A constant the resolver could not use (unregistered/odd spelling) is skipped, not guessed. */
+function usableConstant(constant: UnitConstant | undefined): UnitConstant | null {
+  if (!constant) return null;
+  const dimension = typeof constant.dimension === 'string' ? constant.dimension.trim() : '';
+  const factor = constant.factor;
+  if (dimension === '') return null;
+  if (typeof factor !== 'number' || !Number.isFinite(factor) || factor <= 0) return null;
+  return { dimension, factor };
+}
+
+/**
+ * A column whose header carries a manually defined constant.
+ *
+ * The token comes from the resolver's own parse (`base.token`), never from a second header
+ * grammar: whatever spelling the resolver read is the spelling the definition is looked up
+ * by, so `wind_g` and `weight_g` share one constant exactly like they share one token.
+ */
+function withConstant(
+  base: UnitResolution,
+  constant: UnitConstant | null,
+): UnitResolution | null {
+  if (!constant || base.token === '') return null;
+  return {
+    state: 'recognized',
+    unit: base.token,
+    token: base.token,
+    span: base.span,
+    candidates: [],
+    // A manually defined constant is a quantity with a dimension, so it is convertible by
+    // construction: that is the whole point of writing `g → acceleration 9.80665` down.
+    scalar: true,
+    dimension: constant.dimension,
+    factor: constant.factor,
+  };
+}
+
+/**
  * Derive every column's unit for one matrix. Pure: the matrix stores no unit, this is always
- * `annotation + confirmation memory`, recomputed at read time so a confirm never has to
- * mutate (or re-serialise) the data.
+ * `annotation + confirmation memory` (plus, optionally, the global pre-confirmations and the
+ * workspace's manual constants), recomputed at read time so a confirm never has to mutate
+ * (or re-serialise) the data.
+ *
+ * The third argument is ADDITIVE: omitted (the pre-L1b two-argument call) it changes nothing
+ * — the same resolution, column for column, as before the context existed.
  */
 export function columnUnitResolutions(
   annotations: readonly string[],
   confirmations: UnitConfirmations,
+  context?: UnitResolutionContext,
 ): MatrixUnitView {
   const signature = unitSignature(annotations);
   const perColumn = confirmations[signature];
-  const resolutions = annotations.map((annotation, index) =>
-    resolveConfirmed(annotation, perColumn?.[index]),
-  );
+  const constants = context?.constants;
+  const preconfirm = context?.preconfirm;
+  const resolutions = annotations.map((annotation, index) => {
+    const base = resolveUnit(annotation);
+    const constant = constants ? usableConstant(constants[base.token]) : null;
+    const manual = withConstant(base, constant);
+    if (manual) return manual;
+    // Workspace confirmation first (the L1a memory, incl. the `'none'` rejection), then the
+    // global pre-confirmation as the fallback the decision calls "the application default".
+    const confirmed = perColumn?.[index] ?? (preconfirm ? preconfirm[base.token] : undefined);
+    return resolveConfirmed(annotation, confirmed);
+  });
   return { signature, resolutions };
 }
 

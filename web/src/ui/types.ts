@@ -25,6 +25,7 @@ import type { SmoothingOptions } from '../core/Smoothing.ts';
 import type { MatrixData } from '../core/MatrixData.ts';
 import type { ChartConfig, ChartSource } from '../charts/chartModel.ts';
 import type { ChartTypeId } from '../charts/chartTypes.ts';
+import type { UnitWarningDto } from '../backend/client.ts';
 
 export type CardKind = 'matrix' | 'chart' | 'formula';
 
@@ -145,6 +146,16 @@ export interface NodeStatus {
   /** Structured error identity from the backend (never user prose). */
   code?: string;
   params?: Record<string, unknown>;
+  /**
+   * Unit advice the backend published WITH the numbers currently shown (units L1b / B1).
+   *
+   * SESSION-ONLY and never persisted: it describes one particular result of one server
+   * node, so a snapshot carrying it would be advice about numbers that are gone. It is
+   * dropped whenever the numbers are (dirty / error / cancel / a fresh create that has not
+   * computed yet), exactly like the server drops its own copy — the field is absent when
+   * there is nothing to report, which is also every card in a clean workspace.
+   */
+  warnings?: UnitWarningDto[];
 }
 
 /** One output declaration plus the server matrix that carries its values. */
@@ -481,6 +492,15 @@ export interface WorkspaceSnapshot {
    * keeps opening — a missing value simply means "no override".
    */
   unitPolicyOverride?: 'strict' | 'auto' | 'free';
+  /**
+   * Manual unit constants of THIS workspace (units L1b §B2): header token → dimension/factor.
+   *
+   * Written unconditionally by `toSnapshot` (like `env`), optional in the TYPE because files
+   * written before L1b are still on users' disks — a missing block simply means "no
+   * definitions". Part of the workspace layer on purpose (decision §五): an embedded workspace
+   * carries its own answers and never merges them into the host's.
+   */
+  unitConstants?: Record<string, { dimension: string; factor: number }>;
   cards: CardSnapshot[];
   matrices: MatrixSnapshot[];
   nextCardId: number;
