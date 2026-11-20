@@ -27,6 +27,7 @@
 #include <string>
 #include <vector>
 
+#include "expression.h"
 #include "json.h"
 #include "matrix_store.h"
 
@@ -113,5 +114,41 @@ struct UnitConvertResult {
  * table — the card model's "never silently convert" rule (decision §四).
  */
 UnitConvertResult evaluateUnitConvert(const std::vector<Column>& input, const Json& params);
+
+// ── Unit warnings (L1b, additive) ────────────────────────────────────────────
+//
+// A WARNING is not a failure: it never changes a number, an error code or a node state. It
+// exists because `height_mm + pressure_kpa` is a number the engine happily computes and a
+// human should not have to find by eye (docs/tasks/2026-11-19-units-l1.md §L1b / B1).
+struct UnitWarning {
+  // "unitMismatch" is the only code today; keep it a field so a later kind (`unitMissing`,
+  // `unitAmbiguous`) is additive rather than a protocol change.
+  std::string code = "unitMismatch";
+  std::string left;   // column label of the left operand, as the table spells it
+  std::string right;  // column label of the right operand
+  std::string op;     // `+`, `-`, `>`, `<`, `>=`, `<=`, `==`, `!=` or `IF`
+};
+
+/** DTO shape of one warning: `{code, left, right, op}`. */
+Json unitWarningToJson(const UnitWarning& warning);
+
+/**
+ * Static check of one expression's column operands.
+ *
+ * Only DIRECT column-reference operands of `+`, `-`, the six comparisons and the two `IF`
+ * branches are inspected (nested calls, literals, `-A` and sub-expressions are skipped).
+ * Both sides are resolved with `resolveUnit` on their ANNOTATION — the label is flattened
+ * ("Pos.1 pressure_kpa"), so it is split with Matrix::labelParsed first — and a warning is
+ * emitted ONLY when both sides are `recognized` AND their dimensions differ. Ambiguous,
+ * unknown and non-convertible (empty-dimension) units prove nothing and stay silent: the
+ * contract is "report only what is provable", never "warn because we are unsure".
+ *
+ * `columnLabels` is the flat label list of the input table (the same list the expression
+ * engine resolves names against). Returns an empty vector for an unparsable expression —
+ * the parser's own error is the caller's business, not the checker's.
+ */
+std::vector<UnitWarning> checkExpressionUnitWarnings(
+    const std::string& expression, const std::vector<std::string>& columnLabels,
+    const std::vector<AliasRange>& aliases = {});
 
 }  // namespace dc

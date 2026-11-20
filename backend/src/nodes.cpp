@@ -1462,6 +1462,7 @@ void NodeRegistry::failNodeLocked(int64_t nodeId, const std::string& code, Json 
   node.dirtyReason = DirtyReason::None;
   node.errorCode = code;
   node.errorParams = std::move(params);
+  node.warnings = Json::array();
   // Drop the previous results: an erroring node must not keep serving the numbers from
   // its last successful run (audit finding: downstream cards read stale values and
   // still displayed state "done"). Script-card extra outputs are results too.
@@ -1528,6 +1529,9 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
   Json unitConvertDetail = Json::object();
   std::vector<std::pair<std::string, std::vector<Column>>> scriptExtras;
   bool cancelled = false;
+  // Unit warnings (builtin:expression-columns only): additive advice, collected in the same
+  // pass as the numbers and published with them. Never consulted by the error path.
+  Json unitWarnings = Json::array();
 
   // Qualified column references for a multi-input card: `A.pos.1`, `B.温度`,
   // `A.[地面速度_μm/s]`. The letter follows the port declaration order (A, B, C …) and the
@@ -1642,6 +1646,17 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
             col.posName = "Pos." + std::to_string(i + 1);
             col.annotation = name;
             col.data = ExprEngine::evaluate(expression, names, data, rowLength, aliases);
+            // Static unit check of the SAME expression, on the SAME column labels the
+            // engine just resolved. It reads the annotations only (no values, no
+            // confirmation memory) and only reports what it can prove, so a column with no
+            // unit suffix or an ambiguous token stays silent. Collected after the
+            // evaluation on purpose: numeric and error behaviour must not depend on it.
+            for (const UnitWarning& warning :
+                 checkExpressionUnitWarnings(expression, names, aliases)) {
+              Json entry = unitWarningToJson(warning);
+              entry.set("formula", Json(static_cast<int64_t>(i)));
+              unitWarnings.push(std::move(entry));
+            }
             columns.push_back(std::move(col));
           }
         }
@@ -1852,9 +1867,12 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
   node.state = NodeState::Done;
   node.dirtyReason = DirtyReason::None;
   node.errorCode.clear();
+  node.warnings = unitWarnings;
   Json done = Json::object({{"nodeId", Json(nodeId)},
                             {"state", Json(std::string("done"))},
                             {"matrixId", Json(node.resultMatrixIds[0])}});
+  // Only present when there is something to say, so a clean card's payload does not grow.
+  if (!node.warnings.items().empty()) done.set("warnings", node.warnings);
   if (node.resultMatrixIds.size() > 1) {
     Json ids = Json::array();
     for (int64_t id : node.resultMatrixIds) ids.push(Json(id));
@@ -1916,6 +1934,9 @@ void NodeRegistry::markStaleLocked(int64_t nodeId, DirtyReason reason) {
   node.state = NodeState::Dirty;
   node.errorCode.clear();
   node.errorParams = Json::object();
+  // Warnings describe the numbers this node published; with no numbers to describe they
+  // would be advice about a result the user is no longer looking at.
+  node.warnings = Json::array();
   // Drop the previous numbers. "dirty" must mean "the values stored here do not describe
   // the current inputs" — the same rule the error path already enforces, for the same
   // audit finding (downstream cards reading stale numbers while showing a live state).

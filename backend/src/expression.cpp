@@ -980,6 +980,57 @@ std::vector<std::string> ExprEngine::references(const std::string& expression,
   return refs;
 }
 
+namespace {
+
+// Only a bare column node counts as a "direct" operand. `-A` is NOT one: negation is a
+// function of the operand, and a unit checker that silently unwrapped it would be guessing
+// (the checker's contract is to report only what it can prove).
+int64_t directColumn(const NodePtr& node) {
+  if (node && node->kind == NodeKind::Column) return static_cast<int64_t>(node->column);
+  return -1;
+}
+
+// Walk the AST and emit one pair per unit-relevant operator. Branching is structural, the
+// same way compileAst compiles: a nested operator is its own pair, so `(A+B)/C` reports the
+// `A + B` pair and nothing about `/` (unit algebra is not modelled here).
+void collectOperandPairs(const NodePtr& node, std::vector<ExprEngine::OperandPair>* out) {
+  if (!node) return;
+  if (node->kind == NodeKind::Binary && node->children.size() == 2) {
+    const std::string& op = node->op;
+    const bool relevant = op == "+" || op == "-" || op == ">" || op == "<" || op == ">=" ||
+                          op == "<=" || op == "==" || op == "!=";
+    if (relevant) {
+      ExprEngine::OperandPair pair;
+      pair.op = op;
+      pair.leftColumn = directColumn(node->children[0]);
+      pair.rightColumn = directColumn(node->children[1]);
+      out->push_back(std::move(pair));
+    }
+  }
+  if (node->kind == NodeKind::Call && node->name == "IF" && node->children.size() == 3) {
+    ExprEngine::OperandPair pair;
+    pair.op = "IF";
+    pair.branch = 1;  // the two values the branch chooses between
+    pair.leftColumn = directColumn(node->children[1]);
+    pair.rightColumn = directColumn(node->children[2]);
+    out->push_back(std::move(pair));
+  }
+  for (const auto& child : node->children) collectOperandPairs(child, out);
+}
+
+}  // namespace
+
+std::vector<ExprEngine::OperandPair> ExprEngine::operandPairs(
+    const std::string& expression, const std::vector<std::string>& columnNames,
+    const std::vector<AliasRange>& aliases) {
+  auto tokens = tokenize(expression);
+  auto colMap = buildColumnMap(columnNames, aliases);
+  NodePtr ast = parseAst(tokens, colMap);
+  std::vector<OperandPair> pairs;
+  collectOperandPairs(ast, &pairs);
+  return pairs;
+}
+
 // ── matrix-mode evaluator ──────────────────────────────────────────────
 // Parallel AST walker that produces MatVal instead of vector<double>.
 // Reuses the same tokenizer/parser/AST; only the evaluation semantics differ.

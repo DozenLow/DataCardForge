@@ -717,4 +717,80 @@ UnitConvertResult evaluateUnitConvert(const std::vector<Column>& input, const Js
   return result;
 }
 
+// ── Unit warnings (L1b) ────────────────────────────────────────────────────────────────
+
+Json unitWarningToJson(const UnitWarning& warning) {
+  return Json::object({{"code", Json(warning.code)},
+                       {"left", Json(warning.left)},
+                       {"right", Json(warning.right)},
+                       {"op", Json(warning.op)}});
+}
+
+namespace {
+
+// The unit of one direct column operand, or nullptr when the column proves nothing.
+// `label` is the flattened display label ("Pos.1 pressure_kpa"); labelParsed() is the same
+// splitter the summary / unit-convert cards use, so the checker reads the annotation the
+// way every other card does instead of inventing a second header grammar.
+const UnitResolution* provableUnit(const std::vector<std::string>& labels,
+                                   const std::vector<UnitResolution>& resolutions,
+                                   const std::vector<bool>& resolvable, int64_t column) {
+  if (column < 0 || static_cast<size_t>(column) >= labels.size()) return nullptr;
+  if (!resolvable[static_cast<size_t>(column)]) return nullptr;
+  const UnitResolution& r = resolutions[static_cast<size_t>(column)];
+  if (r.state != UnitState::Recognized) return nullptr;
+  // Affine/log/empirical units register with an empty dimension: they are labels, not
+  // quantities, so "°C + kPa" is provable of nothing. Comparing them would warn on every
+  // temperature column.
+  if (r.dimension.empty()) return nullptr;
+  return &r;
+}
+
+}  // namespace
+
+std::vector<UnitWarning> checkExpressionUnitWarnings(
+    const std::string& expression, const std::vector<std::string>& columnLabels,
+    const std::vector<AliasRange>& aliases) {
+  std::vector<UnitWarning> warnings;
+  std::vector<ExprEngine::OperandPair> pairs;
+  try {
+    pairs = ExprEngine::operandPairs(expression, columnLabels, aliases);
+  } catch (const ExpressionError&) {
+    // An expression that does not parse has no provable operands. The caller already turned
+    // that failure into an error state; the checker must not raise a second one.
+    return warnings;
+  }
+
+  // Resolve every column once: the same column usually appears in several operators, and
+  // resolveUnit walks the suffix grammar each time.
+  std::vector<UnitResolution> resolutions(columnLabels.size());
+  std::vector<bool> resolvable(columnLabels.size(), false);
+  for (size_t i = 0; i < columnLabels.size(); ++i) {
+    std::string posName;
+    std::string annotation;
+    Matrix::labelParsed(columnLabels[i], &posName, &annotation);
+    resolutions[i] = resolveUnit(annotation);
+    resolvable[i] = !annotation.empty();
+  }
+
+  auto labelOf = [&columnLabels](int64_t column) -> const std::string& {
+    return columnLabels[static_cast<size_t>(column)];
+  };
+
+  for (const auto& pair : pairs) {
+    const UnitResolution* left = provableUnit(columnLabels, resolutions, resolvable, pair.leftColumn);
+    const UnitResolution* right =
+        provableUnit(columnLabels, resolutions, resolvable, pair.rightColumn);
+    if (left == nullptr || right == nullptr) continue;
+    if (left->dimension == right->dimension) continue;
+    UnitWarning warning;
+    warning.code = "unitMismatch";
+    warning.left = labelOf(pair.leftColumn);
+    warning.right = labelOf(pair.rightColumn);
+    warning.op = pair.op;
+    warnings.push_back(std::move(warning));
+  }
+  return warnings;
+}
+
 }  // namespace dc

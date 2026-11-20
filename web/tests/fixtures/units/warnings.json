@@ -1,0 +1,86 @@
+{
+  "comment": "Unit-WARNING fixtures (units L1b / B1, backend side). Each case is one `builtin:expression-columns` card over one input table: `columns` is the table (posName + annotation), `expression` is the formula, and `expectWarnings` is the COMPLETE list of warnings the static check must produce (`[]` means provably nothing). A warning is only advice: no case here changes a number, an error code or a node state, and the runner additionally asserts the card ends in state `done` and that the expression's values are untouched. Read by backend/tests/units_warnings_test.cpp — this file is the referee for the 'report only what is provable' rule in docs/tasks/2026-11-19-units-l1.md §L1b / B1.",
+  "cases": [
+    {
+      "name": "direct-mismatch-add-warns",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "pressure_kpa", "data": [100, 200] },
+        { "posName": "Pos.2", "annotation": "height_cm", "data": [1, 2] }
+      ],
+      "expression": "src.pos.1 + src.pos.2",
+      "expectWarnings": [
+        { "code": "unitMismatch", "left": "Pos.1 pressure_kpa", "right": "Pos.2 height_cm", "op": "+" }
+      ]
+    },
+    {
+      "name": "direct-mismatch-subtract-warns",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "pressure_kpa", "data": [100, 200] },
+        { "posName": "Pos.2", "annotation": "time_min", "data": [1, 2] }
+      ],
+      "expression": "src.pos.1 - src.pos.2",
+      "expectWarnings": [
+        { "code": "unitMismatch", "left": "Pos.1 pressure_kpa", "right": "Pos.2 time_min", "op": "-" }
+      ]
+    },
+    {
+      "name": "comparison-mismatch-warns",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_cm", "data": [180, 170] },
+        { "posName": "Pos.2", "annotation": "mass_kg", "data": [70, 80] }
+      ],
+      "expression": "src.pos.1 >= src.pos.2",
+      "expectWarnings": [
+        { "code": "unitMismatch", "left": "Pos.1 height_cm", "right": "Pos.2 mass_kg", "op": ">=" }
+      ]
+    },
+    {
+      "name": "if-branch-mismatch-warns",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "load_kn", "data": [1, 2] },
+        { "posName": "Pos.2", "annotation": "time_min", "data": [10, 20] },
+        { "posName": "Pos.3", "annotation": "energy_kwh", "data": [3, 4] }
+      ],
+      "expression": "IF(src.pos.1 > 1, src.pos.2, src.pos.3)",
+      "expectWarnings": [
+        { "code": "unitMismatch", "left": "Pos.2 time_min", "right": "Pos.3 energy_kwh", "op": "IF" }
+      ]
+    },
+    {
+      "name": "same-dimension-no-warn",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "height_cm", "data": [180, 170] },
+        { "posName": "Pos.2", "annotation": "height_km", "data": [1, 2] }
+      ],
+      "expression": "src.pos.1 + src.pos.2",
+      "expectWarnings": []
+    },
+    {
+      "name": "ambiguous-operand-no-warn",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "tensile_mpa", "data": [100, 200] },
+        { "posName": "Pos.2", "annotation": "pressure_kpa", "data": [1, 2] }
+      ],
+      "expression": "src.pos.1 + src.pos.2",
+      "expectWarnings": []
+    },
+    {
+      "name": "unknown-operand-no-warn",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "sensor", "data": [1, 2] },
+        { "posName": "Pos.2", "annotation": "pressure_kpa", "data": [3, 4] }
+      ],
+      "expression": "src.pos.1 + src.pos.2",
+      "expectWarnings": []
+    },
+    {
+      "name": "nested-operand-no-warn",
+      "columns": [
+        { "posName": "Pos.1", "annotation": "pressure_kpa", "data": [100, 200] },
+        { "posName": "Pos.2", "annotation": "time_min", "data": [1, 2] }
+      ],
+      "expression": "src.pos.1 + (src.pos.2 * 2)",
+      "expectWarnings": []
+    }
+  ]
+}

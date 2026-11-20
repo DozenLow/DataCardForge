@@ -330,6 +330,17 @@ target_link_libraries(dc_units_test PRIVATE dc_core)
 add_test(NAME units_resolver
   COMMAND dc_units_test ${CMAKE_SOURCE_DIR}/../web/tests/fixtures/units/parse.json)
 
+# Unit WARNINGS (units L1b / B1, backend side): the static check behind the formula card's
+# "these two columns do not measure the same thing" advice. Reads
+# web/tests/fixtures/units/warnings.json and requires EXACTLY the listed warnings per case —
+# including the silent cases (ambiguous / unknown / nested / same-dimension), which are the
+# half of the contract that keeps the warning bar worth reading. Beyond the fixture the test
+# asserts the additive rule: numbers, error code and state are untouched.
+add_executable(dc_units_warnings_test tests/units_warnings_test.cpp)
+target_link_libraries(dc_units_warnings_test PRIVATE dc_core)
+add_test(NAME units_warnings
+  COMMAND dc_units_warnings_test ${CMAKE_SOURCE_DIR}/../web/tests/fixtures/units/warnings.json)
+
 # Engine-layer perf gate (docs/decisions/2026-10-29-perf-gate.md): dc_bench calls
 # ExprEngine::evaluate / evaluateMatrix directly — no HTTP, no server, no service restarts.
 # Opt-in like diff_fuzz / nodes_stress: without DC_RUN_BENCH=1 the binary itself exits 101 and

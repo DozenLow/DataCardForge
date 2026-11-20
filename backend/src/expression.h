@@ -92,6 +92,32 @@ class ExprEngine {
   // matching CompiledExpression.references on the TS side.
   static std::vector<std::string> references(const std::string& expression,
                                              const std::vector<std::string>& columnNames);
+
+  /**
+   * Which flat column each operand of a unit-relevant operator refers to.
+   *
+   * A static-analysis view of the same AST `evaluate()` runs — it computes nothing and
+   * changes nothing. One entry per `+`, `-`, comparison (`> < >= <= == !=`) and `IF`
+   * argument; `leftColumn`/`rightColumn` are indices into `columnNames` and are -1 when
+   * that operand is NOT a direct column reference (a number, a nested call, a sub
+   * expression). Ambiguity is reported as -1 on purpose: a caller that wants to talk
+   * about units must never guess which column a compound operand came from.
+   *
+   * Throws ExpressionError exactly like `evaluate()` for the same input, so a caller that
+   * already computed the expression can call this afterwards and only ever see the same
+   * (already reported) failure.
+   */
+  struct OperandPair {
+    std::string op;  // the binary operator, or "IF" for an if-branch pair
+    int64_t leftColumn = -1;
+    int64_t rightColumn = -1;
+    // `IF(cond, a, b)`: index 1 = the taken/else pair (a, b); 0 = the condition pair.
+    // Binary operators always report 0.
+    int64_t branch = 0;
+  };
+  static std::vector<OperandPair> operandPairs(const std::string& expression,
+                                               const std::vector<std::string>& columnNames,
+                                               const std::vector<AliasRange>& aliases = {});
 };
 
 }  // namespace dc

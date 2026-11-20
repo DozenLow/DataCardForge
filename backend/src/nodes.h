@@ -120,6 +120,13 @@ struct ComputeNode {
   DirtyReason dirtyReason = DirtyReason::None;
   std::string errorCode;            // structured code when state == Error
   Json errorParams = Json::object();
+  // Additive ADVICE, never a state: unit warnings found by a static check of the card's
+  // expressions (units.h `checkExpressionUnitWarnings`). Empty for every card that has
+  // nothing to report and for every signature that does not run the checker, which is why
+  // no existing behaviour or fixture moves. A warning cannot fail a node, change a number
+  // or flip `state` — it is published next to the result and dropped whenever the result
+  // is (docs/tasks/2026-11-19-units-l1.md §L1b / B1).
+  Json warnings = Json::array();
   // Bumped by every definition change (inputs / formula / params). Evaluation runs
   // unlocked (max-headroom), so it must refuse to publish a result computed from a
   // definition that has since been replaced — that would be exactly the "downstream reads

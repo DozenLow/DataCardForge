@@ -1185,6 +1185,7 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
       // "you have not asked me to compute yet" from "your upstream changed".
       if (node->state == NodeState::Dirty)
         out.set("reason", Json(std::string(dirtyReasonName(node->dirtyReason))));
+      if (!node->warnings.items().empty()) out.set("warnings", node->warnings);
     }
     return jsonOk(std::move(out));
   }
@@ -1212,6 +1213,9 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
         out.set("extraOutputs", existing->extraOutputs);
       if (existing->state == NodeState::Dirty)
         out.set("reason", Json(std::string(dirtyReasonName(existing->dirtyReason))));
+      // Additive advice (unit warnings). Absent when there is nothing to report, so a clean
+      // card's DTO is byte-identical to what it was before warnings existed.
+      if (!existing->warnings.items().empty()) out.set("warnings", existing->warnings);
       if (existing->state == NodeState::Error) {
         out.set("code", Json(existing->errorCode));
         out.set("params", existing->errorParams);
@@ -1251,8 +1255,10 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
       }
       nodes_->recomputeSubtree(id);
       const auto node = nodes_->get(id);
-      return jsonOk(Json::object({{"nodeId", Json(static_cast<int64_t>(id))},
-                                  {"state", Json(std::string(node ? nodeName(node->state) : "dirty"))}}));
+      Json patched = Json::object({{"nodeId", Json(static_cast<int64_t>(id))},
+                                   {"state", Json(std::string(node ? nodeName(node->state) : "dirty"))}});
+      if (node && !node->warnings.items().empty()) patched.set("warnings", node->warnings);
+      return jsonOk(std::move(patched));
     }
 
     if (suffix.empty() && req.method == "DELETE") {
@@ -1276,6 +1282,7 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
                                {"state", Json(std::string(nodeName(node->state)))},
                                {"resultMatrixIds", std::move(ids)}});
       if (!node->extraOutputs.items().empty()) out.set("extraOutputs", node->extraOutputs);
+      if (!node->warnings.items().empty()) out.set("warnings", node->warnings);
       if (node->state == NodeState::Error) {
         out.set("code", Json(node->errorCode));
         out.set("params", node->errorParams);
