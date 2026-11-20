@@ -119,6 +119,7 @@ async function mountCard(annotations: string[]): Promise<HTMLElement> {
         onOpenFormula={() => {}}
         onOpenRelationEnum={() => {}}
         onOpenScript={() => {}}
+        onOpenUnitConvert={() => {}}
         onActivate={() => {}}
         onReplaceFile={() => {}}
       />,

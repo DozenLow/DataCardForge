@@ -49,6 +49,14 @@ interface MatrixCardProps {
    * than one of its columns — the same reason the port name, not the column, is the handle.
    */
   onOpenScript: () => void;
+  /**
+   * New unit-conversion card reading this table.
+   *
+   * No column argument, like the script card: the card converts whichever of the table's
+   * columns the user chooses on the card itself, and converting is always an explicit
+   * button press there (nothing is rewritten at creation).
+   */
+  onOpenUnitConvert: () => void;
   onActivate: () => void;
   /** True while a file is being dragged over this card (it would replace its data). */
   dropTarget?: boolean;
@@ -73,6 +81,7 @@ export function MatrixCard({
   onOpenFormula,
   onOpenRelationEnum,
   onOpenScript,
+  onOpenUnitConvert,
   onActivate,
   dropTarget = false,
   onReplaceFile,
@@ -400,6 +409,14 @@ export function MatrixCard({
             }}
           >
             {t('menu.newScriptCard')}
+          </ContextMenuItem>
+          <ContextMenuItem
+            onClick={() => {
+              onOpenUnitConvert();
+              setMenu(null);
+            }}
+          >
+            {t('menu.newUnitConvertCard')}
           </ContextMenuItem>
         </ContextMenu>
       ) : null}

@@ -28,7 +28,7 @@ import {
   setCanvasZoom,
   setWorldElement,
 } from '../cardMetrics.ts';
-import { useTranslator, useWorkspace } from '../workspaceStore.ts';
+import { isUnitConvertCard, useTranslator, useWorkspace } from '../workspaceStore.ts';
 import { isChartCard, isFormulaCard, isMatrixCard, isScriptCard } from '../types.ts';
 import { ConnectionLayer } from '../ConnectionLayer.tsx';
 import { CardShell } from './CardShell.tsx';
@@ -37,6 +37,7 @@ import { FormulaCard, type ResolvedInput } from './FormulaCard.tsx';
 import { EmptyState } from './EmptyState.tsx';
 import { MatrixCard } from './MatrixCard.tsx';
 import { ScriptCard } from './ScriptCard.tsx';
+import { UnitConvertCard } from './UnitConvertCard.tsx';
 
 /** Empty space kept beyond the furthest card, in px: room to keep building outward. */
 const PLANE_PAD = 900;
@@ -119,6 +120,7 @@ export function CardCanvas({
   const renameOutputColumn = useWorkspace((s) => s.renameOutputColumn);
   const addRelationEnumCard = useWorkspace((s) => s.addRelationEnumCard);
   const addScriptCard = useWorkspace((s) => s.addScriptCard);
+  const addUnitConvertCard = useWorkspace((s) => s.addUnitConvertCard);
   const setColumnContract = useWorkspace((s) => s.setColumnContract);
   const view = useWorkspace((s) => s.view);
   const setView = useWorkspace((s) => s.setView);
@@ -523,6 +525,39 @@ export function CardCanvas({
                 const id = addScriptCard([card.id]);
                 if (id !== null) select(id);
               }}
+              onOpenUnitConvert={() => {
+                // Birth binding to this card's active table: one `src` matrix port. Nothing
+                // is converted until the user picks targets on the card.
+                const id = addUnitConvertCard(card.id);
+                if (id !== null) select(id);
+              }}
+            />
+          );
+        }
+
+        // `isFormulaCard` narrows and `isUnitConvertCard` is the signature test (a plain
+        // boolean: a third predicate over the same type would make the branches below
+        // `never`). Asked before the generic formula branch, which owns everything else.
+        if (isFormulaCard(card) && isUnitConvertCard(card)) {
+          // The conversion card is its own body (a picker per column + the result grid):
+          // its parameters are not expressions, so the formula editor would be a lie.
+          const input = card.inputs.find((entry) => entry.target.type === 'matrix');
+          const sourceMatrix = input ? matrices.get(input.target.matrixId) : undefined;
+          return (
+            <UnitConvertCard
+              key={card.id}
+              card={card}
+              resultMatrix={matrices.get(card.displayMatrixId)}
+              sourceColumnNames={
+                sourceMatrix
+                  ? sourceMatrix.columns().map((c) => c.annotation || c.posName)
+                  : []
+              }
+              active={active}
+              closeBlocked={closeBlocked}
+              onActivate={() => bringToFront(card.id)}
+              onClose={() => handleClose(card.id)}
+              onCloseBlocked={() => reportBlocked(card.id)}
             />
           );
         }
@@ -636,6 +671,7 @@ export function CardCanvas({
       renameOutputColumn,
       addRelationEnumCard,
       addScriptCard,
+      addUnitConvertCard,
       setColumnContract,
       dependencies,
       bringToFront,

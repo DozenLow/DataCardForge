@@ -72,6 +72,7 @@ import {
   EXPRESSION_COLUMNS_SIGNATURE,
   INPUT_PORT_SOURCE,
   REGRESSION_SIGNATURE,
+  UNIT_CONVERT_SIGNATURE,
   chartPortId,
 } from './migrate.ts';
 import {
@@ -136,6 +137,80 @@ export type SummaryStatId = (typeof SUMMARY_STATS)[number];
 
 /** The signature behind the 摘要 panel. Published id — frozen, like every signature id. */
 export const SUMMARY_SIGNATURE = 'builtin:summary';
+
+/**
+ * One entry of `params.targets` on a unit-conversion card.
+ *
+ * `from` is NOT optional here even though the wire contract makes it optional: the backend
+ * re-parses the annotation when it is absent, and a column the user confirmed on the data
+ * card (`current_a` → A) still parses `ambiguous` — only an explicit `from` carries that
+ * confirmation across the card boundary (decision §四).
+ */
+export interface UnitConvertTarget {
+  /** 0-based column index in the source table. */
+  column: number;
+  /** The derived (and possibly user-confirmed) source unit. Always sent. */
+  from: string;
+  /** Target unit; must share `from`'s dimension. */
+  to: string;
+}
+
+/**
+ * Session state of one unit-conversion card.
+ *
+ * Deliberately NOT on the card model: `targets` is on the card (it is the signature's
+ * parameter and survives a save), while the lamp, the last error and the local clock are
+ * observations of one compute on this machine — restoring them would present a stale run as
+ * the current one. Same rule as the 摘要 panel's entry and the script card's run state.
+ */
+export interface UnitConvertRunState {
+  status: 'idle' | 'running' | 'done' | 'error';
+  /** Structured error identity from the backend (i18n renders it; never server prose). */
+  code: string | null;
+  /** The backend's structured error params (`column`/`from`/`to`/`unit`/`token`/`name`). */
+  params: Record<string, unknown> | null;
+  /** When the last successful conversion finished (browser clock, labelled as such). */
+  computedAt: number | null;
+}
+
+function emptyUnitConvertRun(): UnitConvertRunState {
+  return { status: 'idle', code: null, params: null, computedAt: null };
+}
+
+/**
+ * Is this card the unit-conversion card?
+ *
+ * A plain boolean, NOT a type predicate, on purpose: `isScriptCard` and `isFormulaCard` both
+ * narrow to `FunctionCardModel`, so a third predicate over that same type collapses the
+ * render dispatch's if/else chain into `never`. The card is a `FunctionCardModel` like every
+ * function card, and each call site narrows with `isFormulaCard` first.
+ */
+export function isUnitConvertCard(card: CardModel): boolean {
+  return card.kind === 'formula' && card.signatureId === UNIT_CONVERT_SIGNATURE;
+}
+
+/**
+ * The `targets` parameter as the wire expects it.
+ *
+ * Reads the card rather than a component's draft, so the array that travels is exactly the
+ * one the user can see on the card. Malformed entries (a hand-edited workspace file) are
+ * dropped instead of being forwarded: the backend answers `badSignatureParams` for those,
+ * and "an entry with no target" is the same thing the UI calls "keep as-is".
+ */
+export function unitConvertTargets(card: FunctionCardModel): UnitConvertTarget[] {
+  const raw = card.params.targets;
+  if (!Array.isArray(raw)) return [];
+  const out: UnitConvertTarget[] = [];
+  for (const entry of raw) {
+    const record = entry as { column?: unknown; from?: unknown; to?: unknown };
+    const column = typeof record?.column === 'number' ? record.column : null;
+    const from = typeof record?.from === 'string' ? record.from : null;
+    const to = typeof record?.to === 'string' ? record.to : null;
+    if (column === null || from === null || to === null || from === '' || to === '') continue;
+    out.push({ column, from, to });
+  }
+  return out;
+}
 
 /** One summary table exactly as the backend returned it. */
 export interface SummaryResultTable {
@@ -1334,6 +1409,31 @@ interface WorkspaceState {
    */
   computeSummary: (cardId: number) => void;
 
+  // ── unit conversion card (`builtin:unit-convert`; units v1 P2) ──────
+  /**
+   * Per-card conversion state, keyed by card id. Never persisted and never on the card
+   * model (see `UnitConvertRunState`).
+   */
+  unitRuns: Record<number, UnitConvertRunState>;
+  /**
+   * Create a unit-conversion card from a source card.
+   *
+   * Modelled on `addRelationEnumCard`: ONE `src` matrix port, `outputs:[{outputId:'result'}]`,
+   * `params:{targets:[]}`, a FRESH (empty) display cache and one dependency edge. Nothing is
+   * converted here — the signature is `explicitCompute`, so the node is born
+   * dirty/`notRequested` and only `convertUnits` asks for numbers.
+   */
+  addUnitConvertCard: (sourceCardId: number, matrixId?: number) => number | null;
+  /**
+   * The ONE trigger for `builtin:unit-convert`: store the targets, sync the node,
+   * `POST /api/nodes/{id}/compute`, then pull the result table into the display cache.
+   *
+   * Explicit only. An upstream change marks the card stale (the backend's own event) and
+   * never re-runs the conversion, because the numbers on screen must not change without the
+   * user asking (decision §四).
+   */
+  convertUnits: (cardId: number, targets: readonly UnitConvertTarget[]) => void;
+
   // ── script card (`builtin:python`) ──────────────────────────────────
   /**
    * Per-card run state, keyed by card id. Never persisted and never on the card model: a
@@ -2212,6 +2312,88 @@ function pullSummaryResult(cardId: number): void {
       result: table,
     });
   });
+}
+
+// ── unit conversion card (`builtin:unit-convert`) ────────────────────────────────────
+//
+// The second `explicitCompute` signature, and it is explicit for a stronger reason than the
+// summary panel: converting REWRITES numbers (in a new table — the source is untouched).
+// Creating the card therefore binds a node and computes nothing; the only trigger is
+// `convertUnits`. Everything downstream of that call is the ordinary function-card path
+// (`pullResultIntoCache` → display cache → dependents), so no number is produced here.
+
+/** Cards with a conversion on the wire: a second click must not race the first. */
+const unitConvertsInFlight = new Set<number>();
+
+/** Merge one patch into a card's conversion state, creating it on first touch. */
+function patchUnitRun(cardId: number, patch: Partial<UnitConvertRunState>): void {
+  useWorkspace.setState((state) => {
+    // The card can be closed while a compute is in flight; the ids restart, so a later card
+    // must never inherit the state of the one that died with the same id.
+    if (!state.cards.some((entry) => entry.id === cardId)) return {};
+    return {
+      unitRuns: {
+        ...state.unitRuns,
+        [cardId]: { ...(state.unitRuns[cardId] ?? emptyUnitConvertRun()), ...patch },
+      },
+    };
+  });
+}
+
+/**
+ * Forget a conversion's numbers when the parameters that produced them changed.
+ *
+ * The backend empties a result matrix the moment it marks a node dirty, and a stale table
+ * under a stale lamp is the same lie the summary panel refuses to tell. The ids survive, so
+ * only the cache and the card's `result` bookkeeping are dropped.
+ */
+function clearUnitConvertResult(cardId: number): void {
+  useWorkspace.setState((state) => {
+    const found = state.cards.find((entry) => entry.id === cardId);
+    // `isFormulaCard` first, for the same narrowing reason as in `convertUnits`.
+    if (!found || !isFormulaCard(found) || !isUnitConvertCard(found)) return {};
+    const card = found;
+    const matrices = new Map(state.matrices);
+    matrices.set(card.displayMatrixId, new MatrixData());
+    return {
+      matrices,
+      cards: state.cards.map((entry) =>
+        entry.id === cardId && isFormulaCard(entry) ? { ...entry, result: null } : entry,
+      ),
+    };
+  });
+}
+
+/**
+ * Mirror one backend node event onto a unit-conversion card.
+ *
+ * The backend is the only authority on staleness: an upstream change arrives as `dirty` +
+ * `upstreamChanged`, and the numbers go with it (never a client-side diff). A `done` event
+ * that this card did not ask for still refreshes the cache — the backend never converts on
+ * its own, so a `done` here can only be the answer to a conversion already requested.
+ */
+function applyUnitConvertEvent(
+  cardId: number,
+  stateName: NodeStateName,
+  code: string | undefined,
+  params: Record<string, unknown> | undefined,
+): void {
+  if (stateName === 'dirty') {
+    clearUnitConvertResult(cardId);
+    patchUnitRun(cardId, { status: 'idle', code: null, params: null });
+    return;
+  }
+  if (stateName === 'error') {
+    clearUnitConvertResult(cardId);
+    patchUnitRun(cardId, { status: 'error', code: code ?? 'internalError', params: params ?? null });
+    return;
+  }
+  if (stateName === 'computing') {
+    patchUnitRun(cardId, { status: 'running' });
+    return;
+  }
+  // `done`: the numbers are pulled by the event handler itself (it calls the ordinary
+  // `pullResultIntoCache`), and the lamp is set when that pull lands.
 }
 
 
@@ -3553,6 +3735,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         scriptRuns: Object.fromEntries(
           Object.entries(current.scriptRuns).filter(([key]) => Number(key) !== id),
         ),
+        // Same rule for a unit-conversion card's last conversion.
+        unitRuns: Object.fromEntries(
+          Object.entries(current.unitRuns).filter(([key]) => Number(key) !== id),
+        ),
         // An offer names a card that no longer exists; keeping it would leave a banner
         selectedId: current.selectedId === id ? null : current.selectedId,
         blockedCardId: current.blockedCardId === id ? null : current.blockedCardId,
@@ -3612,6 +3798,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         unitConfirmations: {},
         // Same for each script card's last run: the nodes are gone with the cards.
         scriptRuns: {},
+        // …and for a unit-conversion card's last conversion.
+        unitRuns: {},
         // The sentence counted the scripts of the workspace that was just emptied; leaving
         // it up would state a fact about cards that no longer exist.
         scriptNotice: null,
@@ -4249,6 +4437,96 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       return cardId;
     },
 
+    addUnitConvertCard(sourceCardId, matrixId) {
+      const state = get();
+      const sourceCard = state.cards.find((c) => c.id === sourceCardId);
+      if (!sourceCard || isChartCard(sourceCard)) return null;
+      // v2: the reference is ONE explicit matrix — the caller may name an output, otherwise
+      // the card captures what the source shows right now and keeps reading it.
+      const targetMatrixId =
+        matrixId ??
+        (isMatrixCard(sourceCard)
+          ? sourceCard.sources[sourceCard.activeSource]?.matrixId
+          : undefined) ??
+        (isFormulaCard(sourceCard) ? sourceCard.displayMatrixId : undefined);
+      if (targetMatrixId === undefined) return null;
+      const owned = isMatrixCard(sourceCard)
+        ? sourceCard.sources.map((entry) => entry.matrixId)
+        : [
+            sourceCard.displayMatrixId,
+            ...sourceCard.outputs
+              .map((output) => output.localMatrixId)
+              .filter((id): id is number => typeof id === 'number'),
+          ];
+      if (!owned.includes(targetMatrixId)) return null;
+      const matrix = state.matrices.get(targetMatrixId);
+      if (!matrix) return null;
+
+      const cardId = state.nextCardId;
+      const displayMatrixId = state.nextMatrixId;
+      const inputs: PortConnection[] = [
+        {
+          portId: INPUT_PORT_SOURCE,
+          target: { type: 'matrix', cardId: sourceCardId, matrixId: targetMatrixId },
+        },
+      ];
+      // Roomy: the picker lists one row per input column (name + source unit + target).
+      const size = { width: 560, height: 460 };
+      const spot = placeOnPlane(
+        { x: sourceCard.x + sourceCard.width + 32, y: sourceCard.y + 40 },
+        size,
+        state.cards,
+      );
+      const card: FunctionCardModel = {
+        kind: 'formula',
+        id: cardId,
+        title: '',
+        ...spot,
+        width: size.width,
+        height: size.height,
+        z: topZ() + 1,
+        createdAt: Date.now(),
+        inputs,
+        signatureId: UNIT_CONVERT_SIGNATURE,
+        // No column is converted until the user says so: `targets: []` is the whole
+        // declaration, and the backend answers it with `badSignatureParams` rather than
+        // copying the table on its own.
+        params: { targets: [] },
+        outputs: [{ outputId: 'result', resultMatrixId: -1 }],
+        node: null,
+        result: null,
+        // The display cache starts EMPTY (the browser computes nothing).
+        displayMatrixId,
+      };
+
+      const cycle = state.dependencies.addDependency(
+        cardId,
+        sourceCardId,
+        inputs.map((input) => input.portId),
+      );
+      if (cycle) {
+        get().showToast(
+          'error',
+          translatorFor(get().locale)('status.cycle', { path: cycle.join(' → ') }),
+        );
+        return null;
+      }
+      const matrices = new Map(state.matrices);
+      matrices.set(displayMatrixId, new MatrixData());
+      set({
+        cards: [...state.cards, card],
+        matrices,
+        dependencies: state.dependencies,
+        nextCardId: cardId + 1,
+        nextMatrixId: displayMatrixId + 1,
+        selectedId: cardId,
+      });
+      revealCard({ ...spot, ...size });
+      // Binds the node (born dirty/notRequested: explicitCompute) — never computes.
+      void syncFunctionCard(cardId);
+      return cardId;
+    },
+
     setPortColumn(cardId, portId, columnIndex) {
       const state = get();
       const card = state.cards.find((c) => c.id === cardId);
@@ -4568,6 +4846,146 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           });
         } finally {
           summaryComputing.delete(cardId);
+        }
+      })();
+    },
+
+    // ── unit conversion card (`builtin:unit-convert`) ─────────────────
+
+    unitRuns: {},
+
+    convertUnits(cardId, targets) {
+      void (async () => {
+        const state = get();
+        const found = state.cards.find((c) => c.id === cardId);
+        // `isFormulaCard` first: two guards narrowing the same branch to the same type leave
+        // the value as `never`, so the kind check comes before the signature check.
+        if (!found || !isFormulaCard(found) || !isUnitConvertCard(found)) return;
+        const card = found;
+        // An empty list would be a card that does nothing (and `badSignatureParams` on the
+        // wire): "convert nothing" is the state the card already starts in.
+        if (targets.length === 0) return;
+        // One conversion per card at a time: two overlapping clicks would race their answers
+        // into the same display cache, and the loser's numbers may belong to another target.
+        if (unitConvertsInFlight.has(cardId)) return;
+        unitConvertsInFlight.add(cardId);
+        const epoch = workspaceEpoch;
+        const nodeIdBefore = card.node?.nodeId ?? null;
+        const params = { targets: targets.map((target) => ({ ...target })) };
+        try {
+          patchUnitRun(cardId, { status: 'running', code: null, params: null });
+          // The declaration travels with the request: one PATCH for an existing node, or the
+          // create that carries the parameters. Either way the node ends up dirty, which is
+          // exactly why the compute below is still needed.
+          set({
+            cards: state.cards.map((entry) =>
+              entry.id === cardId && isFormulaCard(entry)
+                ? { ...entry, params: { ...entry.params, ...params } }
+                : entry,
+            ),
+          });
+          const bindings = portBindingsFor(card, backendMatrixIdFor);
+          if (!bindings) {
+            // The source table has no server id yet (still uploading, or an upstream card
+            // with no result). Nothing authoritative to bind to — say so, do not compute air.
+            patchUnitRun(cardId, { status: 'idle', code: 'upstreamPending', params: null });
+            return;
+          }
+          const existingNodeId =
+            card.node && card.node.nodeId > 0 ? card.node.nodeId : null;
+          const pushed = existingNodeId === null
+            ? await backendClient.createNode(bindings, {
+                signatureId: UNIT_CONVERT_SIGNATURE,
+                params,
+              })
+            : await backendClient.patchNode(existingNodeId, { params, inputs: bindings });
+          if (!pushed.ok || pushed.nodeId === undefined) {
+            if (pushed.code === 'backendUnavailable') {
+              set({ backend: { state: 'offline', error: pushed.code } });
+            }
+            patchUnitRun(cardId, {
+              status: 'error',
+              code: pushed.code ?? 'internalError',
+              params: null,
+            });
+            return;
+          }
+          const nodeId = pushed.nodeId;
+          const stillCurrent = (): boolean =>
+            workspaceEpoch === epoch &&
+            useWorkspace.getState().cards.some((entry) => entry.id === cardId && isUnitConvertCard(entry));
+          if (!stillCurrent()) {
+            // Closed while the request was in flight: the newer intent wins, and a node we
+            // created (rather than reused) would otherwise leak server-side.
+            if (nodeIdBefore === null) void backendClient.deleteNode(nodeId);
+            return;
+          }
+          const resultMatrixIds =
+            pushed.resultMatrixIds ?? (pushed.resultMatrixId !== undefined ? [pushed.resultMatrixId] : []);
+          applyNodeSnapshot(cardId, { nodeId, state: pushed.state ?? 'dirty' });
+          if (resultMatrixIds.length > 0) {
+            // A single-output signature: `result` is ordinal 0, the display matrix.
+            applyScriptOutputIds(cardId, resultMatrixIds, []);
+          }
+          // Comparisons against the PREVIOUS declaration no longer apply: this push is the
+          // declaration the node now carries, so an identical re-push must be recognised.
+          lastPushedSignature.set(cardId, JSON.stringify({ params, inputs: bindings }));
+
+          // The one trigger (decision §四). Never a GET: reading a status must not spend compute.
+          const computed = await backendClient.computeNode(nodeId);
+          if (!stillCurrent()) return;
+          if (!computed.ok) {
+            if (computed.code === 'backendUnavailable') {
+              set({ backend: { state: 'offline', error: computed.code } });
+              patchUnitRun(cardId, { status: 'idle', code: null, params: null });
+            } else {
+              const code = computed.code ?? 'internalError';
+              // A refused compute answers HTTP 400 with `{code, params}`, but the client's
+              // `computeNode` surfaces only the code. The node STATUS carries both, and it is
+              // the same object every other error path reads — so the detail that turns a
+              // code into a sentence (which column, which unit) is read there, never guessed.
+              const status = await backendClient.getNode(nodeId);
+              const params = status?.params ?? {};
+              markNodeError(cardId, code, params);
+              clearUnitConvertResult(cardId);
+              patchUnitRun(cardId, { status: 'error', code, params });
+            }
+            return;
+          }
+          if (computed.resultMatrixIds && computed.resultMatrixIds.length > 0) {
+            applyScriptOutputIds(cardId, computed.resultMatrixIds, []);
+          }
+          if (computed.state === 'error') {
+            const code = computed.code ?? 'internalError';
+            const detail = (computed as typeof computed & ScriptComputeAnswer).params ?? {};
+            // The structured detail (`column`/`from`/`to`/`unit`/`token`) is what turns a code
+            // into a sentence naming the offending column, so it lands on the node AND on the
+            // card's own run state (the panel renders from the latter).
+            markNodeError(cardId, code, detail);
+            clearUnitConvertResult(cardId);
+            patchUnitRun(cardId, { status: 'error', code, params: detail });
+            return;
+          }
+          if (computed.state !== 'done') {
+            // Cancelled or declined: back to "not computed yet" — not a failure.
+            applyNodeSnapshot(cardId, { nodeId, state: computed.state ?? 'dirty' });
+            clearUnitConvertResult(cardId);
+            patchUnitRun(cardId, { status: 'idle', code: null, params: null });
+            return;
+          }
+          applyNodeSnapshot(cardId, { nodeId, state: 'done' });
+          // Publish: display cache first, then the lamp, so "done" is never claimed while the
+          // numbers are still on the wire (the summary panel's rule, applied here).
+          await pullResultIntoCache(cardId);
+          if (!stillCurrent()) return;
+          patchUnitRun(cardId, {
+            status: 'done',
+            code: null,
+            params: null,
+            computedAt: Date.now(),
+          });
+        } finally {
+          unitConvertsInFlight.delete(cardId);
         }
       })();
     },
@@ -5148,7 +5566,25 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       });
       // A finished computation is the trigger to pull the numbers — the display cache is
       // refreshed from the window endpoint, never from a local evaluation.
-      if (event.state === 'done') void pullResultIntoCache(cardId);
+      const pulled = event.state === 'done' ? pullResultIntoCache(cardId) : null;
+      if (pulled) void pulled;
+      // The unit-conversion card mirrors the same events into its own run state (lamp, the
+      // structured error a sentence is built from) and drops its numbers on dirty/error —
+      // the backend has already emptied the result matrix by then.
+      const eventCard = useWorkspace.getState().cards.find((entry) => entry.id === cardId);
+      if (eventCard && isUnitConvertCard(eventCard)) {
+        applyUnitConvertEvent(cardId, event.state, event.code, event.params);
+        // A `done` event nobody here asked for still has to light the card once the numbers
+        // land — the SAME pull as above, awaited rather than started a second time.
+        if (pulled) {
+          void pulled.then(() => {
+            const still = useWorkspace.getState().unitRuns[cardId];
+            if (still && still.status === 'running') {
+              patchUnitRun(cardId, { status: 'done', computedAt: Date.now() });
+            }
+          });
+        }
+      }
       // An armed script card treats "my input changed" exactly like a formula card's node
       // does: it runs again (the user asked for formula-like behaviour after the first run).
       //
@@ -5297,6 +5733,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // A restored script card has no run of its own: the traceback, duration and previews
         // belonged to a node that no longer exists.
         scriptRuns: {},
+        // Likewise a conversion: the targets are the card's PARAMETER (restored above), but
+        // the last run's lamp and its numbers were that node's.
+        unitRuns: {},
         // The caller knows the file's hash (it read the bytes); trust starts empty so a file
         // can never be treated as trusted by accident while that lookup is in flight.
         trust: initialTrust(),
@@ -5387,6 +5826,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // must never be answered for a card that inherits the same id).
         summaries: {},
         scriptRuns: {},
+        unitRuns: {},
         // Confirmations belonged to the matrices that were just dropped.
         unitConfirmations: {},
         trust: initialTrust(),

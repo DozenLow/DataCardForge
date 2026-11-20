@@ -43,6 +43,14 @@ export class WorkspaceFormatError extends Error {
 export const EXPRESSION_COLUMNS_SIGNATURE = 'builtin:expression-columns';
 /** Second built-in: two cell ports, no formula parameters, signature-fixed output shape. */
 export const REGRESSION_SIGNATURE = 'builtin:linear-regression';
+/**
+ * Units v1 P2: the unit-conversion card (`builtin:unit-convert`).
+ *
+ * One matrix port (`src`) in, one whole table out, K = 1 and `explicitCompute` — creating
+ * the card rewrites nobody's numbers, `POST /api/nodes/{id}/compute` does, and only after
+ * the user picked target units (docs/decisions/2026-11-18-units-v1.md §四).
+ */
+export const UNIT_CONVERT_SIGNATURE = 'builtin:unit-convert';
 
 /**
  * Port id a function card uses for its single matrix input.

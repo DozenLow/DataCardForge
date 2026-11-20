@@ -225,6 +225,13 @@ const dictionaries = {
     'formula.error.unknownSignature': '未知函数签名「{name}」',
     'formula.error.badSignatureParams': '函数参数不完整或非法（缺少「{name}」）',
     'formula.error.internalError': '内部错误（函数计算未完成）',
+    // units v1 P2 — the conversion card's structured failures (decision §四). Each one is a
+    // refusal, never a silent conversion; `{column}` is the 0-based index the backend named.
+    'formula.error.unitMismatch': '第 {column} 列量纲不同：「{from}」不能换算为「{to}」',
+    'formula.error.unitNotScalar': '「{unit}」不是标量单位，不能换算（只做标签）',
+    'formula.error.unitAmbiguous': '第 {column} 列单位待确认「{token}」— 先在数据卡确认',
+    'formula.error.unitUnknown': '第 {column} 列没有可识别的单位 — 先在数据卡确认',
+    'formula.error.unknownUnit': '未知单位「{unit}」',
 
     // 函数卡三区布局（左：输入 / 右上：公式 / 右下：输出）
     'formula.zoneInputs': '输入',
@@ -263,6 +270,7 @@ const dictionaries = {
     'menu.newFormula': '新建公式卡…',
     'menu.newRelationEnum': '新建关系枚举卡…',
     'menu.newScriptCard': '新建脚本卡…',
+    'menu.newUnitConvertCard': '新建单位换算卡…',
     'status.needTwoColumns': '「{type}」至少需要 2 列数据，该表只有 {have} 列',
     'relation.card': '关系枚举',
     'relation.pair': '{x}：{y}',
@@ -313,6 +321,40 @@ const dictionaries = {
     'unit.cancel': '取消',
     'unit.unnamedColumn': '第 {n} 列',
     'unit.labelOnly': '仅标签',
+
+    // ── 单位换算卡（builtin:unit-convert；units v1 P2）────────────────────
+    // 换算必须显式：选目标单位、点「换算」，产出新表；源表的数值与表头都不动（决策 §四）。
+    'convert.card': '单位换算',
+    'convert.columns': '列',
+    'convert.zoneColumns': '列与单位',
+    'convert.zoneResult': '换算结果',
+    'convert.column': '列',
+    'convert.sourceUnit': '源单位',
+    'convert.targetUnit': '目标单位',
+    'convert.keep': '保持原样',
+    'convert.notConvertible': '不可换算',
+    'convert.notConvertibleTip': '「{unit}」不是标量单位（温度/对数/经验标度），v1 只显示标签、不做换算',
+    'convert.needSource': '先在数据卡确认单位',
+    'convert.needSourceTip': '该列单位待确认（「{token}」）或没有单位 — 回到数据卡点击表头单位确认后再换算',
+    'convert.confirmedSource': '已确认：{unit}',
+    'convert.convert': '换算',
+    'convert.reconvert': '重新换算',
+    'convert.converting': '换算中…',
+    'convert.edited': '目标单位已修改 — 点「换算」才会产出新表',
+    'convert.done': '换算完成（{time}，本地时间）',
+    'convert.resultPending': '尚未换算 — 选好目标单位后点「换算」',
+    'convert.resultStale': '上游已变 — 上次换算的结果已失效，点「换算」重算',
+    'convert.resultError': '换算失败 — 见上方提示',
+    'convert.nothingChosen': '还没有选目标单位：所有列都保持原样',
+    'convert.export': '导出 CSV',
+    'convert.noSource': '输入表还没有数据',
+    'convert.rowHeader': 'No.{n}',
+    'convert.noUnitColumn': '无单位',
+    'convert.unitAmbiguousShort': '待确认',
+    'convert.ambiguous': '待确认「{token}」',
+    'convert.unknown': '无单位',
+    'convert.error.upstreamPending': '上游表尚未上传到后端，稍后再换算',
+    'convert.error.name': '列',
 
     // 帮助（公式 / 函数说明）：菜单项、卡片上的「?」与悬停提示共用同一份文案。
     // 签名（Pos.1、SUM(c)…）是代码，保持字面量；这里只有散文，因此两个语言都齐。
@@ -614,6 +656,14 @@ const dictionaries = {
     'formula.error.unknownSignature': "Unknown function signature '{name}'",
     'formula.error.badSignatureParams': "Function parameters are incomplete or invalid (missing '{name}')",
     'formula.error.internalError': 'Internal error (the function did not finish)',
+    // units v1 P2 — the conversion card's structured failures (decision §四).
+    'formula.error.unitMismatch':
+      'Column {column} has a different dimension: "{from}" cannot be converted to "{to}"',
+    'formula.error.unitNotScalar': '"{unit}" is not a scalar unit and cannot be converted (label only)',
+    'formula.error.unitAmbiguous':
+      'The unit of column {column} is unconfirmed ("{token}") — confirm it on the data card first',
+    'formula.error.unitUnknown': 'Column {column} carries no recognisable unit — confirm it on the data card first',
+    'formula.error.unknownUnit': 'Unknown unit "{unit}"',
 
     // Function card three-zone layout (left: inputs / top-right: formulas / bottom-right: outputs)
     'formula.zoneInputs': 'Inputs',
@@ -654,6 +704,7 @@ const dictionaries = {
     'menu.newFormula': 'New Formula Card…',
     'menu.newRelationEnum': 'New Relation Enumeration Card…',
     'menu.newScriptCard': 'New Script Card…',
+    'menu.newUnitConvertCard': 'New unit-conversion card…',
     'status.needTwoColumns': '"{type}" needs at least 2 columns; this table has {have}',
     'relation.card': 'Relation enumeration',
     'relation.pair': '{x} : {y}',
@@ -705,6 +756,44 @@ const dictionaries = {
     'unit.cancel': 'Cancel',
     'unit.unnamedColumn': 'Column {n}',
     'unit.labelOnly': 'label only',
+
+    // ── unit conversion card (builtin:unit-convert; units v1 P2) ─────────
+    // Conversion is explicit: pick a target unit, press 换算, get a NEW table. The source's
+    // numbers and its annotations are never touched (decision §四).
+    'convert.card': 'Unit conversion',
+    'convert.columns': 'columns',
+    'convert.zoneColumns': 'Columns & units',
+    'convert.zoneResult': 'Converted table',
+    'convert.column': 'Column',
+    'convert.sourceUnit': 'Source unit',
+    'convert.targetUnit': 'Target unit',
+    'convert.keep': 'Keep as-is',
+    'convert.notConvertible': 'Not convertible',
+    'convert.notConvertibleTip':
+      '"{unit}" is not a scalar unit (temperature / logarithmic / empirical scale); v1 shows the label and never converts it',
+    'convert.needSource': 'Confirm the unit on the data card first',
+    'convert.needSourceTip':
+      "This column's unit is unconfirmed (\"{token}\") or absent — confirm it on the data card header, then convert",
+    'convert.confirmedSource': 'Confirmed: {unit}',
+    'convert.convert': 'Convert',
+    'convert.reconvert': 'Convert again',
+    'convert.converting': 'Converting…',
+    'convert.edited': 'Target units changed — press Convert to produce the table',
+    'convert.done': 'Converted ({time}, local time)',
+    'convert.resultPending': 'Not converted yet — pick a target unit, then press Convert',
+    'convert.resultStale': 'Upstream changed — the last conversion is invalid; press Convert',
+    'convert.resultError': 'The conversion failed — see the message above',
+    'convert.nothingChosen': 'No target unit chosen yet: every column stays as-is',
+    'convert.export': 'Export CSV',
+    'convert.noSource': 'The input table has no data yet',
+    'convert.rowHeader': 'No.{n}',
+    'convert.noUnitColumn': 'no unit',
+    'convert.unitAmbiguousShort': 'unconfirmed',
+    'convert.ambiguous': 'unconfirmed "{token}"',
+    'convert.unknown': 'no unit',
+    'convert.error.upstreamPending':
+      'The upstream table is not uploaded to the backend yet — try again shortly',
+    'convert.error.name': 'Column',
 
     // Help (formula / function reference): the menu entries, the card's "?" and the hover
     // tooltips all read these same strings.
