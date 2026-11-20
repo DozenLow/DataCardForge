@@ -65,7 +65,8 @@
   - [ImPlot v1.1 API 大改](lessons/implot-v1.1-api.md)
   - [ImGui Docking 下 PushStyleColor 的坑](lessons/imgui-docking-pushstylecolor.md)
 - 🧾 **任务书**（`tasks/`）— 一次会话可完成的执行切片：前置条件、契约红线、验收命令
-  - [单位 L1（作用域骨架+显式输出单位+漂移提示）](tasks/2026-11-19-units-l1.md) ← 🚧 开工；L1a 先行，L1b 随后
+  - [单位 L2（白名单继承+自动换算档；做完即停，L3 搁置）](tasks/2026-11-19-units-l2.md) ← 🚧 开工
+  - [单位 L1（作用域骨架+显式输出单位+漂移提示）](tasks/2026-11-19-units-l1.md) ← ✅ 已合入（d4d9454/be5c4f9/750af78）
   - [单位 v1（P1 识别/确认/轴单位 · P2 换算卡 · P3 提示）](tasks/2026-11-18-units-v1.md) ← P1+P2 已合入；P3 并入[单位感知阶梯](decisions/2026-11-19-units-awareness-p3-and-formula-output.md)
   - [摘要面板 P2（前端）](tasks/2026-10-29-summary-p2-panel.md) ← 待开工，被「结果预览 / 稠密帧」阻塞
 - 🗃 **样本数据**（`sampleData/`）— 合成数据，供演示与手工验证；生成脚本可复现
