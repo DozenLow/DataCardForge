@@ -151,10 +151,13 @@ UI 只传单卡），补口只会克隆首源（`addScriptPort` 把新口绑到 
 - **G1（S1）**：`window.addEventListener('contextmenu', e => e.preventDefault(), {capture:true})`。
   **只 `preventDefault`、不 `stopPropagation`**——四处自绘菜单（表头/结果头/输出行/裸画布）
   全是 React `onContextMenu`，事件照常冒泡，行为零回归，只是原生菜单没了。**编辑面暂时豁免**
-  （`closest('input,textarea,[contenteditable]')` 放行，输入框/CodeMirror 还能用浏览器粘贴菜单）。
+  （`closest('input, textarea, select, [contenteditable="true"], .cm-content')` 放行，输入框/CodeMirror
+  还能用浏览器粘贴菜单；G2 判定编辑面不可只靠该属性，`plaintext-only`/空值也要认）。
 - **G2（S2）**：`EditingSurface` 适配器 + 自绘编辑菜单（复制/剪切/粘贴/全选），完成后**删豁免**，
   屏蔽扩到全应用。顺序反了脚本编辑器会有一段时间粘贴不了。
-- 键盘唤起（Shift+F10 / 菜单键）不拦：无前置 pointerdown 就不武装，键盘用户保持原样。
+- **键盘唤起（Shift+F10 / 菜单键）**：G1 按 target 屏蔽原生菜单，键盘/鼠标一视同仁（符合「全屏蔽」
+  裁决）；但四处自绘菜单是 React `onContextMenu`，键盘事件同样触发，故**键盘用户仍能打开自绘菜单**，
+  无障碍不退化。pointer 武装态属 G3（拖/点裁决），不属 G1（纯屏蔽）——G1 不做 pointer 谓词。
 
 `EditingSurface` 接口（菜单不认 CodeMirror）：
 
