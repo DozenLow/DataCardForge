@@ -27,7 +27,7 @@
 - 🧭 **项目演进史**（`history.md`）— 把决策/日志/踩坑/审计按因果链串成一条历史：四个时代、四条螺旋线、教训清单与现状
   - [项目演进史（DataCardForge）](history.md) · [EN](history.en.md) ← **先读这篇再进各分册**
 - 📌 **决策记录**（`decisions/`）— 已经拍板、影响后续的方向性结论
-  - [单位感知阶梯：P3 提示与公式输出单位的统一规划](decisions/2026-11-19-units-awareness-p3-and-formula-output.md) ← 📝 **草案/讨论中**：量纲推断 L1→L3，只声明能证明的
+  - [单位感知阶梯与三档策略：P3 提示与公式输出单位](decisions/2026-11-19-units-awareness-p3-and-formula-output.md) ← 🧭 **方向已拍板**：L1→L3 推断 × 严格/自动/自由三档，卡>工作区>全局 作用域
   - [单位 v1：列元数据、三态识别、组级确认、显式换算](decisions/2026-11-18-units-v1.md) ← **已实施 P1+P2**：单位是派生元数据，数值永不自动改写
   - [阻塞闸门：冻结传播、告警、红框标出节点（计算错误不算阻塞）](decisions/2026-11-17-blocking-gate.md) ← 停下来但保留一切状态，原因消失自动恢复
   - [脚本卡的自动运行：clean 成功一次后与公式卡同频](decisions/2026-11-17-script-autorun.md) ← **最新：首次手点，之后随数据自动重算**
