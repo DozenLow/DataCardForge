@@ -39,6 +39,13 @@ export interface ColumnUnitChip {
   ambiguous: boolean;
   /** Hover text (the card supplies a localised sentence). */
   title?: string;
+  /**
+   * Provenance short label drawn after the unit (`inherited` → 继承, units L2a).
+   *
+   * A unit the user asserted and a unit DERIVED from the expression must not look alike: the
+   * label states where the value came from without changing it.
+   */
+  provenance?: string;
 }
 
 export interface VirtualTableProps {
@@ -295,6 +302,9 @@ export function VirtualTable({
                     }
                   >
                     <span className="vtable__unit-label">{unit.label}</span>
+                    {unit.provenance ? (
+                      <span className="vtable__unit-provenance">{unit.provenance}</span>
+                    ) : null}
                     {unit.ambiguous ? (
                       <span className="vtable__unit-mark" aria-hidden="true">
                         ?

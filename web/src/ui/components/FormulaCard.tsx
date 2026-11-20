@@ -25,7 +25,13 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAccuracyHint } from '../useAccuracyHint.ts';
 import { MatrixData } from '../../core/MatrixData.ts';
 import { effectiveUnitPolicy, useTranslator, useWorkspace } from '../workspaceStore.ts';
-import { convertibleUnits } from '../../core/units.ts';
+import { useGlobalSettings } from '../useGlobalSettings.ts';
+import {
+  candidateByUnit,
+  columnUnitResolutions,
+  convertibleUnits,
+  unitSignature,
+} from '../../core/units.ts';
 import { registerPort, unregisterPort, type AnchorSide } from '../cardMetrics.ts';
 import { flushOperations, settleOperation } from '../operationSettle.ts';
 import type { FunctionCardModel, NodeStatus } from '../types.ts';
@@ -42,7 +48,7 @@ import {
 } from './ContextMenu.tsx';
 import { HoverHelp, useHoverHelp } from './HoverHelp.tsx';
 import { SummaryPanel } from './SummaryPanel.tsx';
-import { ROW_HEADER_WIDTH, VirtualTable } from './VirtualTable.tsx';
+import { ROW_HEADER_WIDTH, VirtualTable, type ColumnUnitChip } from './VirtualTable.tsx';
 
 /**
  * Readable names for the relation signature's five output columns.
@@ -124,6 +130,14 @@ interface FormulaCardProps {
   onClose: () => void;
   onCloseBlocked: () => void;
   onActivate: () => void;
+  /**
+   * Adopt the user's output-unit pick for a column of the RESULT table (units L2a).
+   *
+   * The inherited unit lives on the result column, and the result grid's header chip is the
+   * one place that says so. Choosing a unit right there is the same assertion the picker
+   * below writes (`params.formulas[i].unit`), just anchored on the thing being labelled.
+   */
+  onSetResultUnit?: (columnIndex: number, unit: string) => void;
 }
 
 export function FormulaCard({
@@ -140,6 +154,7 @@ export function FormulaCard({
   onClose,
   onCloseBlocked,
   onActivate,
+  onSetResultUnit,
 }: FormulaCardProps) {
   const { t } = useTranslator();
   const setBounds = useWorkspace((s) => s.setBounds);
@@ -152,6 +167,18 @@ export function FormulaCard({
   // Explicit OUTPUT unit (units L1a): the user's assertion about a result column. Stored on
   // the formula row; it never changes a number, it only labels the output downstream.
   const setFormulaUnit = useWorkspace((s) => s.setFormulaUnit);
+  /**
+   * The unit layers of the RESULT table (units L1a/L2a): the confirmation memory, this
+   * workspace's constants, the global pre-confirmations and the derived inheritances.
+   *
+   * The card only needs them to say WHERE a result column's unit came from: a user assertion
+   * and a unit inferred from the expression are both `recognized` downstream, and the header
+   * chip is what tells the two apart.
+   */
+  const unitConfirmations = useWorkspace((s) => s.unitConfirmations);
+  const unitConstants = useWorkspace((s) => s.unitConstants);
+  const inheritedUnits = useWorkspace((s) => s.inheritedUnits);
+  const globalUnitPreconfirm = useGlobalSettings().unitPreconfirm;
   // The reference dialog is store-owned: the Help menu opens the same one, and this card
   // must not need a prop relayed through CardCanvas to reach it.
   const openHelp = useWorkspace((s) => s.openHelp);
@@ -520,6 +547,82 @@ export function FormulaCard({
     ? 'stale'
     : (card.node?.state ?? 'idle');
 
+  // ── result unit provenance (units L2a) ───────────────────────────────────────────────
+  /**
+   * Signature + resolutions of the RESULT table, derived through the ordinary chain.
+   *
+   * Both are needed to label a provenance: the chain says what the column's unit is, and the
+   * memories say WHERE it came from — a unit sitting in `unitConfirmations[signature]` is the
+   * user's assertion, a unit sitting in `inheritedUnits[signature]` is a machine inference.
+   */
+  const resultUnitView = useMemo(() => {
+    if (!resultMatrix || resultMatrix.columnCount() === 0) return null;
+    const annotations = resultMatrix.columns().map((column) => column.annotation);
+    const signature = unitSignature(annotations);
+    const { resolutions } = columnUnitResolutions(annotations, unitConfirmations, {
+      constants: unitConstants,
+      preconfirm: globalUnitPreconfirm,
+      inherited: inheritedUnits,
+    });
+    return { signature, resolutions };
+  }, [resultMatrix, unitConfirmations, unitConstants, globalUnitPreconfirm, inheritedUnits]);
+
+  /**
+   * How one result column got its unit: `asserted` (the user said so), `inherited` (the
+   * expression provably preserves the source column's unit) or nothing.
+   *
+   * A derived unit that the user's assertion (or a constant) overrides is NOT labelled
+   * 继承: the label must describe the unit on screen, not a discarded inference.
+   */
+  const resultUnitSource = (index: number): 'asserted' | 'inherited' | null => {
+    if (!resultUnitView) return null;
+    const own = unitConfirmations[resultUnitView.signature]?.[index];
+    if (typeof own === 'string' && own !== '') return 'asserted';
+    const derived = inheritedUnits[resultUnitView.signature]?.[index];
+    if (!derived) return null;
+    const resolution = resultUnitView.resolutions[index];
+    return resolution?.state === 'recognized' && resolution.unit === derived ? 'inherited' : null;
+  };
+
+  /** Unit chip for a result column header; drawn only when the column resolves to a unit. */
+  const resultUnitChip = (index: number): ColumnUnitChip | null => {
+    const resolution = resultUnitView?.resolutions[index];
+    if (!resolution || resolution.state !== 'recognized') return null;
+    const source = resultUnitSource(index);
+    const provenance =
+      source === 'asserted'
+        ? t('unit.sourceAsserted')
+        : source === 'inherited'
+          ? t('unit.sourceInherited')
+          : undefined;
+    const title =
+      source === 'inherited'
+        ? `${t('unit.recognized', { unit: resolution.unit })} — ${t('unit.inheritedHint')}`
+        : t('unit.recognized', { unit: resolution.unit });
+    return {
+      label: resolution.unit,
+      ambiguous: false,
+      title,
+      ...(provenance ? { provenance } : {}),
+    };
+  };
+
+  /**
+   * Clicking a result header's unit chip overrides the derived unit.
+   *
+   * This is the same assertion as the per-row picker (`params.formulas[i].unit`), anchored
+   * where the label is: without it, a user who disagrees with an inherited unit would have no
+   * way to say so without hunting for the row. An empty answer withdraws the assertion.
+   */
+  const setResultUnitPick = (index: number) => {
+    const own = resultUnitView ? (unitConfirmations[resultUnitView.signature]?.[index] ?? '') : '';
+    const answer = window.prompt(t('unit.outputUnit'), own === 'none' ? '' : own);
+    if (answer === null) return;
+    const trimmed = answer.trim();
+    if (trimmed !== '' && !candidateByUnit(trimmed)) return;
+    onSetResultUnit?.(index, trimmed);
+  };
+
   return (
     <CardShell
       card={card}
@@ -876,6 +979,9 @@ export function FormulaCard({
                     }
                     columnLabel={relationStatName}
                     columnTitle={relationColumnTitle}
+                    columnUnit={expressionShaped ? resultUnitChip : undefined}
+                    // A recognized chip is otherwise display-only; here it is the override.
+                    onUnitChipClick={(column) => setResultUnitPick(column)}
                     onHeaderContextMenu={(event, column) => {
                       event.preventDefault();
                       // The card owns its own menu: without this the event also reaches

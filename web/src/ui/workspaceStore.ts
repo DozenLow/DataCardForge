@@ -39,6 +39,10 @@ import {
   type UnitResolutionContext,
 } from '../core/units.ts';
 import { DEFAULT_SMOOTHING, type SmoothingOptions } from '../core/Smoothing.ts';
+// Units L2a: the derivation is PURE and structural (AST + resolutions, never a value), so it
+// belongs to `core/` — this import is not the retired browser compute path.
+import { inferInheritedUnit, type InheritedUnits } from '../core/unitInheritance.ts';
+import { columnUnitResolutions } from '../core/units.ts';
 import { defaultChartConfig, type ChartConfig, type ChartSource } from '../charts/chartModel.ts';
 import { chartTypeDef, minimumColumns, type ChartTypeId } from '../charts/chartTypes.ts';
 import { lineColor } from '../charts/palette.ts';
@@ -401,11 +405,20 @@ export function effectiveUnitPolicy(
  *
  * Derived at CALL time (never cached): a component that subscribes to `unitConstants` and
  * the settings re-derives its chips, axis and targets from the same chain.
+ *
+ * `inherited` (units L2a) is the DERIVED third layer: the units a unit-preserving formula
+ * output inherits from its source column. It is passed for every consumer so a chip, an axis
+ * and the convert card all read one chain — and it is deliberately NOT stored next to
+ * `unitConfirmations`, because a machine inference must never look like the user's answer.
  */
 export function unitResolutionContext(
-  state: Pick<WorkspaceState, 'unitConstants'>,
+  state: Pick<WorkspaceState, 'unitConstants' | 'inheritedUnits'>,
 ): UnitResolutionContext {
-  return { constants: state.unitConstants, preconfirm: getGlobalSettings().unitPreconfirm };
+  return {
+    constants: state.unitConstants,
+    preconfirm: getGlobalSettings().unitPreconfirm,
+    inherited: state.inheritedUnits,
+  };
 }
 
 /**
@@ -1450,6 +1463,17 @@ interface WorkspaceState {
    */
   unitConstants: UnitConstants;
   /**
+   * Units that formula outputs INHERIT from a unit-preserving expression (units L2a).
+   *
+   * Derived, session-scoped metadata: `resultSignature → columnIndex → unit`, recomputed
+   * after every result pull from `params.formulas[i].expression` + the source table's
+   * resolutions, cleared when a pull finds nothing usable, never serialised into a snapshot
+   * and never merged with another workspace's. It is deliberately SEPARATE from
+   * `unitConfirmations`: a machine inference must never read as the user's assertion, and the
+   * resolution chain gives the user's answer priority over this one.
+   */
+  inheritedUnits: InheritedUnits;
+  /**
    * Define (or redefine) one manual constant. An unusable definition (empty token, empty
    * dimension, non-positive factor) is refused and the previous value is kept.
    */
@@ -2186,6 +2210,9 @@ async function pushFunctionCard(cardId: number): Promise<void> {
   }
   // A PATCH response carries no output ids (only nodeId + state), so an empty list must
   // not overwrite the ids recorded at creation — outputs[] keeps the previous values.
+  // A push that left the node dirty/errored took the previous result away: the derivation
+  // that was keyed to that table's signature goes with it (units L2a).
+  if ((result.state ?? 'dirty') !== 'done') deriveInheritedUnits(cardId, '');
   const resultMatrixIds = result.resultMatrixIds ?? (result.resultMatrixId !== undefined ? [result.resultMatrixId] : []);
   applyNodeSnapshot(cardId, {
     nodeId,
@@ -2279,7 +2306,13 @@ function applyOutputIds(cardId: number, resultMatrixIds: number[]): void {
   }));
 }
 
-/** Mark a card's node as errored with a structured code (no result pull attempted). */
+/**
+ * Mark a card's node as errored with a structured code (no result pull attempted).
+ *
+ * The derived units of this card's outputs go with the numbers (units L2a): an error means
+ * there is no table of this shape any more, and leaving a previous pull's inference behind
+ * would label the next table with units nobody derived for it.
+ */
 function markNodeError(cardId: number, code: string, params: Record<string, unknown>): void {
   useWorkspace.setState((state) => ({
     cards: state.cards.map((card) => {
@@ -2773,6 +2806,96 @@ async function fetchResultRows(resultMatrixId: number, rowBudget: number): Promi
 }
 
 /**
+ * Re-derive the units a formula card's outputs INHERIT (units L2a).
+ *
+ * The whole point of the feature is that the user never types a unit that is already implied:
+ * `force_n * 2` produces a force, so its output column shows `N` — labelled 「继承」, never
+ * 「断言」 — and the chart axis / convert card read it through the ordinary chain.
+ *
+ * Where it is written: `inheritedUnits[resultSignature][index]`. That map is SESSION state
+ * (never in `toSnapshot`, never merged with another workspace) and it is kept strictly apart
+ * from `unitConfirmations`: the user's assertion lives there and must always win, so the two
+ * memories can never overwrite each other.
+ *
+ * When it is written: after every result pull (`applyResultCache`), and again whenever the
+ * pull found nothing usable — a `stale`/`error`/truncated-away answer CLEARS the derivation
+ * instead of leaving the previous table's units behind under a signature that may now mean
+ * something else. Recomputation is unconditional, so a changed expression or a changed source
+ * unit re-derives on the next pull rather than drifting.
+ *
+ * Nothing here reads or writes a NUMBER: `inferInheritedUnit` only walks the parsed tree.
+ */
+function deriveInheritedUnits(cardId: number, resultSignature?: string): void {
+  const state = useWorkspace.getState();
+  const card = state.cards.find((entry) => entry.id === cardId);
+  if (!card || !isFormulaCard(card)) return;
+  const formulas = card.params.formulas ?? [];
+
+  // The source table this card reads: its first `matrix` port, resolved through the ordinary
+  // chain (workspace constants > confirmation > pre-confirmation > parse). Sources are read
+  // WITHOUT `inherited`, so a chain of formula cards inherits one hop, never transitively —
+  // "nesting is not merged" is the L2a rule, and it also keeps the derivation a pure function
+  // of the data cards (no ordering dependence between two formula pulls).
+  const port = card.inputs.find((input) => input.target.type === 'matrix');
+  const sourceMatrix = port ? state.matrices.get(port.target.matrixId) : undefined;
+  let sourceResolutions: ReturnType<typeof columnUnitResolutions>['resolutions'] | null = null;
+  let sourceNames: string[] = [];
+  if (sourceMatrix && sourceMatrix.columnCount() > 0) {
+    const annotations = sourceMatrix.columns().map((column) => column.annotation);
+    sourceNames = sourceMatrix.columns().map((_, index) => sourceMatrix.columnLabel(index));
+    sourceResolutions = columnUnitResolutions(annotations, state.unitConfirmations, {
+      constants: state.unitConstants,
+      preconfirm: getGlobalSettings().unitPreconfirm,
+    }).resolutions;
+  }
+
+  const displayMatrix = state.matrices.get(card.displayMatrixId);
+  // `''` is the caller saying "the output this card published is gone" (dirty/error/cancel):
+  // nothing may inherit under that signature any more. Absent, the current display cache is
+  // read — which is what a pull that found no result needs.
+  if (resultSignature === '') {
+    clearInheritedUnits();
+    return;
+  }
+  const signature =
+    resultSignature ??
+    (displayMatrix && displayMatrix.columnCount() > 0
+      ? unitSignature(displayMatrix.columns().map((column) => column.annotation))
+      : null);
+  if (!signature) return;
+
+  const derived: Record<number, string> = {};
+  if (sourceResolutions && sourceResolutions.length > 0 && displayMatrix) {
+    formulas.forEach((formula, index) => {
+      // Only columns that actually exist on the pulled table can inherit anything.
+      if (index >= displayMatrix.columnCount()) return;
+      const inherited = inferInheritedUnit(formula.expression ?? '', sourceResolutions, sourceNames);
+      if (inherited) derived[index] = inherited.unit;
+    });
+  }
+
+  const previous = state.inheritedUnits[signature];
+  const unchanged =
+    previous &&
+    Object.keys(previous).length === Object.keys(derived).length &&
+    Object.entries(derived).every(([index, unit]) => previous[Number(index)] === unit);
+  if (unchanged) return;
+
+  useWorkspace.setState((current) => {
+    const next: Record<string, Readonly<Record<number, string>>> = { ...current.inheritedUnits };
+    if (Object.keys(derived).length === 0) delete next[signature];
+    else next[signature] = derived;
+    return { inheritedUnits: next };
+  });
+}
+
+/** Drop every derivation: used when nothing on screen may carry an inherited unit any more. */
+function clearInheritedUnits(): void {
+  if (Object.keys(useWorkspace.getState().inheritedUnits).length === 0) return;
+  useWorkspace.setState({ inheritedUnits: {} });
+}
+
+/**
  * Remember the user's explicit OUTPUT units for the table that just arrived (units L1a §2).
  *
  * This is the ONE line that carries the assertion downstream: the confirmation memory is
@@ -2847,6 +2970,11 @@ function applyResultCache(cardId: number, result: ResultFetch): void {
   // (units L1a §2) — before the dependents are refreshed, so a chart re-derives the axis
   // unit from the assertion in the same wave that gives it the numbers.
   assertFormulaUnits(cardId);
+  // …and the derived half (units L2a) is re-derived from the formulas + the SOURCE table. It
+  // runs second on purpose: the user's assertion is the one that must win, and writing the
+  // inference after it keeps the two memories in clearly separate slots. The signature comes
+  // from the table that just arrived, so the derivation cannot be keyed to a previous shape.
+  deriveInheritedUnits(cardId, unitSignature(result.matrix.columns().map((column) => column.annotation)));
   // A chart drawn from this output must show the numbers that just arrived — the same
   // "dependents follow their source" rule a data card's file switch follows.
   useWorkspace.getState().refreshDependentsOf(cardId);
@@ -2973,7 +3101,12 @@ async function pullPreviewIntoCache(cardId: number): Promise<void> {
   // switch" race. The run that superseded it has its own pull.
   const targetMatrixId = output.resultMatrixId;
   const result = await fetchResultRows(targetMatrixId, budget);
-  if (!result) return;
+  if (!result) {
+    // The read produced no table (stale result id, transport failure): the derivation that
+    // was keyed to the previous one is no longer a statement about anything on screen.
+    deriveInheritedUnits(cardId, '');
+    return;
+  }
   const now = useWorkspace.getState().cards.find((entry) => entry.id === cardId);
   if (!now || !isFormulaCard(now) || now.outputs[0]?.resultMatrixId !== targetMatrixId) return;
   applyResultCache(cardId, result);
@@ -3642,6 +3775,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     unitPolicyOverride: undefined,
     // No manual constants yet: every header is read by the registry alone.
     unitConstants: {},
+    // Nothing pulled yet, so nothing can have inherited a unit.
+    inheritedUnits: {},
     propagationFrozen: false,
     blockers: [],
     blockedCardId: null,
@@ -4144,6 +4279,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         summaries: {},
         // Confirmations belonged to the matrices that were just released.
         unitConfirmations: {},
+        // …and so did every inherited unit: it was derived from those tables.
+        inheritedUnits: {},
         // Same for each script card's last run: the nodes are gone with the cards.
         scriptRuns: {},
         // …and for a unit-conversion card's last conversion.
@@ -6187,6 +6324,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // so a restore REPLACES them (a legacy file without the block restores to none). A
         // nested workspace keeps its own definitions and never inherits the parent's.
         unitConstants: sanitizeUnitConstants(snapshot.unitConstants),
+        // Inherited units (units L2a) are NOT restored: they are derived from the formulas and
+        // the source tables, so the first pull after the restore re-derives them. Keeping the
+        // previous workspace's derivation here would be exactly the cross-workspace merge the
+        // nesting rule forbids.
+        inheritedUnits: {},
         // A restored script card has no run of its own: the traceback, duration and previews
         // belonged to a node that no longer exists.
         scriptRuns: {},
@@ -6303,6 +6445,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         unitRuns: {},
         // Confirmations belonged to the matrices that were just dropped.
         unitConfirmations: {},
+        // Inherited units are derived from those same tables, so they go with them — and a
+        // nested workspace must never see another workspace's derivation.
+        inheritedUnits: {},
         // …and so did the workspace's policy override: a reset is an empty workspace, which
         // inherits the global tier like a brand-new one.
         unitPolicyOverride: undefined,

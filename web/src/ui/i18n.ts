@@ -330,6 +330,10 @@ const dictionaries = {
     'unit.outputUnitNone': '不断言',
     'unit.outputUnitHint': '这是你的断言：结果列按此单位显示，供图轴与换算读取；不会换算或改写任何数值。',
     'unit.sourceAsserted': '断言',
+    // Units L2a — a unit DERIVED from a unit-preserving expression (never the user's answer).
+    'unit.sourceInherited': '继承',
+    'unit.inheritedHint':
+      '继承自源列单位的推断结果：该表达式只做缩放或保单位运算，所以输出列沿用源列的单位。它不是你的断言，在输出单位里选择一个即可覆盖。',
     'unit.driftToast':
       '单位变化：{n} 列的表头单位与上次不同（如「{column}」{before} → {after}），请在列头确认单位',
 
@@ -821,6 +825,10 @@ const dictionaries = {
     'unit.outputUnitHint':
       'Your assertion: the result column is shown with this unit, and charts/convert read it. No value is converted or rewritten.',
     'unit.sourceAsserted': 'asserted',
+    // Units L2a — a unit DERIVED from a unit-preserving expression (never the user's answer).
+    'unit.sourceInherited': 'inherited',
+    'unit.inheritedHint':
+      'Inferred from the source column: this expression only scales or preserves its input, so the output keeps that column\'s unit. It is not your assertion — choosing an output unit overrides it.',
     'unit.driftToast':
       'Units changed: {n} column(s) now resolve differently (e.g. "{column}" {before} → {after}) — confirm them in the table header',
 

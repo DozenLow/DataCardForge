@@ -253,7 +253,15 @@ function tokenize(input: string): Token[] {
 
 // ── AST nodes ──────────────────────────────────────────────────────────
 
-type ASTNode =
+/**
+ * A parsed expression node, exposed READ-ONLY for structural questions (units L2a's
+ * whitelist classifier asks "is this shape unit-preserving?" without evaluating anything).
+ *
+ * Additive by construction: nothing in `compile()` reads this type, so exporting it cannot
+ * move a single number. `column` carries the resolved column index, `call` the upper-cased
+ * function name and its arguments as written.
+ */
+export type ASTNode =
   | { kind: 'number'; value: number }
   | { kind: 'column'; index: number; name: string }
   | { kind: 'binary'; op: string; left: ASTNode; right: ASTNode }
@@ -797,6 +805,14 @@ export interface CompiledExpression {
   source: string;
   /** Column names referenced by the expression. */
   references: string[];
+  /**
+   * The parsed tree the evaluator was built from (read-only).
+   *
+   * Exposed for structural consumers — the units L2a inheritance classifier reads it to
+   * decide whether an expression PRESERVES its source column's unit. Nothing evaluates
+   * through this field, so publishing it changes no result.
+   */
+  ast: ASTNode;
   /** Evaluate against column data arrays. */
   evaluate: Evaluator;
 }
@@ -899,8 +915,25 @@ export function compile(
   return {
     source: expression,
     references,
+    ast,
     evaluate: compileAST(ast),
   };
+}
+
+/**
+ * Parse an expression into its AST, without compiling an evaluator.
+ *
+ * Same tokenizer, same parser, same name→index mapping as `compile()`, so the tree is the
+ * one the engine would run; only the closure is skipped. Purely structural — callers such as
+ * `unitInheritance` read it to decide what a formula PRESERVES, and must never treat this as
+ * a way to compute. Any parse error is the ordinary `ExpressionError`.
+ */
+export function parseExpression(
+  expression: string,
+  columnNames: string[],
+  aliases: AliasRange[] = [],
+): ASTNode {
+  return compile(expression, columnNames, aliases).ast;
 }
 
 /**

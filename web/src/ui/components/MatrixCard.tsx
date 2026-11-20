@@ -106,6 +106,8 @@ export function MatrixCard({
   const unitConstants = useWorkspace((s) => s.unitConstants);
   /** The GLOBAL fallback of that chain: token → pre-confirmed unit (decision §三). */
   const globalUnitPreconfirm = useGlobalSettings().unitPreconfirm;
+  /** Units a formula output inherits from a unit-preserving expression (units L2a). */
+  const inheritedUnits = useWorkspace((s) => s.inheritedUnits);
   const confirmUnitGroup = useWorkspace((s) => s.confirmUnitGroup);
 
   /**
@@ -119,14 +121,16 @@ export function MatrixCard({
             matrix.columns().map((column) => column.annotation),
             unitConfirmations,
             // Same chain as every other consumer: workspace constants + global
-            // pre-confirmations (units L1b §B2). The chips must never disagree with the axis.
+            // pre-confirmations (units L1b §B2) + the derived inheritance of a formula
+            // output (units L2a). The chips must never disagree with the axis.
             {
               constants: unitConstants,
               preconfirm: globalUnitPreconfirm,
+              inherited: inheritedUnits,
             },
           )
         : null,
-    [matrix, unitConfirmations, unitConstants, globalUnitPreconfirm],
+    [matrix, unitConfirmations, unitConstants, globalUnitPreconfirm, inheritedUnits],
   );
 
   /** Header label for a column, the same expression the table prints. */

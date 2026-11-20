@@ -425,6 +425,9 @@ describe('unitResolutionContext', () => {
     expect(unitResolutionContext(store())).toEqual({
       constants: { g: { dimension: 'acceleration', factor: 9.80665 } },
       preconfirm: { ms: 'ms' },
+      // Added by units L2a: the derived inheritance layer travels in the same context (empty
+      // here — nothing has been pulled in this workspace yet).
+      inherited: {},
     });
   });
 

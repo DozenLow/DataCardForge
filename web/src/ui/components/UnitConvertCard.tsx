@@ -140,6 +140,8 @@ export function UnitConvertCard({
   /** The workspace + global half of the units resolution chain (units L1b §B2). */
   const unitConstants = useWorkspace((s) => s.unitConstants);
   const globalUnitPreconfirm = useGlobalSettings().unitPreconfirm;
+  /** Units a formula output inherits from a unit-preserving expression (units L2a). */
+  const inheritedUnits = useWorkspace((s) => s.inheritedUnits);
   const convertUnits = useWorkspace((s) => s.convertUnits);
   const loadFullResult = useWorkspace((s) => s.loadFullResult);
   const run = useWorkspace((s) => s.unitRuns[card.id]);
@@ -162,11 +164,12 @@ export function UnitConvertCard({
             sourceMatrix.columns().map((column) => column.annotation),
             unitConfirmations,
             // A conversion target is only offered when the SOURCE unit is known, so the
-            // source must be read through the same chain as the chip that shows it.
-            { constants: unitConstants, preconfirm: globalUnitPreconfirm },
+            // source must be read through the same chain as the chip that shows it —
+            // including a unit the source formula output inherited (units L2a).
+            { constants: unitConstants, preconfirm: globalUnitPreconfirm, inherited: inheritedUnits },
           ).resolutions
         : [],
-    [sourceMatrix, unitConfirmations, unitConstants, globalUnitPreconfirm],
+    [sourceMatrix, unitConfirmations, unitConstants, globalUnitPreconfirm, inheritedUnits],
   );
 
   const dimensions = useMemo(() => unitsByDimension(), []);

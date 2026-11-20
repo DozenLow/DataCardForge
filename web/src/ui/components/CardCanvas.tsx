@@ -118,6 +118,8 @@ export function CardCanvas({
   const addFormulaCard = useWorkspace((s) => s.addFormulaCard);
   const showToast = useWorkspace((s) => s.showToast);
   const renameOutputColumn = useWorkspace((s) => s.renameOutputColumn);
+  /** Output-unit assertion (units L1a/L2a): the result grid's header chip writes it. */
+  const setFormulaUnit = useWorkspace((s) => s.setFormulaUnit);
   const addRelationEnumCard = useWorkspace((s) => s.addRelationEnumCard);
   const addScriptCard = useWorkspace((s) => s.addScriptCard);
   const addUnitConvertCard = useWorkspace((s) => s.addUnitConvertCard);
@@ -631,6 +633,7 @@ export function CardCanvas({
               inputs={resolvedInputs}
               onRenameOutputColumn={(index, name) => renameOutputColumn(card.id, index, name)}
               onSetColumnContract={(columns) => setColumnContract(card.id, columns)}
+              onSetResultUnit={(columnIndex, unit) => setFormulaUnit(card.id, columnIndex, unit)}
               onOpenFunction={() => {
                 // Chain: this card's output becomes the next card's explicit input.
                 const id = addFormulaCard(card.id);

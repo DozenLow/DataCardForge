@@ -84,6 +84,8 @@ export function ChartCard({
   /** The workspace + global half of the units resolution chain (units L1b §B2). */
   const unitConstants = useWorkspace((s) => s.unitConstants);
   const globalUnitPreconfirm = useGlobalSettings().unitPreconfirm;
+  /** Units a formula output inherits from a unit-preserving expression (units L2a). */
+  const inheritedUnits = useWorkspace((s) => s.inheritedUnits);
   const typeDef = useMemo(() => chartTypeDef(card.config.type), [card.config.type]);
   const tRef = useRef(t);
   tRef.current = t;
@@ -209,8 +211,9 @@ export function ChartCard({
         matrix.columns().map((entry) => entry.annotation),
         unitConfirmations,
         // Identical context to the header chips: a constant that renames a dimension must
-        // move the axis label with it, or the same column would have two units on screen.
-        { constants: unitConstants, preconfirm: globalUnitPreconfirm },
+        // move the axis label with it, or the same column would have two units on screen —
+        // and the same goes for a unit a formula output inherits (units L2a).
+        { constants: unitConstants, preconfirm: globalUnitPreconfirm, inherited: inheritedUnits },
       );
       const resolution = resolutions[source.columnIndex];
       if (!resolution) return undefined;
@@ -227,6 +230,7 @@ export function ChartCard({
     unitConfirmations,
     unitConstants,
     globalUnitPreconfirm,
+    inheritedUnits,
   ]);
 
   const option = useMemo(

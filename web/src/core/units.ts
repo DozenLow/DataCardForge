@@ -545,8 +545,11 @@ export type UnitConstants = Readonly<Record<string, UnitConstant>>;
  *      the ambiguous spelling means in THIS project);
  *   2. the confirmation memory `[signature][index]` (the workspace's own answers, including
  *      the explicit output-unit assertions of L1a);
- *   3. `preconfirm[token]` — the GLOBAL pre-confirmation, the application-wide default;
- *   4. the resolver's own parse.
+ *   3. `inherited[signature][index]` — the DERIVED unit of a unit-preserving formula output
+ *      (units L2a). It sits below the user's own answers because it is a machine inference,
+ *      and above the global pre-confirmation because it names THIS table's column;
+ *   4. `preconfirm[token]` — the GLOBAL pre-confirmation, the application-wide default;
+ *   5. the resolver's own parse.
  *
  * `undefined` context (the two-argument call) must keep the pre-L1b behaviour exactly, so
  * every step below is skipped when its input is absent.
@@ -556,6 +559,14 @@ export interface UnitResolutionContext {
   readonly preconfirm?: Readonly<Record<string, string>>;
   /** Manual constants of the workspace that owns the table. Never global, never merged. */
   readonly constants?: UnitConstants;
+  /**
+   * Derived units of unit-preserving formula outputs (units L2a), keyed by result column-unit
+   * signature then column index. Session state, never persisted, never merged with the
+   * workspace's own answers — the store keeps it in `inheritedUnits`, apart from
+   * `unitConfirmations`. A derived unit is only ever applied where nothing else answered:
+   * a user confirmation (or `'none'`) on that column still wins.
+   */
+  readonly inherited?: Readonly<Record<string, Readonly<Record<number, string>>>>;
 }
 
 /** A constant the resolver could not use (unregistered/odd spelling) is skipped, not guessed. */
@@ -612,14 +623,20 @@ export function columnUnitResolutions(
   const perColumn = confirmations[signature];
   const constants = context?.constants;
   const preconfirm = context?.preconfirm;
+  const inheritedColumn = context?.inherited?.[signature];
   const resolutions = annotations.map((annotation, index) => {
     const base = resolveUnit(annotation);
     const constant = constants ? usableConstant(constants[base.token]) : null;
     const manual = withConstant(base, constant);
     if (manual) return manual;
     // Workspace confirmation first (the L1a memory, incl. the `'none'` rejection), then the
-    // global pre-confirmation as the fallback the decision calls "the application default".
-    const confirmed = perColumn?.[index] ?? (preconfirm ? preconfirm[base.token] : undefined);
+    // DERIVED inheritance of this exact column (units L2a) — which only applies when the user
+    // has said nothing here — then the global pre-confirmation the decision calls "the
+    // application default".
+    const confirmed =
+      perColumn?.[index] ??
+      inheritedColumn?.[index] ??
+      (preconfirm ? preconfirm[base.token] : undefined);
     return resolveConfirmed(annotation, confirmed);
   });
   return { signature, resolutions };
