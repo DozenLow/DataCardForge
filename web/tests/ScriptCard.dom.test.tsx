@@ -28,6 +28,7 @@ import { portAnchor } from '../src/ui/cardMetrics.ts';
 import { useWorkspace, emptyScriptRun } from '../src/ui/workspaceStore.ts';
 import { isScriptCard, type FunctionCardModel } from '../src/ui/types.ts';
 import { initialTrust } from '../src/ui/workspaceTrust.ts';
+import { resolveEditingSurface } from '../src/ui/editingSurface.ts';
 import {
   ScriptCard,
   localSyntaxDiagnostic,
@@ -1024,5 +1025,39 @@ describe('workspace trust lock', () => {
 
     expect(client.computeNode).not.toHaveBeenCalled();
     expect(store().scriptRuns[cardId]?.code).toBe('untrusted');
+  });
+});
+
+/**
+ * G2 wiring: the card's CodeMirror editor has to be reachable from the generic editing-menu
+ * layer, or right-click inside the script does nothing (the native menu is cancelled
+ * application-wide since G1). The adapter itself is tested in `editingSurface.dom.test.tsx`;
+ * what this asserts is that THIS component registers its view — the one line of card code the
+ * adapter contract needs.
+ */
+describe('editing surface registration (G2)', () => {
+  it('registers the CodeMirror content DOM as an editing surface', async () => {
+    const host = await mount(cardId);
+    const content = host.querySelector('.script-card__editor .cm-content') as HTMLElement;
+    expect(content).not.toBeNull();
+
+    // Right-clicks land on a rendered line, not on `.cm-content`: resolution walks up.
+    const line = content.querySelector('.cm-line') as HTMLElement;
+    const surface = resolveEditingSurface(line);
+    expect(surface).not.toBeNull();
+    expect(surface?.canPaste).toBe(true);
+
+    await act(async () => {
+      surface!.selectAll();
+    });
+    expect(surface?.canCopy).toBe(true);
+
+    // Paste goes through a transaction, which is what the card's update listener (syntax check
+    // + settle operation) and its undo history hang off — so the document really changes.
+    await act(async () => {
+      surface!.paste('result = A\n');
+    });
+    await flush();
+    expect(content.textContent).toContain('result = A');
   });
 });

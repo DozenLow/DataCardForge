@@ -51,6 +51,7 @@ import {
   type ScriptRunState,
 } from '../workspaceStore.ts';
 import { portVarName } from '../bindings.ts';
+import { codeMirrorSurface, registerEditingSurface } from '../editingSurface.ts';
 import { scriptTrusted } from '../workspaceTrust.ts';
 import {
   invalidateLayout,
@@ -1100,7 +1101,13 @@ export function ScriptCard({
       parent: host,
     });
     editorView.current = view;
+    // The application's own editing menu (G2) reaches this editor through the surface
+    // registry, never through CodeMirror knowledge of its own: `view.contentDOM` is the
+    // `.cm-content` element a right-click actually lands on. Unregistered with the view, so a
+    // closed card leaves no adapter pointing at a destroyed editor.
+    const unregisterSurface = registerEditingSurface(view.contentDOM, codeMirrorSurface(view));
     return () => {
+      unregisterSurface();
       view.destroy();
       editorView.current = null;
     };

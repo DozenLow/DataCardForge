@@ -22,6 +22,7 @@ import { hashWorkspaceBytes } from './workspaceTrust.ts';
 import { armAlertAudio } from './alerts.ts';
 import { useWorkspace } from './workspaceStore.ts';
 import { CardCanvas } from './components/CardCanvas.tsx';
+import { EditingMenuHost } from './components/EditingMenu.tsx';
 import { HelpDialog } from './components/HelpDialog.tsx';
 import { MenuBar } from './components/MenuBar.tsx';
 import { StatusBar } from './components/StatusBar.tsx';
@@ -393,6 +394,12 @@ export default function App() {
           "?" reach it through the store. It renders through a portal, so this position in
           the tree has no layout meaning. */}
       <HelpDialog />
+      {/* Right-click inside a text field: the native menu is cancelled application-wide (G1)
+          and this host answers the request with the self-rendered editing menu (G2). Mounted
+          once, here, for the same reason as the help modal: it is a portal, so its position in
+          the tree has no layout meaning. The locale is passed in rather than subscribed to,
+          because `App` already holds it. */}
+      <EditingMenuHost locale={locale} />
     </div>
   );
 }

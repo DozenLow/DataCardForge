@@ -1,5 +1,5 @@
 /**
- * Cancel the browser's own context menu for the whole workbench — task G1, step S1 of
+ * Cancel the browser's own context menu for the whole workbench — tasks G1 (S1) + G2 (S2) of
  * `docs/decisions/2026-11-20-card-multi-input-and-wire-gesture.md` §八.
  *
  * Why the native menu has to go: this application owns right-click. A right-click is how a
@@ -9,7 +9,7 @@
  * API can defer it while a gesture decides between click and drag: it can only be cancelled.
  * So it is cancelled once, at the window, for the whole application.
  *
- * Two invariants make that safe, and neither may be relaxed to make a test pass:
+ * Three invariants make that safe, and none may be relaxed to make a test pass:
  *
  *   1. `preventDefault()` only — never `stopPropagation()`. All four self-rendered menus
  *      (VirtualTable column header, FormulaCard result header, ScriptCard output row, the bare
@@ -18,29 +18,34 @@
  *      cancel dispatch, so those handlers keep running; stopping propagation here would
  *      silently disable every one of them.
  *
- *   2. Editing surfaces keep the native menu for now. Until task G2 ships the self-rendered
- *      editing menu, the browser's paste / spelling menu is the only clipboard path an
- *      `input`, a `textarea` or the CodeMirror script editor has; suppressing it there would
- *      leave the editor unable to paste. G2 deletes this exemption (§八).
+ *   2. EVERY target is cancelled, editing surfaces included (G2). G1 kept a temporary
+ *      exemption here so `input` / `textarea` / CodeMirror kept the browser's paste menu;
+ *      that exemption is now deleted, because the application renders its own editing menu
+ *      instead. The order matters and is why this landed only after `EditingMenu` existed:
+ *      the other way around leaves the script editor unable to paste for the length of a
+ *      release.
+ *
+ *   3. An editing surface gets our menu, not nothing. Cancelling the native menu on a text
+ *      field is only acceptable if the application offers copy / cut / paste / select all on
+ *      that field, so the listener asks `resolveEditingSurface` — which knows CodeMirror and
+ *      plain fields and canPaste/canCopy per surface — and dispatches a request the mounted
+ *      `EditingMenuHost` answers (`EDITING_MENU_REQUEST_EVENT`). Non-editing targets get no
+ *      request: the card menus are handlers, not requests, and G3's wire gesture decides at
+ *      `pointerup`.
  *
  * Installation is idempotent across hot reloads: the live listener is parked on the window
  * under a `Symbol.for` key, so a re-evaluated module replaces its predecessor instead of
  * stacking a second copy.
  *
  * Note: a keyboard-invoked `contextmenu` (Shift+F10 / the menu key) arrives on this same path
- * as an ordinary event and is cancelled like any other — G1's suppression is decided by the
- * target alone. The project's own right-click semantics are pointer-derived (decision §七),
- * so nothing of ours opens from the keyboard.
+ * as an ordinary event and is handled like any other — G1's suppression is decided by the
+ * target alone, and an editing surface opens the same menu, anchored to the surface itself
+ * when the event carries no pointer position.
  */
-
-/**
- * Targets that keep the browser's own menu: text entry (native paste / spelling), option
- * picking, and CodeMirror 6's editable DOM. `.cm-content` is listed alongside
- * `[contenteditable="true"]` because CodeMirror guarantees the class while the attribute is
- * only its default; either hit is enough. Temporary — see invariant 2 above.
- */
-export const EDITING_SURFACE_SELECTOR =
-  'input, textarea, select, [contenteditable="true"], .cm-content';
+import {
+  requestEditingMenu,
+  resolveEditingSurface,
+} from './editingSurface.ts';
 
 const LISTENER_SLOT = Symbol.for('datacardforge.suppressNativeMenu.listener');
 
@@ -53,26 +58,45 @@ type InstalledListener = (event: Event) => void;
 type ListenerHost = Record<symbol, unknown>;
 
 /**
- * True when `target` is, or sits inside, an editing surface that keeps the native menu.
+ * Where the editing menu should open.
  *
- * A `contextmenu` can also be dispatched at the window or the document, where the target is
- * not an element at all; those are not editing surfaces, so the menu is suppressed there like
- * anywhere else.
+ * A pointer-driven `contextmenu` carries the pointer position, which is where a menu belongs.
+ * A keyboard-driven one carries (0, 0), and opening at the top-left of the viewport would put
+ * the menu nowhere near the field the user just focused — so it is anchored to the surface's
+ * left/bottom edge instead. The `clientX !== 0 || clientY !== 0` test is deliberately not
+ * "inside the viewport": (0, 0) is the value a keyboard event uses, and a pointer that really
+ * is at the origin still resolves to a menu that opens a few pixels away.
  */
-export function isEditingSurfaceTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof Element)) return false;
-  return target.closest(EDITING_SURFACE_SELECTOR) !== null;
+function menuPosition(event: Event, target: EventTarget | null): { x: number; y: number } {
+  if (
+    typeof MouseEvent !== 'undefined' &&
+    event instanceof MouseEvent &&
+    (event.clientX !== 0 || event.clientY !== 0)
+  ) {
+    return { x: event.clientX, y: event.clientY };
+  }
+  if (target instanceof Element) {
+    const rect = target.getBoundingClientRect();
+    if (rect.width !== 0 || rect.height !== 0) return { x: rect.left, y: rect.bottom };
+  }
+  return { x: 0, y: 0 };
 }
 
 /**
- * The one window-level handler: cancel the native menu, touch nothing else.
+ * The one window-level handler: cancel the native menu, then offer ours where we own one.
  *
  * `stopPropagation` must not be added here — the four React `onContextMenu` handlers live
  * downstream of this listener and depend on the event continuing to bubble.
  */
 export function suppressNativeContextMenu(event: Event): void {
-  if (isEditingSurfaceTarget(event.target)) return;
+  // The ruling is unconditional: the browser's menu never appears, for any target.
   event.preventDefault();
+
+  // Then, for a text surface only, ask the application for the replacement menu. A target
+  // without an adapter (a card, the canvas, an empty stretch of body) stops here: those
+  // targets have their own React handlers, and there is nothing to dispatch to.
+  if (resolveEditingSurface(event.target) === null) return;
+  requestEditingMenu({ ...menuPosition(event, event.target), target: event.target });
 }
 
 /**

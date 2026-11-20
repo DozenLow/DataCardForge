@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * Global native-context-menu suppression — task G1, decision §八 step S1.
+ * Global native-context-menu suppression — tasks G1 (S1) and G2 (S2), decision §八.
  *
  * The workbench owns right-click: four self-rendered menus (VirtualTable column header,
  * FormulaCard result header, ScriptCard output row, the bare canvas) open on it, and task G3
@@ -12,15 +12,23 @@
  * React `onContextMenu` handlers that sit *downstream* of the window listener, so a handler
  * that still runs, and an event that still bubbles, is the evidence that the suppression never
  * grew a `stopPropagation`.
+ *
+ * G2's half: the temporary editing-surface exemption G1 shipped is GONE. Editing surfaces are
+ * cancelled like everything else, and they get our own editing menu instead — the listener
+ * dispatches an `EDITING_MENU_REQUEST_EVENT` the mounted host answers. So the two tests that
+ * used to assert "the browser's menu is left alone here" now assert the opposite, because
+ * letting the native menu through would be a regression of the ruling (and not letting ours
+ * through would leave the field with no menu at all).
  */
 import { StrictMode, act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { installNativeMenuSuppression } from '../src/ui/suppressNativeMenu.ts';
 import {
-  installNativeMenuSuppression,
-  isEditingSurfaceTarget,
-} from '../src/ui/suppressNativeMenu.ts';
+  EDITING_MENU_REQUEST_EVENT,
+  type EditingMenuRequestDetail,
+} from '../src/ui/editingSurface.ts';
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -57,6 +65,21 @@ function surface(html: string): HTMLElement {
   host.innerHTML = html;
   document.body.append(host);
   return host;
+}
+
+/** Record every editing-menu request the window sees while `run` executes. */
+function collectRequests(run: () => void): EditingMenuRequestDetail[] {
+  const seen: EditingMenuRequestDetail[] = [];
+  const listener = (event: Event) => {
+    seen.push((event as CustomEvent<EditingMenuRequestDetail>).detail);
+  };
+  window.addEventListener(EDITING_MENU_REQUEST_EVENT, listener);
+  try {
+    run();
+  } finally {
+    window.removeEventListener(EDITING_MENU_REQUEST_EVENT, listener);
+  }
+  return seen;
 }
 
 afterEach(async () => {
@@ -101,14 +124,17 @@ describe('native menu suppression', () => {
     }
   });
 
-  it('leaves editing surfaces alone so the browser paste/spelling menu keeps working', () => {
-    // Temporary exemption (decision §八): removed by task G2, which replaces these native
-    // menus with the `EditingSurface` adapter plus a self-rendered one.
+  it('cancels the native menu on editing surfaces too (G2 deleted the exemption)', () => {
+    // G1 kept the browser's menu here so a field could still paste. G2 replaces it with the
+    // application's own editing menu, so the cancellation is now unconditional — letting the
+    // browser's menu back in would be a regression of the §八 ruling.
     install();
     const host = surface(
       [
         '<input id="input" value="x" />',
         '<textarea id="textarea">x</textarea>',
+        // A `<select>` has no text to copy, so it is cancelled too and gets no editing menu:
+        // its picker is a dropdown, not a context menu.
         '<select id="select"><option>x</option></select>',
         '<div id="editable" contenteditable="true"><span id="editable-child">42</span></div>',
         '<div id="cm" class="cm-content" contenteditable="true"><div id="cm-line">print(x)</div></div>',
@@ -116,21 +142,59 @@ describe('native menu suppression', () => {
     );
     for (const id of ['input', 'textarea', 'select', 'editable-child', 'cm-line']) {
       const target = host.querySelector(`#${id}`) as HTMLElement;
-      expect(rightClick(target).defaultPrevented).toBe(false);
+      expect(rightClick(target).defaultPrevented).toBe(true);
     }
   });
 
-  it('answers the editing-surface exemption by the nearest editable ancestor', () => {
+  it('answers an editing-surface right-click with a request carrying the pointer position', () => {
+    install();
+    const host = surface('<input id="input" value="abcdef" />');
+    const input = host.querySelector('#input') as HTMLInputElement;
+
+    const requests = collectRequests(() => {
+      rightClick(input, { clientX: 321, clientY: 123 });
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatchObject({ x: 321, y: 123 });
+    // The target travels, not the surface: the host resolves it (one resolution path).
+    expect(requests[0].target).toBe(input);
+  });
+
+  it('anchors a keyboard-invoked request to the surface, which carries no pointer position', () => {
+    // Shift+F10 / the menu key: same event path, but `clientX`/`clientY` are 0. jsdom reports a
+    // zero-size rect as well, so the honest fallback here is the viewport origin — what matters
+    // is that a request is still produced for the focused field.
+    install();
+    const host = surface('<textarea id="area">x</textarea>');
+    const area = host.querySelector('#area') as HTMLTextAreaElement;
+
+    const requests = collectRequests(() => {
+      rightClick(area, { clientX: 0, clientY: 0 });
+    });
+
+    expect(requests).toHaveLength(1);
+    expect(requests[0].x).toBe(0);
+    expect(requests[0].y).toBe(0);
+    expect(requests[0].target).toBe(area);
+  });
+
+  it('sends no request for a target that has no editing surface', () => {
+    install();
     const host = surface(
-      '<div id="editable" contenteditable="true"><span id="inside">42</span></div>' +
-        '<span id="outside">42</span>',
+      '<div class="card" id="card"><span id="title">Title</span></div><input id="check" type="checkbox" />',
     );
-    const editable = host.querySelector('#editable') as HTMLElement;
-    expect(isEditingSurfaceTarget(editable)).toBe(true);
-    expect(isEditingSurfaceTarget(host.querySelector('#inside'))).toBe(true);
-    expect(isEditingSurfaceTarget(host.querySelector('#outside'))).toBe(false);
-    expect(isEditingSurfaceTarget(document)).toBe(false);
-    expect(isEditingSurfaceTarget(null)).toBe(false);
+
+    const requests = collectRequests(() => {
+      rightClick(host.querySelector('#title') as HTMLElement);
+      rightClick(host.querySelector('#card') as HTMLElement);
+      rightClick(host.querySelector('#check') as HTMLElement);
+      rightClick(document.body);
+      rightClick(window);
+    });
+
+    // The four card menus and the wire gesture are downstream handlers, not requests.
+    expect(requests).toEqual([]);
   });
 
   it('does not stack listeners when a hot reload installs from a re-evaluated module', async () => {
@@ -202,6 +266,48 @@ describe('self-rendered menus still open', () => {
       const event = rightClick(host.querySelector('#header') as HTMLElement);
       expect(handlerSaw).toEqual([true]);
       // Propagation is intact: the window's own bubble listener saw the same event.
+      expect(bubbled).toHaveLength(1);
+      expect(event.cancelBubble).toBe(false);
+      expect(event.defaultPrevented).toBe(true);
+    } finally {
+      window.removeEventListener('contextmenu', onBubble);
+    }
+  });
+
+  it('keeps propagating on an editing surface as well (the request is not a bubble barrier)', async () => {
+    // The editing menu is a *request*; it must not turn the suppression into a
+    // stopPropagation, or a React handler wrapped around a field (a card's own menu) would stop
+    // seeing the event the moment the field appears.
+    install();
+
+    const host = document.createElement('div');
+    document.body.append(host);
+    const root = createRoot(host);
+    roots.push(root);
+
+    const handlerSaw: boolean[] = [];
+    await act(async () => {
+      root.render(
+        <StrictMode>
+          <div
+            onContextMenu={(event) => {
+              handlerSaw.push(event.defaultPrevented);
+            }}
+          >
+            <input id="inside-card" defaultValue="x" />
+          </div>
+        </StrictMode>,
+      );
+    });
+
+    const bubbled: Event[] = [];
+    const onBubble = (event: Event): void => {
+      bubbled.push(event);
+    };
+    window.addEventListener('contextmenu', onBubble);
+    try {
+      const event = rightClick(host.querySelector('#inside-card') as HTMLElement);
+      expect(handlerSaw).toEqual([true]);
       expect(bubbled).toHaveLength(1);
       expect(event.cancelBubble).toBe(false);
       expect(event.defaultPrevented).toBe(true);
