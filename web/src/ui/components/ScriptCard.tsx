@@ -79,6 +79,7 @@ import {
   ContextMenuItem,
   ContextMenuSub,
 } from './ContextMenu.tsx';
+import { SourcePicker, type SourcePickerMode } from './SourcePicker.tsx';
 
 // ── prose ─────────────────────────────────────────────────────────────────────────────
 //
@@ -97,6 +98,14 @@ interface ScriptLabels {
   addPort: string;
   addOutput: string;
   removeOutput: string;
+  /** Left panel: the source label is the control that opens the source picker (M2). */
+  pickSource: string;
+  /** Left panel: `✕` on a port row (allowed unconditionally — ruling #3). */
+  removePort: string;
+  /** `{n}` is how many identifier occurrences the removal leaves behind in the script. */
+  portReferences: string;
+  /** The row hint when the script does not name the removed port's variable at all. */
+  portReferencesNone: string;
   /** `{name}` is the human output name, `{id}` its stable `out:N`. */
   buildTitle: string;
   /** Shown at the top of the build menu while the output has no rows yet. */
@@ -160,6 +169,10 @@ const LABELS: Record<Locale, ScriptLabels> = {
     addPort: '+ 端口',
     addOutput: '+ 输出',
     removeOutput: '删除此输出',
+    pickSource: '选择来源',
+    removePort: '删除此端口',
+    portReferences: '脚本里还有 {n} 处引用',
+    portReferencesNone: '脚本里没有引用',
     buildTitle: '{name}（{id}）· 从这里建卡',
     outputEmpty: '该输出还没有数据，先运行一次',
     buildUnavailable: '这个输出还不能建卡',
@@ -243,6 +256,10 @@ const LABELS: Record<Locale, ScriptLabels> = {
     addPort: '+ port',
     addOutput: '+ output',
     removeOutput: 'Remove this output',
+    pickSource: 'Choose the source',
+    removePort: 'Remove this port',
+    portReferences: 'The script still names it {n}×',
+    portReferencesNone: 'Not named in the script',
     buildTitle: '{name} ({id}) · build from this output',
     outputEmpty: 'No data yet — run the card first',
     buildUnavailable: 'This output cannot be built from yet',
@@ -813,6 +830,22 @@ interface PortView {
   missing: boolean;
 }
 
+/**
+ * The source label became a `<button>` (M2: it opens the source picker), and a button
+ * brings its own frame. These declarations strip it back to the text it used to be — inline
+ * because this lane owns no stylesheet, and the label must not read as a second control
+ * competing with the `✕` beside it. Colour and ellipsis still come from
+ * `.script-card__source`, so the row looks unchanged until it is hovered.
+ */
+const SOURCE_CONTROL_STYLE = {
+  font: 'inherit',
+  textAlign: 'left',
+  background: 'transparent',
+  border: 0,
+  padding: 0,
+  cursor: 'pointer',
+} as const;
+
 export function ScriptCard({
   card,
   active,
@@ -840,7 +873,11 @@ export function ScriptCard({
   const debugScriptCard = useWorkspace((state) => state.debugScriptCard);
   const renameScriptPort = useWorkspace((state) => state.renameScriptPort);
   const renameScriptOutput = useWorkspace((state) => state.renameScriptOutput);
-  const addScriptPort = useWorkspace((state) => state.addScriptPort);
+  /**
+   * 删口 (ruling #3): unconditional, so this is a plain action and not a request the card
+   * has to justify. Adding and re-binding a port go through the picker's own store calls.
+   */
+  const removeScriptInput = useWorkspace((state) => state.removeScriptInput);
   const addScriptOutput = useWorkspace((state) => state.addScriptOutput);
   const removeScriptOutput = useWorkspace((state) => state.removeScriptOutput);
   /**
@@ -873,6 +910,26 @@ export function ScriptCard({
     outputId: string;
     ordinal: number;
   } | null>(null);
+  /**
+   * The open source picker (`add` / `rebind`), anchored in VIEWPORT coordinates for the same
+   * reason the build menu is: `Popup` portals into `document.body` and needs a viewport
+   * point, not a point inside the card's transformed box.
+   *
+   * Nothing is declared by opening this — the store only writes on a pick — so closing the
+   * popup (Escape, outside click, a resize) leaves the card exactly as it was.
+   */
+  const [sourcePicker, setSourcePicker] = useState<{
+    mode: SourcePickerMode;
+    /** The port being re-bound; absent in `add` mode. */
+    portId?: string;
+    x: number;
+    y: number;
+  } | null>(null);
+  const openSourcePicker = (mode: SourcePickerMode, anchor: HTMLElement, portId?: string): void => {
+    const rect = anchor.getBoundingClientRect();
+    // Just under the control that opened it, like every other popup in the card.
+    setSourcePicker({ mode, portId, x: rect.left, y: rect.bottom + 4 });
+  };
 
   const params = scriptParams(card);
   const scriptText = params.script;
@@ -1097,6 +1154,21 @@ export function ScriptCard({
       }),
     [portNames, outputNames],
   );
+
+  /**
+   * What removing one port leaves behind in the script — the ONLY hint 删口 gets.
+   *
+   * The ruling is that removal is allowed unconditionally (the script's writer is the
+   * reader of its inputs, and a stale reference fails as a line-numbered `NameError`), so the
+   * panel counts occurrences and stops there. It doubles as the marker for a recycled name:
+   * a port added after an earlier one was removed can inherit a letter the script still uses.
+   */
+  const referenceHintFor = (varName: string): string => {
+    const occurrences = countScriptOccurrences(scriptText, varName);
+    return occurrences === 0
+      ? labels.portReferencesNone
+      : fill(labels.portReferences, { n: occurrences });
+  };
 
   const running = run?.status === 'running';
   const state = running ? 'computing' : (card.node?.state ?? 'idle');
@@ -1406,8 +1478,17 @@ export function ScriptCard({
                       The row HEAD is the connection endpoint; the preview (its sibling, on
                       outputs) is not, so a wire never anchors on a row that has grown a table
                       under it. A wire enters at this head's LEFT edge.
+
+                      `data-port-id` is the same identity in the DOM: the wiring gesture (G3)
+                      hit-tests a drop on this attribute to know which port a dragged card is
+                      being aimed at. It sits on the element the ref already registers, so the
+                      anchor and the gesture can never disagree about where the port is.
                     */}
-                    <div className="script-card__row-head" ref={portRefFor(port.portId, 'left')}>
+                    <div
+                      className="script-card__row-head"
+                      ref={portRefFor(port.portId, 'left')}
+                      data-port-id={port.portId}
+                    >
                       <NameField
                         value={port.varName}
                         ariaLabel={`${labels.ports} ${index + 1}`}
@@ -1421,9 +1502,22 @@ export function ScriptCard({
                           renameScriptPort(card.id, port.portId, name);
                         }}
                       />
-                      <span className="script-card__source" title={port.label}>
+                      {/*
+                        The source is the port's ATTACHMENT, not its identity (决策 §二), so
+                        it is a control: clicking it re-binds this port to another matrix
+                        without touching `in:N`, the variable name or the script.
+                      */}
+                      <button
+                        type="button"
+                        className="script-card__source script-card__source--control"
+                        title={`${labels.pickSource} — ${port.label}`}
+                        aria-label={`${labels.pickSource} ${port.varName}`}
+                        data-port-source={port.portId}
+                        style={SOURCE_CONTROL_STYLE}
+                        onClick={(event) => openSourcePicker('rebind', event.currentTarget, port.portId)}
+                      >
                         ← {port.label}
-                      </span>
+                      </button>
                       <span
                         className={`script-card__shape${port.missing ? ' script-card__shape--missing' : ''}`}
                       >
@@ -1432,20 +1526,38 @@ export function ScriptCard({
                       <span className="script-card__mode">
                         {t(port.mode === 'cell' ? 'formula.modeCell' : 'formula.modeMatrix')}
                       </span>
+                      {/*
+                        删口's only hint (ruling #3): the script's own references stay, so the
+                        next run reports a line-numbered `NameError`. Saying the count here is
+                        the whole veto — there is none.
+                      */}
+                      <span className="script-card__shape script-card__refs" title={labels.removePort}>
+                        {referenceHintFor(port.varName)}
+                      </span>
+                      <button
+                        type="button"
+                        className="script-card__remove"
+                        title={`${labels.removePort} ${port.varName} — ${referenceHintFor(port.varName)}`}
+                        aria-label={`${labels.removePort} ${port.varName}`}
+                        data-port-remove={port.portId}
+                        onClick={() => removeScriptInput(card.id, port.portId)}
+                      >
+                        ×
+                      </button>
                     </div>
                   </li>
                 ))}
               </ul>
             )}
+            {/*
+              NOT disabled at 0 ports: a card with no ports is a declaration that can still
+              gain its FIRST one, and the picker is what names its source. It used to be
+              disabled because the old action had nothing to clone.
+            */}
             <button
               type="button"
               className="script-card__add"
-              disabled={ports.length === 0}
-              onClick={() => {
-                // The action appends to the script's text: it must append to the latest text.
-                flushOperations();
-                addScriptPort(card.id);
-              }}
+              onClick={(event) => openSourcePicker('add', event.currentTarget)}
             >
               {labels.addPort}
             </button>
@@ -1700,6 +1812,25 @@ export function ScriptCard({
             {t('menu.newScriptCard')}
           </ContextMenuItem>
         </ContextMenu>
+      ) : null}
+
+      {/*
+        The source picker — the discoverable counterpart to the canvas wiring gesture (G3):
+        one popup, two entry points. From a port row's source label it RE-BINDS that port
+        (`in:N` and the variable stay); from `+ 端口` it APPENDS a port. Both write through
+        the store's own actions, so the cycle refusal, the atomic edge resync and the
+        declaration bookkeeping stay in one place. A sibling of the card body, so nothing in
+        the card's `overflow: hidden` can clip it (see `Popup`).
+      */}
+      {sourcePicker ? (
+        <SourcePicker
+          cardId={card.id}
+          mode={sourcePicker.mode}
+          portId={sourcePicker.portId}
+          x={sourcePicker.x}
+          y={sourcePicker.y}
+          onDismiss={() => setSourcePicker(null)}
+        />
       ) : null}
     </CardShell>
   );
