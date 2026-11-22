@@ -52,6 +52,11 @@ struct FunctionSignature {
   // reads it from /api/signatures (`compute: "auto" | "explicit"`) and renders a
   // compute action instead of assuming the numbers exist.
   bool explicitCompute = false;
+  // Whether evaluating this signature spawns a child process (the script card's
+  // interpreter). The scheduler reads this trait to route the run through the process
+  // lane — a registry-wide cap on concurrent children — instead of branching on the card
+  // kind: the next heavy capability declares the same trait and gets the same lane.
+  bool childProcess = false;
 };
 
 // Registry lookups. The returned pointers are valid for the process lifetime.

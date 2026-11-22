@@ -30,7 +30,8 @@ were considered and dropped. Three entrances, each answering one question:
   causal history: four eras, four spirals, a lesson list and the current state
   - [Project history (DataCardForge)](history.en.md) ← **read this one before the individual volumes**
 - 📌 **Decision records** (`decisions/`) — settled, direction-setting conclusions
-  - [Blocking gate: freeze propagation, alert once, outline the offending card (compute errors do not block)](decisions/2026-11-17-blocking-gate.md) ← **latest: stop but keep every state; release when the cause is gone**
+  - [Parallel wave scheduler: ready queue + script process lane](decisions/2026-11-22-parallel-wave-scheduler.md) ← **latest: a node starts the instant its producers finish, never waiting for unrelated slow cards; script children capped at four with cancel-aware queueing; client contract unchanged**
+  - [Blocking gate: freeze propagation, alert once, outline the offending card (compute errors do not block)](decisions/2026-11-17-blocking-gate.md) ← stop but keep every state; release when the cause is gone
   - [Script-card auto-run: formula-like after the first successful clean run](decisions/2026-11-17-script-autorun.md) ← **latest: one manual first run, automatic afterwards**
   - [Debounce belongs to the user operation: one 200 ms settle for the workspace](decisions/2026-11-17-operation-settle.md) ← the per-card 250/500/600 ms timers are gone
   - [Workspace trust: per-file hash records, per-script confirmation, bound to this machine](decisions/2026-11-17-workspace-trust.md) ← unconfirmed scripts do not run; the gate auto-run sits behind

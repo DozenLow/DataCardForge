@@ -241,10 +241,17 @@ class NodeRegistry {
   // whatever the path lengths. Ready nodes are taken in node-id order, which makes one
   // wave's sequence reproducible. Takes mu_ itself.
   std::vector<int64_t> waveOrder(int64_t nodeId, bool includeSelf) const;
-  // Walk `order` (dependency-first) and evaluate each node, applying the laziness rule:
-  // an `explicitCompute` node is marked stale instead of evaluated, and its dependents
-  // are marked stale without evaluation (their input is pending, not broken).
-  void evaluateInOrder(const std::vector<int64_t>& order);
+  // The wave's first half, single-threaded: walk `order` (dependency-first), mark every
+  // `explicitCompute` node stale and prune its subtree (their input is pending, not
+  // broken). Returns the dispatchable nodes, still in evaluation order.
+  std::vector<int64_t> prepareWave(const std::vector<int64_t>& order);
+  // The wave's second half: ready-queue dispatch over the dispatchable set — a node runs
+  // as soon as every in-wave producer has completed, never waiting for unrelated nodes.
+  // The calling thread is a worker too; spawned helpers are capped (DC_FORMULA_LANE,
+  // default 8). Script runs additionally pass the registry-wide process lane below.
+  // Blocks until the whole wave is done: the client's synchronous contract is unchanged.
+  // docs/decisions/2026-11-22-parallel-wave-scheduler.md.
+  void runWaveParallel(const std::vector<int64_t>& order);
   // REQUIRES mu_: mark the node dirty with a reason and drop its previous result, so
   // "dirty" always means "the numbers stored here do not describe the current inputs".
   void markStaleLocked(int64_t nodeId, DirtyReason reason);
@@ -316,6 +323,14 @@ class NodeRegistry {
   // Script-card runs in flight, by node id. Guarded by mu_; the pid is published here so
   // /cancel can signal it while the evaluation thread keeps waiting outside the lock.
   std::map<int64_t, std::shared_ptr<PythonRun>> runningPython_;
+
+  // The process lane ("脚本泳道"): a registry-wide cap on concurrent script child
+  // processes, shared by every request thread. Heavy runs queue for a slot; the wait is
+  // cancel-aware, so /cancel on a queued run ends it without ever spawning. Independent
+  // of mu_ — lock order is lane → registry (the queued-cancel path), never the reverse.
+  std::mutex scriptLaneMu_;
+  std::condition_variable scriptLaneCv_;
+  int scriptLaneBusy_ = 0;
 
   // Cycle check over the *dependency* direction, mirroring findDownstreamPath().
   bool wouldCycle(int64_t dependentId, int64_t dependsOnId, std::vector<int64_t>* pathOut) const;

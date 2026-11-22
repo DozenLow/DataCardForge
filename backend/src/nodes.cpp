@@ -10,8 +10,10 @@
 #include <ctime>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <queue>
 #include <set>
+#include <thread>
 
 #ifdef _WIN32
 #  ifndef WIN32_LEAN_AND_MEAN
@@ -1291,8 +1293,46 @@ NodeRegistry::ScriptCardOutcome NodeRegistry::runScriptCard(
     std::lock_guard<std::mutex> lock(mu_);
     runningPython_[nodeId] = run;
   }
-  const ProcessOutcome process =
-      runPythonChild(paths, timeoutMs, &run->cancelRequested, &run->pgid);
+
+  // The process lane: a registry-wide cap on concurrent script children (heavy work's
+  // own swim lane, so eight slow scripts can never starve a millisecond formula card).
+  // Registration happens FIRST, so /cancel finds a queued run too; the wait is
+  // cancel-aware and a cancelled queue entry returns without spawning anything.
+  static const int kScriptLaneCap = [] {
+    const char* env = std::getenv("DC_SCRIPT_LANE");
+    const int value = env != nullptr ? std::atoi(env) : 4;
+    return value > 0 ? value : 4;
+  }();
+  {
+    std::unique_lock<std::mutex> lane(scriptLaneMu_);
+    scriptLaneCv_.wait(lane, [&] {
+      return scriptLaneBusy_ < kScriptLaneCap || run->cancelRequested.load();
+    });
+    if (run->cancelRequested.load()) {
+      lane.unlock();
+      std::lock_guard<std::mutex> lock(mu_);
+      auto it = runningPython_.find(nodeId);
+      if (it != runningPython_.end() && it->second == run) runningPython_.erase(it);
+      outcome.errorCode = "runCancelled";
+      return outcome;
+    }
+    ++scriptLaneBusy_;
+  }
+  // Releases the slot the instant the child is reaped — not after the output decode —
+  // and on every exit path, including an exception.
+  struct LaneRelease {
+    NodeRegistry* registry;
+    ~LaneRelease() {
+      std::lock_guard<std::mutex> lane(registry->scriptLaneMu_);
+      --registry->scriptLaneBusy_;
+      registry->scriptLaneCv_.notify_one();
+    }
+  };
+  ProcessOutcome process;
+  {
+    LaneRelease release{this};
+    process = runPythonChild(paths, timeoutMs, &run->cancelRequested, &run->pgid);
+  }
   {
     std::lock_guard<std::mutex> lock(mu_);
     auto it = runningPython_.find(nodeId);
@@ -1389,6 +1429,9 @@ bool NodeRegistry::cancelRun(int64_t nodeId) {
   // The waiter polls the same flag, so a kill that loses this race still ends the run; the
   // direct signal is what makes /cancel immediate instead of "within one poll interval".
   run->cancelRequested.store(true);
+  // A run queued for a process-lane slot waits on this flag too: wake it so /cancel ends
+  // a queued run without ever spawning the interpreter.
+  scriptLaneCv_.notify_all();
   const int64_t pgid = run->pgid.load();
 #ifndef _WIN32
   if (pgid > 1) ::kill(static_cast<pid_t>(-pgid), SIGKILL);
@@ -2075,11 +2118,13 @@ void NodeRegistry::markStaleLocked(int64_t nodeId, DirtyReason reason) {
   }
 }
 
-void NodeRegistry::evaluateInOrder(const std::vector<int64_t>& order) {
+std::vector<int64_t> NodeRegistry::prepareWave(const std::vector<int64_t>& order) {
   // Nodes whose upstream is pending are marked, not evaluated: their input is not broken,
   // it is simply not computed yet, and reporting a data error for that would be a lie the
-  // user cannot act on.
+  // user cannot act on. Topological order guarantees every descendant of a lazy node
+  // appears after it, so one forward pass prunes whole lazy subtrees.
   std::set<int64_t> blocked;
+  std::vector<int64_t> dispatchable;
   for (int64_t id : order) {
     if (blocked.count(id)) {
       std::lock_guard<std::mutex> lock(mu_);
@@ -2101,15 +2146,152 @@ void NodeRegistry::evaluateInOrder(const std::vector<int64_t>& order) {
       for (int64_t dependent : collectSubtree(id, false)) blocked.insert(dependent);
       continue;
     }
-    evaluateNode(id);
+    dispatchable.push_back(id);
   }
+  return dispatchable;
+}
+
+void NodeRegistry::runWaveParallel(const std::vector<int64_t>& order) {
+  const std::vector<int64_t> dispatchable = prepareWave(order);
+  // A one-node wave gains nothing from threads: stay serial (also the degenerate case
+  // every existing single-card test exercises).
+  if (dispatchable.size() <= 1) {
+    for (int64_t id : dispatchable) evaluateNode(id);
+    return;
+  }
+
+  // In-wave readiness over the dispatchable set — the same key resolution as waveOrder:
+  // positive keys are node ids, matrix keys resolve to their producer through
+  // resultOwner_. The set is predecessor-closed (a node with a pruned producer is itself
+  // pruned), so every remaining count can reach zero.
+  struct WaveState {
+    std::mutex mu;
+    std::condition_variable cv;
+    std::deque<int64_t> ready;
+    std::map<int64_t, size_t> remaining;
+    std::map<int64_t, std::set<int64_t>> forward;
+    size_t unfinished = 0;
+    int helpers = 0;  // spawned workers still alive
+    std::vector<std::thread> threads;
+  };
+  auto state = std::make_shared<WaveState>();
+  state->unfinished = dispatchable.size();
+  {
+    std::lock_guard<std::mutex> lock(mu_);
+    const std::set<int64_t> wave(dispatchable.begin(), dispatchable.end());
+    for (int64_t id : wave) state->remaining[id] = 0;
+    for (int64_t id : wave) {
+      auto dit = dependencies_.find(id);
+      if (dit == dependencies_.end()) continue;
+      std::set<int64_t> preds;
+      for (int64_t key : dit->second) {
+        int64_t pred = -1;
+        if (key > 0) {
+          pred = key;
+        } else {
+          auto oit = resultOwner_.find(key);
+          if (oit != resultOwner_.end()) pred = oit->second.first;
+        }
+        if (pred > 0 && wave.count(pred) != 0) preds.insert(pred);
+      }
+      for (int64_t pred : preds) {
+        state->forward[pred].insert(id);
+        ++state->remaining[id];
+      }
+    }
+  }
+  for (int64_t id : dispatchable)
+    if (state->remaining[id] == 0) state->ready.push_back(id);
+
+  // The formula lane's worker cap. Env override exists for the perf gate and probes;
+  // the default leaves headroom on a 16-core box for the process lane and the UI.
+  static const int kMaxHelpers = [] {
+    const char* env = std::getenv("DC_FORMULA_LANE");
+    const int value = env != nullptr ? std::atoi(env) : 8;
+    return value > 0 ? value : 8;
+  }();
+
+  // One worker: take a ready node, evaluate it (the registry's usual unlocked phases and
+  // version-guarded commit), then release its consumers. The calling thread runs this
+  // too, so the wave still completes if thread creation ever fails. A node completes
+  // exactly once — done, error or cancelled all release consumers; an errored producer's
+  // downstream still runs and inherits the error through gatherInputs, as before.
+  std::function<void(bool)> worker = [&](bool counted) {
+    for (;;) {
+      int64_t id = -1;
+      {
+        std::unique_lock<std::mutex> lock(state->mu);
+        for (;;) {
+          if (state->unfinished == 0) {
+            if (counted) --state->helpers;
+            return;
+          }
+          if (!state->ready.empty()) {
+            id = state->ready.front();
+            state->ready.pop_front();
+            break;
+          }
+          state->cv.wait(lock);
+        }
+      }
+      // evaluateNode catches its own evaluation errors; this outer guard is the
+      // detached-thread rule (stress_test doctrine): nothing escapes a worker, so an
+      // exotic allocation failure degrades to one stuck node, never a dead process.
+      try {
+        evaluateNode(id);
+      } catch (...) {
+      }
+      {
+        std::lock_guard<std::mutex> lock(state->mu);
+        --state->unfinished;
+        auto fit = state->forward.find(id);
+        if (fit != state->forward.end()) {
+          for (int64_t consumer : fit->second)
+            if (--state->remaining[consumer] == 0) state->ready.push_back(consumer);
+        }
+        while (!state->ready.empty() && state->helpers < kMaxHelpers) {
+          ++state->helpers;
+          try {
+            state->threads.emplace_back(worker, true);
+          } catch (...) {
+            --state->helpers;  // the calling thread (and live helpers) drain the queue
+            break;
+          }
+        }
+        state->cv.notify_all();
+      }
+    }
+  };
+
+  // Initial helpers: enough that every root can start at once, never more than the cap
+  // and never more than roots minus one (the calling thread takes a root too).
+  {
+    std::lock_guard<std::mutex> lock(state->mu);
+    const size_t wanted = state->ready.size() > 1 ? state->ready.size() - 1 : 0;
+    while (state->helpers < kMaxHelpers && static_cast<size_t>(state->helpers) < wanted) {
+      ++state->helpers;
+      try {
+        state->threads.emplace_back(worker, true);
+      } catch (...) {
+        --state->helpers;
+        break;
+      }
+    }
+  }
+  worker(false);
+  // The calling thread returns only at unfinished == 0; no spawn can happen after that
+  // (an empty ready queue is part of the same critical section), so the vector is stable
+  // and every helper exits on the same condition. Joining cannot deadlock.
+  for (std::thread& t : state->threads) t.join();
 }
 
 void NodeRegistry::recomputeSubtree(int64_t nodeId) {
   // The loop holds no lock: evaluateNode() takes it in short bursts itself, so a slow node
   // cannot freeze the registry (docs/decisions/2026-10-15-max-headroom-principle.md).
   // Topological order, not BFS visit order: a join must wait for its LONGEST upstream path.
-  evaluateInOrder(waveOrder(nodeId, true));
+  // Ready-queue dispatch: independent branches run concurrently, joins still wait for all
+  // their producers (docs/decisions/2026-11-22-parallel-wave-scheduler.md).
+  runWaveParallel(waveOrder(nodeId, true));
 }
 
 void NodeRegistry::computeNow(int64_t nodeId) {
@@ -2122,7 +2304,7 @@ void NodeRegistry::computeNow(int64_t nodeId) {
     it->second.dirtyReason = DirtyReason::None;
   }
   evaluateNode(nodeId);
-  evaluateInOrder(waveOrder(nodeId, false));
+  runWaveParallel(waveOrder(nodeId, false));
 }
 
 void NodeRegistry::onMatrixChanged(int64_t matrixId) {

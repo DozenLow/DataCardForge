@@ -128,6 +128,7 @@ const FunctionSignature& pythonScript() {
     s.outputs = {};  // declared by params.outputs  (empty template, see header)
     s.explicitCompute = true;
     s.portsFromParams = true;
+    s.childProcess = true;
     return s;
   }();
   return kSig;

@@ -648,6 +648,127 @@ int main() {
     CHECK(fitCell(diaD.nodeId, 1) == waveIntercept);
   }
 
+  // ── Parallel fan-out: ready-queue dispatch must keep every number exact ─────────────
+  // Ten independent branches under one source, each with its own tail, plus an uneven
+  // join (x from a depth-2 node, y from a depth-3 node). The wave has >1 dispatchable
+  // node, so it goes through runWaveParallel's worker pool — completion order is not
+  // deterministic, the numbers must be. Same oracle rule as the serial diamond: the wave
+  // result must equal a fresh least-squares fit of the stored inputs.
+  {
+    Column fanCol;
+    fanCol.posName = "Pos.1";
+    fanCol.data = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    const int64_t fanSource = store.insert(Matrix({fanCol}));
+
+    auto fanParams = [](const std::string& expr) {
+      Json params = Json::object();
+      Json formulas = Json::array();
+      Json entry = Json::object();
+      entry.set("name", Json(std::string("f")));
+      entry.set("expression", Json(expr));
+      formulas.push(entry);
+      params.set("formulas", std::move(formulas));
+      return params;
+    };
+    PortBinding fanRoot;
+    fanRoot.portId = "src";
+    fanRoot.mode = "matrix";
+    fanRoot.sourceMatrixId = fanSource;
+    const auto root = nodes.createV2(kSigExpressionColumns, {fanRoot}, fanParams("pos.1 * 2"));
+    CHECK(root.nodeId > 0);
+    nodes.computeNow(root.nodeId);
+
+    std::vector<int64_t> branchIds, tailIds;
+    for (int i = 0; i < 10; ++i) {
+      PortBinding b;
+      b.portId = "src";
+      b.mode = "matrix";
+      b.sourceNodeId = root.nodeId;
+      const auto branch = nodes.createV2(
+          kSigExpressionColumns, {b}, fanParams("pos.1 + " + std::to_string(i)));
+      CHECK(branch.nodeId > 0);
+      nodes.computeNow(branch.nodeId);
+      PortBinding t;
+      t.portId = "src";
+      t.mode = "matrix";
+      t.sourceNodeId = branch.nodeId;
+      const auto tail = nodes.createV2(kSigExpressionColumns, {t}, fanParams("pos.1 * 3"));
+      CHECK(tail.nodeId > 0);
+      nodes.computeNow(tail.nodeId);
+      branchIds.push_back(branch.nodeId);
+      tailIds.push_back(tail.nodeId);
+    }
+
+    PortBinding fanX;
+    fanX.portId = "x";
+    fanX.varName = "x";
+    fanX.mode = "cell";
+    fanX.columnIndex = 0;
+    fanX.sourceNodeId = branchIds[0];  // depth 2
+    PortBinding fanY;
+    fanY.portId = "y";
+    fanY.varName = "y";
+    fanY.mode = "cell";
+    fanY.columnIndex = 0;
+    fanY.sourceNodeId = tailIds[6];  // depth 3
+    const auto fanJoin = nodes.createV2(kSigLinearRegression, {fanX, fanY}, Json::object());
+    CHECK(fanJoin.nodeId > 0);
+    nodes.computeNow(fanJoin.nodeId);
+
+    int64_t revision = 0;
+    CHECK(store.patchCells(fanSource, {CellPatch{0, 0, 7.0}}, &revision));
+    nodes.onMatrixChanged(fanSource);
+
+    // Every node in the fan must be done — a lost wakeup or a stuck remaining count
+    // would leave a yellow card behind.
+    const auto rootNode = nodes.get(root.nodeId);
+    CHECK(rootNode && rootNode->state == NodeState::Done);
+    for (int64_t id : branchIds) {
+      const auto n = nodes.get(id);
+      CHECK(n && n->state == NodeState::Done);
+    }
+    for (int64_t id : tailIds) {
+      const auto n = nodes.get(id);
+      CHECK(n && n->state == NodeState::Done);
+    }
+    const auto joinNode = nodes.get(fanJoin.nodeId);
+    CHECK(joinNode && joinNode->state == NodeState::Done);
+
+    // Independent oracle over the FRESH stored columns (x = 2*a, y = 3*(2*a+6)).
+    const auto xFresh = columnOf(store, rootNode->resultMatrixId());
+    Matrix yMatrix;
+    CHECK(store.snapshot(nodes.get(tailIds[6])->resultMatrixId(), &yMatrix));
+    const auto yFresh = yMatrix.column(0).data;
+    double sx = 0, sy = 0;
+    for (size_t i = 0; i < xFresh.size(); ++i) {
+      sx += xFresh[i];
+      sy += yFresh[i];
+    }
+    const double mx = sx / static_cast<double>(xFresh.size());
+    const double my = sy / static_cast<double>(yFresh.size());
+    double sxx = 0, sxy = 0;
+    for (size_t i = 0; i < xFresh.size(); ++i) {
+      sxx += (xFresh[i] - mx) * (xFresh[i] - mx);
+      sxy += (xFresh[i] - mx) * (yFresh[i] - my);
+    }
+    const double wantSlope = sxy / sxx;
+    const double wantIntercept = my - wantSlope * mx;
+    Matrix joinMatrix;
+    CHECK(store.snapshot(joinNode->resultMatrixId(), &joinMatrix));
+    CHECK(std::abs(joinMatrix.column(0).data[0] - wantSlope) < 1e-9);
+    CHECK(std::abs(joinMatrix.column(1).data[0] - wantIntercept) < 1e-9);
+    // x = 2*a is linear in a and y = 6*a+18, so the fit is exact: slope 3, intercept 18.
+    CHECK(std::abs(joinMatrix.column(0).data[0] - 3.0) < 1e-9);
+    CHECK(std::abs(joinMatrix.column(1).data[0] - 18.0) < 1e-9);
+
+    // Idempotence: a fresh recompute of the join must not move the numbers.
+    nodes.computeNow(fanJoin.nodeId);
+    Matrix again;
+    CHECK(store.snapshot(joinNode->resultMatrixId(), &again));
+    CHECK(again.column(0).data[0] == joinMatrix.column(0).data[0]);
+    CHECK(again.column(1).data[0] == joinMatrix.column(1).data[0]);
+  }
+
   std::printf("%s: node_registry (%d failures)\n", failures == 0 ? "PASS" : "FAILED", failures);
   return failures == 0 ? 0 : 1;
 }

@@ -417,6 +417,89 @@ void testCancelKillsTheRun() {
   CHECK(!fixture.nodes.cancelRun(nodeId));  // nothing left to cancel
 }
 
+// The process lane caps concurrent script children (default 4, DC_SCRIPT_LANE). Six
+// 0.3-second runs through four slots need at least two rounds: time.sleep cannot be
+// shortened, so the wall-clock lower bound is a hard consequence of the cap, not a
+// timing hope. Before the lane existed these six ran fully concurrent (~one round).
+void testScriptLaneCapsConcurrentChildren() {
+  Fixture fixture;
+  const int64_t source = insertMatrix(&fixture.store, {{1, 2}});
+  std::vector<int64_t> ids;
+  for (int i = 0; i < 6; ++i) {
+    const int64_t nodeId = createPythonNode(
+        &fixture, {source}, {"A"}, "import time\ntime.sleep(0.3)\nout = A\n", {"out"}, 10000);
+    CHECK(nodeId > 0);
+    ids.push_back(nodeId);
+  }
+  const auto started = std::chrono::steady_clock::now();
+  std::vector<std::thread> threads;
+  for (int64_t id : ids)
+    threads.emplace_back([&fixture, id] { fixture.nodes.computeNow(id); });
+  for (std::thread& t : threads) t.join();
+  const double seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+  // Lower bound follows the actual cap (env-overridable): ceil(6/cap) rounds of 0.3s
+  // sleep, with 25% slack for scheduling. sleep cannot be shortened, so this is a hard
+  // consequence of the cap, not a timing hope.
+  const char* laneEnv = std::getenv("DC_SCRIPT_LANE");
+  const int laneCap = laneEnv != nullptr && std::atoi(laneEnv) > 0 ? std::atoi(laneEnv) : 4;
+  const double rounds = std::ceil(6.0 / static_cast<double>(laneCap));
+  CHECK_MSG(seconds >= 0.3 * rounds * 0.75,
+            "six 0.3s runs finished in %.2fs (cap %d) — the lane cap did not engage",
+            seconds, laneCap);
+  CHECK_MSG(seconds < 5.0, "lane runs took %.2fs — a slot leaked or a waiter stalled", seconds);
+  for (int64_t id : ids) {
+    const auto node = fixture.nodes.get(id);
+    CHECK(node && node->state == NodeState::Done);
+  }
+}
+
+// /cancel must reach a run QUEUED for a lane slot, not only a running child: four
+// infinite loops hold every slot, the fifth registers and waits, and cancelling it ends
+// the wait without ever spawning an interpreter. Registration-before-wait is what makes
+// cancelRun() answer true for the queued run.
+void testCancelQueuedRun() {
+  Fixture fixture;
+  const int64_t source = insertMatrix(&fixture.store, {{1, 2}});
+  std::vector<int64_t> ids;
+  for (int i = 0; i < 5; ++i) {
+    const int64_t nodeId = createPythonNode(
+        &fixture, {source}, {"A"}, "while True:\n    pass\n", {"out"}, 30000);
+    CHECK(nodeId > 0);
+    ids.push_back(nodeId);
+  }
+  const auto started = std::chrono::steady_clock::now();
+  std::vector<std::thread> threads;
+  for (int64_t id : ids)
+    threads.emplace_back([&fixture, id] { fixture.nodes.computeNow(id); });
+  // Handshake: cancelRun answers true once the run is registered — running OR queued.
+  bool allSignalled = true;
+  for (int64_t id : ids) {
+    bool signalled = false;
+    while (std::chrono::steady_clock::now() - started < std::chrono::seconds(10)) {
+      if (fixture.nodes.cancelRun(id)) {
+        signalled = true;
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+    allSignalled = allSignalled && signalled;
+  }
+  for (std::thread& t : threads) t.join();
+  const double seconds =
+      std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count();
+  CHECK_MSG(allSignalled, "cancelRun never saw one of the five runs");
+  CHECK_MSG(seconds < 8.0, "queued cancel took %.2fs — the lane wait is not cancel-aware",
+            seconds);
+  for (int64_t id : ids) {
+    const auto node = fixture.nodes.get(id);
+    // Stopping is not a script failure — every card goes back to "not requested yet".
+    CHECK(node && node->state == NodeState::Dirty);
+    CHECK(node && node->dirtyReason == DirtyReason::NotRequested);
+    CHECK(node && node->errorCode.empty());
+  }
+}
+
 }  // namespace
 
 int main() {
@@ -451,6 +534,8 @@ int main() {
   testExtraOutputsFromTheManifest();
   testZeroPortGeneratorCard();
   testCancelKillsTheRun();
+  testScriptLaneCapsConcurrentChildren();
+  testCancelQueuedRun();
 
   std::printf("%s: python_node (%d failures)\n", failures == 0 ? "PASS" : "FAILED", failures);
   return failures == 0 ? 0 : 1;
