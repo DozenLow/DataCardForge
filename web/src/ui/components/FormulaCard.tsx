@@ -4,7 +4,7 @@
  * Three zones, as designed in the function-card review (README 函数卡 UI):
  *
  *   ┌───────────┬──────────────────────────────┐
- *   │  inputs   │  formulas (one row each)     │
+ *   │  inputs   │  formulas (one entry each)     │
  *   │  (ports)  ├──────────────────────────────┤
  *   │           │  outputs: list + result grid │
  *   └───────────┴──────────────────────────────┘
@@ -192,7 +192,7 @@ export function FormulaCard({
    * Explanations sit behind a ~1 s rest (`HoverHelp`), never on a native `title`: the card
    * is dense, and instant browser tooltips fire on every accidental pass-over.
    *
-   * One hook per *kind* of control, not per row: every expression row explains itself with
+   * One hook per *kind* of control, not per entry: every expression entry explains itself with
    * the same sentence, and hooks cannot be called inside the `draft.map`.
    */
   const nameHover = useHoverHelp(t('help.hover.name'));
@@ -287,7 +287,7 @@ export function FormulaCard({
    * own column list — so `Pos.${index + 1}` is exactly that column.
    *
    * The insertion target is whichever expression input has focus. With none focused the
-   * first row is used and its whole text is REPLACED: appending at the end turned the one
+   * first entry is used and its whole text is REPLACED: appending at the end turned the one
    * affordance that exists to teach `Pos.N` into a red card (`时间_秒 * 2Pos.2` — "表达式
    * 结束后多出「Pos.2」"). A click on a column chip with nothing focused means "use this
    * column", not "glue this onto whatever was there".
@@ -396,7 +396,7 @@ export function FormulaCard({
    * the picker would show a stale value until some unrelated change rebuilt the draft — the
    * store already holds the answer, so the draft follows it.
    *
-   * Only values that DIFFER are written, so an untouched row keeps its object identity and
+   * Only values that DIFFER are written, so an untouched entry keeps its object identity and
    * the commit effect below stays quiet.
    */
   useEffect(() => {
@@ -427,8 +427,8 @@ export function FormulaCard({
         const current = formulas?.[index];
         if (!current) return;
         if (current.name === formula.name && current.expression === formula.expression) {
-          // The synthesiser keeps the row's OTHER fields intact, so an unchanged name and
-          // expression must not re-send the row: that would drop `unit` (the synthesised
+          // The synthesiser keeps the entry's OTHER fields intact, so an unchanged name and
+          // expression must not re-send the entry: that would drop `unit` (the synthesised
           // parameters carry only name + expression). The unit has its own commit path.
           return;
         }
@@ -452,7 +452,7 @@ export function FormulaCard({
    * never change a value, a state or a message.
    *
    * The three tiers are the decision's (§二), not the card's invention:
-   *   - `strict` (default) — show the mismatches, attributed to the row that produced them;
+   *   - `strict` (default) — show the mismatches, attributed to the entry that produced them;
    *   - `free`            — the tier means "do not check", so nothing is shown at all: a
    *                         warning would be the very checking the user turned off;
    *   - `auto`            — the backend CONVERTED the same-dimension pairs before computing,
@@ -616,9 +616,9 @@ export function FormulaCard({
   /**
    * Clicking a result header's unit chip overrides the derived unit.
    *
-   * This is the same assertion as the per-row picker (`params.formulas[i].unit`), anchored
+   * This is the same assertion as the per-entry picker (`params.formulas[i].unit`), anchored
    * where the label is: without it, a user who disagrees with an inherited unit would have no
-   * way to say so without hunting for the row. An empty answer withdraws the assertion.
+   * way to say so without hunting for the entry. An empty answer withdraws the assertion.
    */
   const setResultUnitPick = (index: number) => {
     const own = resultUnitView ? (unitConfirmations[resultUnitView.signature]?.[index] ?? '') : '';
@@ -833,8 +833,8 @@ export function FormulaCard({
                     }
                   />
                   {/* Explicit OUTPUT unit (units L1a §2). Empty = assert nothing, which is
-                      what every row did before this control existed. The choice is stored on
-                      the row (`params.formulas[i].unit`) and re-asserted into the confirmation
+                      what every entry did before this control existed. The choice is stored on
+                      the entry (`params.formulas[i].unit`) and re-asserted into the confirmation
                       memory after every result pull, so charts/convert read it for free. */}
                   <select
                     className={`formula-card__unit card__control${
@@ -883,7 +883,7 @@ export function FormulaCard({
                   ) : null}
                 </div>
               )) : null}
-              {/* One tooltip per kind of control, rendered once: every row shares the same
+              {/* One tooltip per kind of control, rendered once: every entry shares the same
                   sentence, and a hook cannot be called inside the map above. */}
               {nameHover.tooltip}
               {expressionHover.tooltip}
@@ -920,7 +920,7 @@ export function FormulaCard({
                 <p className="formula-card__stale">{t('formula.staleUpstream')}</p>
               ) : null}
               {/* Unit advice from the backend, tier-aware (units L1b §B2). It renders below
-                  the rows it is about, and every entry names its own row when the card has
+                  the entries it is about, and every entry names its own entry when the card has
                   more than one — the `formula` index the server attaches is exactly that. */}
               {unitNotice ? (
                 <div
