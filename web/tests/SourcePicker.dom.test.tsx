@@ -563,7 +563,7 @@ describe('removal and the name-reuse warning', () => {
     const host = await mount(cardId);
 
     // The birth template names A once (`result = A * 1.0`); the comment is not a reference.
-    const hint = host.querySelector('.script-card__row .script-card__refs');
+    const hint = host.querySelector('.script-card__port .script-card__refs');
     expect(hint?.textContent).toBe('脚本里还有 1 处引用');
 
     const remove = host.querySelector<HTMLButtonElement>('[data-port-remove="in:0"]')!;
@@ -615,7 +615,7 @@ describe('wiring seams', () => {
     const head = host.querySelector<HTMLElement>('[data-port-id="in:0"]');
     expect(head).not.toBeNull();
     // The element the gesture hit-tests is the element the wire anchors on.
-    expect(head!.className).toContain('script-card__row-head');
+    expect(head!.className).toContain('script-card__port-head');
     expect(portAnchor(cardId, 'in:0')?.side).toBe('left');
   });
 });

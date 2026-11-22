@@ -302,7 +302,7 @@ export function UnitConvertCard({
           : resolution.unit;
 
     return (
-      <li key={index} className="unit-convert__row" data-column={index}>
+      <li key={index} className="unit-convert__entry" data-column={index}>
         <span className="unit-convert__name" title={name}>
           {name}
         </span>

@@ -167,7 +167,7 @@ function menuItem(text: string): HTMLButtonElement {
 
 /** Right-click one output row — the gesture that opens the build menu. */
 async function openBuildMenu(host: HTMLElement, ordinal: number): Promise<HTMLButtonElement[]> {
-  const row = host.querySelectorAll<HTMLElement>('.script-card__row--output')[ordinal];
+  const row = host.querySelectorAll<HTMLElement>('.script-card__port--output')[ordinal];
   if (!row) throw new Error(`output row ${ordinal} is missing`);
   await rightClick(row);
   return menuItems();
@@ -339,7 +339,7 @@ describe('the build entry', () => {
     // The row is a text box and a couple of buttons; a right-click in the box is the
     // browser's paste gesture, not a request to build a card.
     const host = await mount(cardId);
-    const input = host.querySelector<HTMLInputElement>('.script-card__row--output input');
+    const input = host.querySelector<HTMLInputElement>('.script-card__port--output input');
     expect(input).not.toBeNull();
     await rightClick(input!);
     expect(document.querySelector('.context-menu')).toBeNull();

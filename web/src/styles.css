@@ -1659,7 +1659,7 @@ body {
   border-bottom: 1px solid var(--border);
 }
 
-.formula-card__row {
+.formula-card__expr-entry {
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1667,7 +1667,7 @@ body {
   flex-wrap: wrap;
 }
 
-.formula-card__row--error .formula-card__expr {
+.formula-card__expr-entry--error .formula-card__expr {
   border-color: var(--danger);
 }
 
@@ -2310,8 +2310,8 @@ body {
   color: var(--text);
 }
 
-.summary-panel__row:hover td,
-.summary-panel__row:hover th {
+.summary-panel__stat-item:hover td,
+.summary-panel__stat-item:hover th {
   background: var(--accent-soft);
 }
 
@@ -2961,7 +2961,7 @@ body {
   color: var(--text-dim);
 }
 
-.script-card__row-list {
+.script-card__port-list {
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -2974,7 +2974,7 @@ body {
  * One row is one small card: its HEAD is the connection endpoint, so the row has to read as
  * a thing a wire can attach to rather than as a line of text inside a list.
  */
-.script-card__row {
+.script-card__port {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2987,12 +2987,12 @@ body {
   background: var(--surface);
 }
 
-.script-card__row--output {
+.script-card__port--output {
   background: var(--surface-alt);
 }
 
 /* The endpoint block: everything except the preview, so the wire ignores the expanded table. */
-.script-card__row-head {
+.script-card__port-head {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -3547,7 +3547,7 @@ body {
 
 /* One grid for the header and every row, so the three columns cannot drift apart. */
 .unit-convert__head,
-.unit-convert__row {
+.unit-convert__entry {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 88px 108px;
   align-items: center;
@@ -3572,7 +3572,7 @@ body {
   min-height: 0;
 }
 
-.unit-convert__row {
+.unit-convert__entry {
   border-bottom: 1px solid color-mix(in srgb, var(--border) 45%, transparent);
   font-size: 12px;
 }

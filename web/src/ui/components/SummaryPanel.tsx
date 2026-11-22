@@ -288,7 +288,7 @@ export function SummaryPanel({ card }: SummaryPanelProps) {
                 </thead>
                 <tbody>
                   {result.stats.map((stat, row) => (
-                    <tr key={stat} className="summary-panel__row">
+                    <tr key={stat} className="summary-panel__stat-item">
                       {/* Raw catalog id: row identity, deliberately not translated. */}
                       <th scope="row" className="summary-panel__stat">
                         {stat}

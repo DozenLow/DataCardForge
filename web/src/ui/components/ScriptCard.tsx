@@ -101,11 +101,11 @@ interface ScriptLabels {
   removeOutput: string;
   /** Left panel: the source label is the control that opens the source picker (M2). */
   pickSource: string;
-  /** Left panel: `✕` on a port row (allowed unconditionally — ruling #3). */
+  /** Left panel: `✕` on a input port (allowed unconditionally — ruling #3). */
   removePort: string;
   /** `{n}` is how many identifier occurrences the removal leaves behind in the script. */
   portReferences: string;
-  /** The row hint when the script does not name the removed port's variable at all. */
+  /** The port hint when the script does not name the removed port's variable at all. */
   portReferencesNone: string;
   /** `{name}` is the human output name, `{id}` its stable `out:N`. */
   buildTitle: string;
@@ -605,13 +605,13 @@ function OutputPreview({
 }: {
   preview: ScriptPreview | undefined;
   labels: ScriptLabels;
-  /** Fired after the toggle commits, because the row it lives in just changed height. */
+  /** Fired after the toggle commits, because the port it lives in just changed height. */
   onLayoutChange: () => void;
 }) {
   const [open, setOpen] = useState(false);
 
   /**
-   * The preview grows INSIDE the row card, so expanding it moves every row below without a
+   * The preview grows INSIDE the port card, so expanding it moves every port below without a
    * drag or a resize for anything else to notice. The effect (not the click handler) runs
    * after the commit, which is the first moment the new height is measurable.
    */
@@ -836,7 +836,7 @@ interface PortView {
  * brings its own frame. These declarations strip it back to the text it used to be — inline
  * because this lane owns no stylesheet, and the label must not read as a second control
  * competing with the `✕` beside it. Colour and ellipsis still come from
- * `.script-card__source`, so the row looks unchanged until it is hovered.
+ * `.script-card__source`, so the port looks unchanged until it is hovered.
  */
 const SOURCE_CONTROL_STYLE = {
   font: 'inherit',
@@ -1274,7 +1274,7 @@ export function ScriptCard({
       const callback = (element: HTMLElement | null) => {
         if (!element) return undefined;
         registerPort(card.id, portId, element, side);
-        // The cleanup keeps the registry honest when the row leaves the list or the card
+        // The cleanup keeps the registry honest when the port leaves the list or the card
         // closes: a stale rect would leave a wire pointing at nothing.
         return () => unregisterPort(card.id, portId);
       };
@@ -1283,16 +1283,16 @@ export function ScriptCard({
     };
   }, [card.id, card.inputs, card.outputs]);
 
-  // The row lists, so the observer below can watch them grow, shrink and reflow.
+  // The port lists, so the observer below can watch them grow, shrink and reflow.
   const inputsList = useRef<HTMLUListElement | null>(null);
   const outputsList = useRef<HTMLUListElement | null>(null);
 
   /**
    * Row reflow is layout too.
    *
-   * A preview expanding, a rename hint wrapping onto a second line or a row card growing all
+   * A preview expanding, a rename hint wrapping onto a second line or a port card growing all
    * move the anchors below them, and none of those passes through a drag or a resize handler.
-   * The LISTS are observed rather than the rows, because a list also catches rows that did not
+   * The LISTS are observed rather than the ports, because a list also catches ports that did not
    * exist when this effect first ran (a new output, a new port).
    */
   useEffect(() => {
@@ -1305,7 +1305,7 @@ export function ScriptCard({
 
   /**
    * Stable, so the preview's effect fires when the toggle commits rather than on every
-   * render of the row it lives in.
+   * render of the port it lives in.
    */
   const invalidateOnLayoutChange = useCallback(() => invalidateLayout(), []);
 
@@ -1440,8 +1440,8 @@ export function ScriptCard({
         {/*
           Three columns in one row: what the script reads, the script, what it produces. The
           editor used to be a full-width band below the declaration panels; putting the panels
-          BESIDE it is what lets a wire enter a port row from the left and leave an output row
-          to the right, at the row's own height, instead of at the card's edges.
+          BESIDE it is what lets a wire enter a input port from the left and leave an output port
+          to the right, at the port's own height, instead of at the card's edges.
         */}
         <div className="script-card__body">
           {/* ── left: what the script reads ── */}
@@ -1478,9 +1478,9 @@ export function ScriptCard({
             {ports.length === 0 ? (
               <p className="script-card__panel-empty">{labels.noPorts}</p>
             ) : (
-              <ul className="script-card__row-list" ref={inputsList}>
+              <ul className="script-card__port-list" ref={inputsList}>
                 {ports.map((port, index) => (
-                  <li className="script-card__row" key={port.portId}>
+                  <li className="script-card__port" key={port.portId}>
                     {/*
                       The row HEAD is the connection endpoint; the preview (its sibling, on
                       outputs) is not, so a wire never anchors on a row that has grown a table
@@ -1492,7 +1492,7 @@ export function ScriptCard({
                       anchor and the gesture can never disagree about where the port is.
                     */}
                     <div
-                      className="script-card__row-head"
+                      className="script-card__port-head"
                       ref={portRefFor(port.portId, 'left')}
                       data-port-id={port.portId}
                     >
@@ -1595,14 +1595,14 @@ export function ScriptCard({
               </button>
             ))}
           >
-            <ul className="script-card__row-list" ref={outputsList}>
+            <ul className="script-card__port-list" ref={outputsList}>
               {card.outputs.map((output, ordinal) => {
                 const preview = run?.previews[output.outputId];
                 return (
                   <li
-                    className="script-card__row script-card__row--output"
+                    className="script-card__port script-card__port--output"
                     key={output.outputId}
-                    // The output row is this card's equivalent of a column header: a data
+                    // The output port is this card's equivalent of a column header: a data
                     // column is right-clicked to build from it, and every declared output
                     // — ordinal 0 included — is a matrix the store can already build from.
                     // The gesture is the entry point, not a button (the left-click 「建卡」
@@ -1626,7 +1626,7 @@ export function ScriptCard({
                     {/* The head, not the whole row: this is where the wire leaves, at this
                         row's height, from the RIGHT edge. */}
                     <div
-                      className="script-card__row-head"
+                      className="script-card__port-head"
                       ref={portRefFor(output.outputId, 'right')}
                     >
                       <NameField
@@ -1741,7 +1741,7 @@ export function ScriptCard({
       </div>
 
       {/*
-        The build menu — opened by right-clicking an output row, the same gesture a data
+        The build menu — opened by right-clicking an output port, the same gesture a data
         column header uses. It is a sibling of the card body so nothing inside the card's
         `overflow: hidden` can clip it (see `Popup`). Every branch closes it itself: a menu
         that survives its own click leaves the user wondering whether the click landed.
@@ -1823,7 +1823,7 @@ export function ScriptCard({
 
       {/*
         The source picker — the discoverable counterpart to the canvas wiring gesture (G3):
-        one popup, two entry points. From a port row's source label it RE-BINDS that port
+        one popup, two entry points. From a input port's source label it RE-BINDS that port
         (`in:N` and the variable stay); from `+ 端口` it APPENDS a port. Both write through
         the store's own actions, so the cycle refusal, the atomic edge resync and the
         declaration bookkeeping stay in one place. A sibling of the card body, so nothing in

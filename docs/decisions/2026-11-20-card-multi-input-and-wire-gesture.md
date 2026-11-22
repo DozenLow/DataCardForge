@@ -86,13 +86,13 @@ UI 只传单卡），补口只会克隆首源（`addScriptPort` 把新口绑到 
 > **表现选择**（图表列 dock）：只列已连接来源，新连接走来源侧显式手势。
 > **绑定声明**（脚本卡左栏）：端口先于边存在，左栏是输入的唯一编辑面，可枚举工作区可发布矩阵。
 
-- 端口行 `← 来源` 变控件，点开 `Popup`（门户到 body，卡片是 transformed 容器）按
+- 端口 `← 来源` 变控件，点开 `Popup`（门户到 body，卡片是 transformed 容器）按
   `publishedMatrices` 分组：数据卡=当前显示文件，函数卡=每个已声明输出（含 unit-convert 卡，
   零特例自动覆盖）。**自己与下游（会成环）置灰**并给理由；已被别口占用的标「已绑定为 A」；
   输出槽还没算过的标「尚未计算」。
 - `+ 端口` 打开同一弹层：选中即追加 `in:N` + 名字；**取消则什么都不留**。0 口时不再 disabled。
-- 行尾 `✕` 删口：复用 `countScriptOccurrences` 提示「脚本里还有 N 处引用」，只提示不拦截。
-- 端口行加 `data-port-id`（供 G3 命中测试；现在只有 ref 注册，没有该属性）。
+- 端口尾部 `✕` 删口：复用 `countScriptOccurrences` 提示「脚本里还有 N 处引用」，只提示不拦截。
+- 端口加 `data-port-id`（供 G3 命中测试；现在只有 ref 注册，没有该属性）。
 - 视觉语言复用图表统一后的 `SidePanel`/`Popup`（`53af5d9`），保持一致。
 - 多文件卡的非当前文件选不到（`publishedMatrices` 只发当前显示文件；「切文件是数据变更」是
   冻结契约，要换先切文件）。同表多口允许（两个变量读同一批数字，无害），选择器标注即可。
@@ -100,14 +100,14 @@ UI 只传单卡），补口只会克隆首源（`addScriptPort` 把新口绑到 
 ## 六、右键拖接线手势（G3）
 
 抓手 P0 = **标题栏**：react-rnd 的拖拽把手、`allowAnyClick` 默认 false（右键不挪卡）、
-**没有任何右键菜单**——唯一干净位。表头/输出行/结果头各有自绘菜单，留待 G4。
+**没有任何右键菜单**——唯一干净位。表头/输出端口/结果头各有自绘菜单，留待 G4。
 
 **落点矩阵**（松手前必须显示方向与动作）：
 
 | 落点 | 动作 | 松手前显示 |
 |---|---|---|
-| B 的**脚本端口行**（`in:N`） | **替换**该端口来源 | `替换端口 A（原 b.csv → 新 c.csv）` |
-| B 的**卡体**（非端口行） | **新增**端口，名字取下一个空闲字母 | `新增端口 B ← c.csv` |
+| B 的**脚本端口**（`in:N`） | **替换**该端口来源 | `替换端口 A（原 b.csv → 新 c.csv）` |
+| B 的**卡体**（非端口） | **新增**端口，名字取下一个空闲字母 | `新增端口 B ← c.csv` |
 | B 是图表 / 内置签名函数卡（含 unit-convert） | 拒绝 | `此卡片不接受新输入` |
 | A 自己 / A 的下游 | 松手前就红、松手拒绝 | 复用 `status.cycle` toast |
 | 空白画布 | 取消，零副作用 | 草稿线变虚线 |
@@ -119,8 +119,8 @@ UI 只传单卡），补口只会克隆首源（`addScriptPort` 把新口绑到 
 - **与文件拖放区分**：左键拖文件到数据卡=替换数据（现有 `dropTarget` 高亮）；右键拖卡到
   数据卡=拒绝（数据卡不接受输入）。两套高亮必须长得不一样。
 - 命中测试用**纯函数 `resolveDrop(point, cards, ports)` 按卡矩形解**（client→plane 换算在外层
-  薄薄一层），不依赖 `elementFromPoint`（jsdom 无布局，会假阳性）；端口行靠 `data-port-id`。
-  `resolveDrop` 必须区分**图表端口行（chartPortId，拒接）与脚本端口行（in:N，可替换）**。
+  薄薄一层），不依赖 `elementFromPoint`（jsdom 无布局，会假阳性）；端口靠 `data-port-id`。
+  `resolveDrop` 必须区分**图表端口（chartPortId，拒接）与脚本端口（in:N，可替换）**。
 - 手势内核（`wireGesture` 状态 + `resolveDrop` + ConnectionLayer 的 `draftWire`）与触发器分离：
   今天挂标题栏右键，将来端口圆点做出来只换触发器，内核不动。草稿线留在 `pointer-events: none`
   的背景层，不新增层、不碰「连线不拦截鼠标」锁定项。
@@ -149,7 +149,7 @@ UI 只传单卡），补口只会克隆首源（`addScriptPort` 把新口绑到 
 几乎无实际意义，**全部屏蔽，需要的功能重写**。
 
 - **G1（S1）**：`window.addEventListener('contextmenu', e => e.preventDefault(), {capture:true})`。
-  **只 `preventDefault`、不 `stopPropagation`**——四处自绘菜单（表头/结果头/输出行/裸画布）
+  **只 `preventDefault`、不 `stopPropagation`**——四处自绘菜单（表头/结果头/输出端口/裸画布）
   全是 React `onContextMenu`，事件照常冒泡，行为零回归，只是原生菜单没了。**编辑面暂时豁免**
   （`closest('input, textarea, select, [contenteditable="true"], .cm-content')` 放行，输入框/CodeMirror
   还能用浏览器粘贴菜单；G2 判定编辑面不可只靠该属性，`plaintext-only`/空值也要认）。
@@ -192,7 +192,7 @@ EditingSurface = { copy(), cut(), paste(text), selectAll(), canCopy, canPaste }
 | M2 | 左栏来源选择器 + `data-port-id` | ScriptCard.tsx、新 SourcePicker.tsx、DOM 测试 | M1 |
 | G2 | EditingSurface + 编辑菜单 S2（删豁免） | 新 editingSurface.ts/EditingMenu.tsx、ScriptCard.tsx(仅注册适配器)、VirtualTable.tsx、FormulaCard.tsx、测试 | G1 |
 | G3 | pointer 仲裁 + 右键拖接线 | 新 wireGesture.ts、CardShell.tsx、ConnectionLayer.tsx、cardMetrics.ts、测试 | M1+G1+M2 |
-| G4 | **延后另开板**：四菜单改 pointerup 派发、输出行起手拖线 | — | G3 验证后 |
+| G4 | **延后另开板**：四菜单改 pointerup 派发、输出端口起手拖线 | — | G3 验证后 |
 
 并行对：M1∥G1（store vs 全局，零交集）；G2∥G3（编辑面 vs 壳/连线/手势，G3 只读 M2 的
 `data-port-id`，不写 ScriptCard）。其余串行。执行委派云端 flash、单一写域，lead 亲跑闸门亲读 diff。
@@ -204,7 +204,7 @@ EditingSurface = { copy(), cut(), paste(text), selectAll(), canCopy, canPaste }
 `portNames.length == bindings.size`）；G4；units 任何代码；后端/协议/runner/契约改动。
 
 **会改变这些决定的信号**：
-- 用户普遍要从**输出行**起拖（精确携带输出身份）→ 提前做 G4 的菜单让位机制。
+- 用户普遍要从**输出端口**起拖（精确携带输出身份）→ 提前做 G4 的菜单让位机制。
 - 需要「一个端口收一串矩阵」（读法 B）→ 动 runner 注入契约，另开决策。
 - 拖拽建线需要撤销栈 → 与「无撤销栈」缺口合并裁决（断线=改数据，需撤回路）。
 - 标题栏右键将来要承载卡片菜单 → 按 §七 仲裁在 pointerup 打开，与拖线共存。
@@ -214,13 +214,13 @@ EditingSurface = { copy(), cut(), paste(text), selectAll(), canCopy, canPaste }
 | # | 抉择 | 裁决 |
 |---|---|---|
 | 1 | 接线入口 | **右键拖 + 左栏来源选择器都做**（M2 在范围内） |
-| 2 | 落点语义 | **拖到卡内其他输入端口行 = 替换该口来源；拖到卡体 = 新增端口** |
+| 2 | 落点语义 | **拖到卡内其他输入端口 = 替换该口来源；拖到卡体 = 新增端口** |
 | 3 | 删口 | **允许删**，脚本留 `NameError`（带行号）+「还有 N 处引用」提示 |
 | 4 | K>1 拖出哪路输出 | **本轮按 A：落点弹一次矩阵选择（单输出零点击）** |
 | 5 | 本轮范围 | **多输入 + 手势 + 原生菜单全屏蔽 / 编辑重写一起做** |
 | 6 | G4 | **暂停，后面再说** |
 
-**【待讨论 · 用户指定提醒】4B 方案**：强制从**输出行**起拖——精确携带「哪张表哪个输出」，
+**【待讨论 · 用户指定提醒】4B 方案**：强制从**输出端口**起拖——精确携带「哪张表哪个输出」，
 免掉落点矩阵选择；代价 = 提前做 G4 的菜单让位机制。用户认为值得商榷，**G4 重启时优先重议 4B**。
 本轮先按 4A 执行。
 
@@ -230,7 +230,7 @@ EditingSurface = { copy(), cut(), paste(text), selectAll(), canCopy, canPaste }
   逐字节不变；成环整笔回滚（卡片/inputs/edges 三处不动）；改接到未注册矩阵后不推送、注册完成
   确实补推；删口后其余口 id/名字不变、`in:N` 不复用活跃洞；0 口卡 `portNames=[]` 合法。
 - DOM：来源 chip 开选择器、成环候选置灰、`+端口` 取消不留端口、`✕` 删口引用计数提示。
-- 手势：`resolveDrop` 落点矩阵纯函数用例（端口行替换/卡体新增/图表与内置签名拒接/成环拒接/
+- 手势：`resolveDrop` 落点矩阵纯函数用例（端口替换/卡体新增/图表与内置签名拒接/成环拒接/
   空白取消/同矩阵 no-op）；仲裁状态机（4px 阈值、Esc、单击/拖线分流、键盘入口）。
 - 编辑面：适配器复制/剪切/全选、粘贴权限被拒置灰；四处自绘菜单零回归；`contextmenu` 被
   `defaultPrevented`（jsdom 测不到「原生不弹」，测此代理）。

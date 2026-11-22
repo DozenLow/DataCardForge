@@ -257,7 +257,7 @@ describe('function card zones', () => {
       },
     });
     const host = await mount(card);
-    const rows = host.querySelectorAll('.formula-card__row');
+    const rows = host.querySelectorAll('.formula-card__expr-entry');
     expect(rows).toHaveLength(2);
     const names = [...host.querySelectorAll<HTMLInputElement>('.formula-card__name')].map(
       (input) => input.value,

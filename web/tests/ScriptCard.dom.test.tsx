@@ -244,7 +244,7 @@ describe('layout', () => {
 
   it('names each port with its variable, its source and its shape', async () => {
     const host = await mount(cardId);
-    const row = host.querySelector('.script-card__row')!;
+    const row = host.querySelector('.script-card__port')!;
 
     expect(nameInput(host, '输入端口 1').value).toBe('A');
     // Where the values come from: the file name, so the user never has to guess.
@@ -255,7 +255,7 @@ describe('layout', () => {
 
   it('lists output 0 with its stable identity and the add/remove controls', async () => {
     const host = await mount(cardId);
-    const rows = host.querySelectorAll('.script-card__row--output');
+    const rows = host.querySelectorAll('.script-card__port--output');
     expect(rows).toHaveLength(1);
     expect(rows[0].querySelector('.script-card__output-id')?.textContent).toBe('out:0');
     // The display output cannot be removed, so its control is disabled from the start.
@@ -717,7 +717,7 @@ function withPreview(): void {
 }
 
 function rowHead(host: HTMLElement, panel: 'inputs' | 'outputs'): HTMLElement {
-  const element = host.querySelector(`.script-card__panel--${panel} .script-card__row-head`);
+  const element = host.querySelector(`.script-card__panel--${panel} .script-card__port-head`);
   if (!(element instanceof HTMLElement)) throw new Error(`no ${panel} row head`);
   return element;
 }
@@ -759,16 +759,16 @@ describe('three-column body', () => {
   it('wraps every row control in a head card and keeps the preview a sibling of it', async () => {
     const host = await mount(cardId);
 
-    const inputRow = host.querySelector('.script-card__row:not(.script-card__row--output)');
-    const inputHead = inputRow?.querySelector('.script-card__row-head');
+    const inputRow = host.querySelector('.script-card__port:not(.script-card__port--output)');
+    const inputHead = inputRow?.querySelector('.script-card__port-head');
     expect(inputHead).not.toBeNull();
     // The declaration controls moved INTO the head; the head is the row's identity.
     expect(inputHead!.querySelector('.script-card__source')?.textContent).toContain('a.csv');
     expect(inputHead!.querySelector('.script-card__shape')?.textContent).toBe('2×1');
     expect(inputHead!.querySelector('.script-card__mode')?.textContent).toBe('矩阵');
 
-    const outputRow = host.querySelector('.script-card__row--output')!;
-    const outputHead = outputRow.querySelector('.script-card__row-head');
+    const outputRow = host.querySelector('.script-card__port--output')!;
+    const outputHead = outputRow.querySelector('.script-card__port-head');
     expect(outputHead).not.toBeNull();
     expect(outputHead!.querySelector('.script-card__output-id')?.textContent).toBe('out:0');
     expect(outputHead!.querySelector('input')).toBe(nameInput(host, '输出声明 1'));
@@ -789,7 +789,7 @@ describe('three-column body', () => {
     expect(preview!.parentElement).toBe(outputRow);
     expect(outputHead!.contains(preview!)).toBe(false);
     // The head node itself survives: the preview opened beside it, not around it.
-    expect(outputRow.querySelector('.script-card__row-head')).toBe(outputHead);
+    expect(outputRow.querySelector('.script-card__port-head')).toBe(outputHead);
   });
 });
 

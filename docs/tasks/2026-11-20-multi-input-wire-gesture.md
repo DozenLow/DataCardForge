@@ -23,7 +23,7 @@
 - 重试谓词缺陷：`if (!bindings) return;` ~L2187；`card.node !== null` ~L2264/L2274
 - 图表多来源重同步（待泛化）：`beforeOwners`/`afterOwners` ~L3765–3782
 - `publishedMatrices`：~L2009；`chartInputsFromConfig`：~L3307
-- ScriptCard `+端口` 0 口禁用：`ScriptCard.tsx` ~L1443；输出行右键 ~L1492
+- ScriptCard `+端口` 0 口禁用：`ScriptCard.tsx` ~L1443；输出端口右键 ~L1492
 - CardShell 抓手：`dragHandleClassName="card__titlebar"` ~L99（无 allowAnyClick、标题栏无菜单）
 
 ## M1 · store 动作层（写域：workspaceStore.ts、bindings.ts、web/tests/ScriptCardStore.test.ts、web/tests/fixtures/cards/）
@@ -52,7 +52,7 @@
 ## M2 · 左栏来源选择器（写域：ScriptCard.tsx、新 SourcePicker.tsx、web/tests/ DOM 用例）
 
 依赖 M1。契约红线：绑定声明可枚举工作区（区别于图表表现选择）；成环候选置灰；取消不留端口；
-0 口不再禁用；端口行加 `data-port-id`；视觉复用 SidePanel/Popup。
+0 口不再禁用；端口加 `data-port-id`；视觉复用 SidePanel/Popup。
 
 验收：DOM 用例（来源 chip 开弹层、成环置灰、+端口取消不留口、✕ 删口引用计数提示）+ 全量不回归。
 
@@ -67,7 +67,7 @@
 
 依赖 M1+G1+M2。契约红线：分界在 pointerup 按 4px 位移裁决（不靠 contextmenu 时机、不用长按
 计时器）；pointerdown 不 preventDefault；落点矩阵按决策 §六；`resolveDrop` 纯函数按卡矩形解
-（不依赖 elementFromPoint）；区分图表端口行（拒接）与脚本端口行（可替换）；草稿线留背景层
+（不依赖 elementFromPoint）；区分图表端口（拒接）与脚本端口（可替换）；草稿线留背景层
 `pointer-events:none`、带箭头；多输出不许猜 out:0；提交调 M1 三动作。**CardShell 九卡型共用，
 最大回归面**——配 pointer 序列用例。
 
@@ -75,8 +75,8 @@
 
 ## G4 · 延后另开板（本轮不做）
 
-四菜单改 pointerup 派发、输出行起手拖线。依赖 G3 验证后。
-**重启时优先重议 4B 方案**（强制输出行起拖、免落点矩阵选择；用户 2026-11-20 指定提醒，见决策 §十二）。
+四菜单改 pointerup 派发、输出端口起手拖线。依赖 G3 验证后。
+**重启时优先重议 4B 方案**（强制输出端口起拖、免落点矩阵选择；用户 2026-11-20 指定提醒，见决策 §十二）。
 
 ## 收口闸门（lead 亲跑）
 

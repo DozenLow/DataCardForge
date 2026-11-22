@@ -85,7 +85,7 @@ const OUTPUT_UNIT_GROUPS: ReadonlyArray<{ dimension: string; units: readonly str
   return [...byDimension.entries()].map(([dimension, units]) => ({ dimension, units }));
 })();
 
-/** The assertion stored on one formula row — `''` means "assert nothing". */
+/** The assertion stored on one formula entry — `''` means "assert nothing". */
 function formulaUnitOf(formula: { unit?: string } | undefined): string {
   return typeof formula?.unit === 'string' ? formula.unit : '';
 }
@@ -165,7 +165,7 @@ export function FormulaCard({
   const setFormula = useWorkspace((s) => s.setFormula);
   const removeFormula = useWorkspace((s) => s.removeFormula);
   // Explicit OUTPUT unit (units L1a): the user's assertion about a result column. Stored on
-  // the formula row; it never changes a number, it only labels the output downstream.
+  // the formula entry; it never changes a number, it only labels the output downstream.
   const setFormulaUnit = useWorkspace((s) => s.setFormulaUnit);
   /**
    * The unit layers of the RESULT table (units L1a/L2a): the confirmation memory, this
@@ -795,7 +795,7 @@ export function FormulaCard({
               {expressionShaped ? draft.map((formula, index) => (
                 <div
                   key={index}
-                  className={`formula-card__row${error ? ' formula-card__row--error' : ''}`}
+                  className={`formula-card__expr-entry${error ? ' formula-card__expr-entry--error' : ''}`}
                 >
                   <input
                     type="text"

@@ -207,7 +207,7 @@ function panelText(host: HTMLElement): string {
 }
 
 function rowLabels(host: HTMLElement): string[] {
-  return [...host.querySelectorAll('.summary-panel__row .summary-panel__stat')].map(
+  return [...host.querySelectorAll('.summary-panel__stat-item .summary-panel__stat')].map(
     (cell) => cell.textContent ?? '',
   );
 }
@@ -243,7 +243,7 @@ describe('summary panel — 未请求', () => {
     // "Nothing has been asked for" must not look like a result: a digit anywhere here would
     // be a fabricated number (a table, a count, a timestamp).
     expect(panelText(host)).not.toMatch(/\d/);
-    expect(host.querySelectorAll('.summary-panel__row')).toHaveLength(0);
+    expect(host.querySelectorAll('.summary-panel__stat-item')).toHaveLength(0);
     // And nothing has been created yet: the node is lazy (lifecycle plan A).
     expect(
       backend!.calls.filter((call) => call.method === 'POST' && /\/api\/nodes$/.test(call.url)),
@@ -293,7 +293,7 @@ describe('summary panel — 有结果', () => {
     expect(host.querySelector('.summary-panel__bar--done')).not.toBeNull();
     // Row identity is the raw catalog id, in catalog order — never translated.
     expect(rowLabels(host)).toEqual([...SUMMARY_STATS]);
-    expect(host.querySelectorAll('.summary-panel__row')).toHaveLength(12);
+    expect(host.querySelectorAll('.summary-panel__stat-item')).toHaveLength(12);
 
     const headers = [...host.querySelectorAll('.summary-panel__table thead th')].map(
       (cell) => cell.textContent,
@@ -301,12 +301,12 @@ describe('summary panel — 有结果', () => {
     // Columns inherit the source column labels verbatim (decision §三).
     expect(headers).toEqual(['统计量', 'Pos.1 A', 'Pos.2 B']);
 
-    const firstRow = [...host.querySelectorAll('.summary-panel__row')[0].querySelectorAll('.summary-panel__cell')].map(
+    const firstRow = [...host.querySelectorAll('.summary-panel__stat-item')[0].querySelectorAll('.summary-panel__cell')].map(
       (cell) => cell.textContent,
     );
     // The numbers are the stub's, not `mean(1,2,3,4) = 2.5`: no local arithmetic exists.
     expect(firstRow).toEqual(['101', '201']);
-    const lastRow = [...host.querySelectorAll('.summary-panel__row')[11].querySelectorAll('.summary-panel__cell')].map(
+    const lastRow = [...host.querySelectorAll('.summary-panel__stat-item')[11].querySelectorAll('.summary-panel__cell')].map(
       (cell) => cell.textContent,
     );
     expect(lastRow).toEqual(['112', '212']);
@@ -337,7 +337,7 @@ describe('summary panel — 待重算', () => {
 
     expect(host.querySelector('.summary-panel__bar--stale')).not.toBeNull();
     expect(panelText(host)).toContain('上游已变');
-    expect(host.querySelectorAll('.summary-panel__row')).toHaveLength(0);
+    expect(host.querySelectorAll('.summary-panel__stat-item')).toHaveLength(0);
     expect(host.querySelectorAll('.summary-panel__cell')).toHaveLength(0);
     // No table at all — so not a single value, and in particular no row of zeros. (The
     // statistic filter's labels are catalog ids and may legitimately contain digits: `q1`.)
@@ -362,7 +362,7 @@ describe('summary panel — 待重算', () => {
     });
     await settle();
     expect(panelText(host)).toContain('参数已改');
-    expect(host.querySelectorAll('.summary-panel__row')).toHaveLength(0);
+    expect(host.querySelectorAll('.summary-panel__stat-item')).toHaveLength(0);
     expect(store().summaries[card.id].stats).not.toContain('sem');
   });
 });
@@ -383,7 +383,7 @@ describe('summary panel — 错误', () => {
     // The structured code travels; the sentence is i18n's, and the panel has no `params`
     // channel to fill a placeholder in, so it degrades to the generic sentence + the code.
     expect(alert?.textContent).toContain('badSignatureParams');
-    expect(host.querySelectorAll('.summary-panel__row')).toHaveLength(0);
+    expect(host.querySelectorAll('.summary-panel__stat-item')).toHaveLength(0);
     // Retry stays possible: an error is not a dead end.
     expect(host.querySelector<HTMLButtonElement>('.summary-panel__compute')).not.toBeNull();
   });

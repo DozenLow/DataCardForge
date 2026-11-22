@@ -286,7 +286,7 @@ async function setup(): Promise<{ source: MatrixCardModel; card: FunctionCardMod
 
 /** The picker row for one column (`data-column` is the 0-based source column). */
 function row(host: HTMLElement, column: number): HTMLElement {
-  const element = host.querySelector<HTMLElement>(`.unit-convert__row[data-column="${column}"]`);
+  const element = host.querySelector<HTMLElement>(`.unit-convert__entry[data-column="${column}"]`);
   expect(element).not.toBeNull();
   return element!;
 }
