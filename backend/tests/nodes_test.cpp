@@ -527,6 +527,127 @@ int main() {
   CHECK(badArityNode && badArityNode->errorParams["expected"].asNumber() == 3);
   CHECK(badArityNode && badArityNode->errorParams["got"].asNumber() == 2);
 
+  // ── Uneven diamond: one wave must never compute a join from a stale upstream ────────
+  // BFS distance from the change point is the SHORTEST path, so a join fed by a short and
+  // a long path used to run before the long path's tail finished — publishing numbers that
+  // mixed fresh and stale inputs under a green `done` light. Found live (2026-11-22) with
+  // a fit card: the wave printed fit(x_new, z_old) = slope 24.236453 while a fresh compute
+  // gives fit(x_new, z_new) = 25.832512. The wave order is now a topological sort of the
+  // induced subgraph (waveOrder), so every in-wave producer runs before its consumers.
+  //
+  //   source ─► A ─► B ─► C ─► Z        (long path, depth 4)
+  //             └────────────┐
+  //                          D = fit(x=A, y=Z)   (join of depths 1 and 4)
+  {
+    Column diamondCol;
+    diamondCol.posName = "Pos.1";
+    diamondCol.data = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+    const int64_t diamondSource = store.insert(Matrix({diamondCol}));
+
+    auto formulaParams = [](const char* expr) {
+      Json params = Json::object();
+      Json formulas = Json::array();
+      Json entry = Json::object();
+      entry.set("name", Json(std::string("f")));
+      entry.set("expression", Json(std::string(expr)));
+      formulas.push(entry);
+      params.set("formulas", std::move(formulas));
+      return params;
+    };
+    PortBinding wholeTable;
+    wholeTable.portId = "src";
+    wholeTable.mode = "matrix";
+    wholeTable.sourceMatrixId = diamondSource;
+    const auto diaA = nodes.createV2(kSigExpressionColumns, {wholeTable},
+                                     formulaParams("pos.1 * 2"));
+    CHECK(diaA.nodeId > 0);
+    nodes.computeNow(diaA.nodeId);
+
+    auto chainFrom = [&](int64_t producer, const char* expr) {
+      PortBinding b;
+      b.portId = "src";
+      b.mode = "matrix";
+      b.sourceNodeId = producer;
+      const auto r = nodes.createV2(kSigExpressionColumns, {b}, formulaParams(expr));
+      CHECK(r.nodeId > 0);
+      nodes.computeNow(r.nodeId);
+      return r;
+    };
+    const auto diaB = chainFrom(diaA.nodeId, "pos.1 + 1");
+    const auto diaC = chainFrom(diaB.nodeId, "pos.1 * pos.1");
+    const auto diaZ = chainFrom(diaC.nodeId, "pos.1 + 1");
+
+    PortBinding fitX;
+    fitX.portId = "x";
+    fitX.varName = "x";
+    fitX.mode = "cell";
+    fitX.columnIndex = 0;
+    fitX.sourceNodeId = diaA.nodeId;
+    PortBinding fitY;
+    fitY.portId = "y";
+    fitY.varName = "y";
+    fitY.mode = "cell";
+    fitY.columnIndex = 0;
+    fitY.sourceNodeId = diaZ.nodeId;
+    const auto diaD = nodes.createV2(kSigLinearRegression, {fitX, fitY}, Json::object());
+    CHECK(diaD.nodeId > 0);
+    nodes.computeNow(diaD.nodeId);
+
+    auto fitCell = [&](int64_t nodeId, size_t column) -> double {
+      const auto n = nodes.get(nodeId);
+      Matrix m;
+      if (!n || !store.snapshot(n->resultMatrixId(), &m) || m.columnCount() <= column ||
+          m.column(column).data.empty())
+        return NAN;
+      return m.column(column).data[0];
+    };
+
+    // One wave from the source, exactly like PATCH /api/matrices/{id} does it.
+    int64_t revision = 0;
+    CHECK(store.patchCells(diamondSource, {CellPatch{0, 0, 7.0}}, &revision));
+    nodes.onMatrixChanged(diamondSource);
+
+    // The long path really ran: Z's first cell is ((7*2)+1)^2+1 = 226, not the old 10.
+    CHECK(columnOf(store, nodes.get(diaZ.nodeId)->resultMatrixId())[0] == 226.0);
+
+    // Independent oracle: least squares over the FRESH x and z, computed here from the
+    // stored columns — not from anything the fit node published.
+    const auto xNew = columnOf(store, nodes.get(diaA.nodeId)->resultMatrixId());
+    const auto zNew = columnOf(store, nodes.get(diaZ.nodeId)->resultMatrixId());
+    double sx = 0, sy = 0;
+    for (size_t i = 0; i < xNew.size(); ++i) {
+      sx += xNew[i];
+      sy += zNew[i];
+    }
+    const double mx = sx / static_cast<double>(xNew.size());
+    const double my = sy / static_cast<double>(zNew.size());
+    double sxx = 0, sxy = 0;
+    for (size_t i = 0; i < xNew.size(); ++i) {
+      sxx += (xNew[i] - mx) * (xNew[i] - mx);
+      sxy += (xNew[i] - mx) * (zNew[i] - my);
+    }
+    const double expectedSlope = sxy / sxx;
+    const double expectedIntercept = my - expectedSlope * mx;
+
+    const auto diaDNode = nodes.get(diaD.nodeId);
+    CHECK(diaDNode && diaDNode->state == NodeState::Done);
+    const double waveSlope = fitCell(diaD.nodeId, 0);
+    const double waveIntercept = fitCell(diaD.nodeId, 1);
+    CHECK(std::abs(waveSlope - expectedSlope) < 1e-9);
+    CHECK(std::abs(waveIntercept - expectedIntercept) < 1e-9);
+    // Golden values from the live reproduction (independent Python fit of the same inputs):
+    // pins the oracle itself, so a future change to both cannot quietly agree on garbage.
+    CHECK(std::abs(waveSlope - 25.832512315270936) < 1e-6);
+    CHECK(std::abs(waveIntercept - (-115.5566502463054)) < 1e-6);
+
+    // Idempotence: recomputing the join alone afterwards must change nothing — the wave
+    // already fed it fresh inputs. Under the old BFS order this recomputation moved the
+    // numbers, which is how the stale read was first noticed.
+    nodes.computeNow(diaD.nodeId);
+    CHECK(fitCell(diaD.nodeId, 0) == waveSlope);
+    CHECK(fitCell(diaD.nodeId, 1) == waveIntercept);
+  }
+
   std::printf("%s: node_registry (%d failures)\n", failures == 0 ? "PASS" : "FAILED", failures);
   return failures == 0 ? 0 : 1;
 }

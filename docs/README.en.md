@@ -75,7 +75,8 @@ were considered and dropped. Three entrances, each answering one question:
 - 🗃 **Sample data** (`sampleData/`) — synthetic data for demos and manual checks; the generator reproduces it
   - [`1.txt`](sampleData/1.txt) · [`2.txt`](sampleData/2.txt) · [`generate_matrix.py`](sampleData/generate_matrix.py)
 - 🖼 **Diagrams** (`diagrams/`) — every diagram as SVG plus the interactive page, see [Diagrams](#diagrams)
-- 📅 **Development log** (`log/`) — progress by date (**latest 2026-11-04**)
+- 📅 **Development log** (`log/`) — progress by date (**latest 2026-11-22**)
+  - [2026-11-22](log/2026-11-22.md) (wave recompute topological-order fix: BFS distance is not evaluation order · uneven diamond read stale numbers · waveOrder Kahn + regression test)
   - [2026-11-04](log/2026-11-04.md) (docs rework: ASCII diagrams replaced with SVG + interactive page · navigation and facts · docs-check in CI)
   - [2026-10-31](log/2026-10-31.md) (data cards can replace files: replace follows · the 409 ordering problem · closeAllCards releases backend resources)
   - [2026-10-28](log/2026-10-28.md) (two user complaints → three real defects: pointer capture swallowing click · no usable column name on files with headers · the formula area squeezed to 0 by the result table)

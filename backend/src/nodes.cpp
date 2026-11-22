@@ -1940,9 +1940,13 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
 }
 
 std::vector<int64_t> NodeRegistry::collectSubtree(int64_t nodeId, bool includeSelf) const {
-  // BFS over `dependents_` (edges point source->dependent, so this order is already
-  // dependency-first). The node's result matrices are mid-edges: whoever binds any of
-  // them depends on this node — K outputs ⇒ K keys.
+  // BFS over `dependents_` collects the wave's node SET. The visit order is NOT
+  // dependency-first: BFS distance is the shortest path from the change point, so a join
+  // reached by a short path and a long path appears at the SHORT depth — evaluating in
+  // this order let it read the long path's stale result (uneven-diamond regression in
+  // nodes_test). waveOrder() turns this set into a real evaluation order.
+  // The node's result matrices are mid-edges: whoever binds any of them depends on this
+  // node — K outputs ⇒ K keys.
   std::vector<int64_t> order;
   std::lock_guard<std::mutex> lock(mu_);
   std::set<int64_t> visited;
@@ -1972,6 +1976,65 @@ std::vector<int64_t> NodeRegistry::collectSubtree(int64_t nodeId, bool includeSe
           for (int64_t d : rit->second) q.push(d);
       }
     }
+  }
+  return order;
+}
+
+std::vector<int64_t> NodeRegistry::waveOrder(int64_t nodeId, bool includeSelf) const {
+  const std::vector<int64_t> reachable = collectSubtree(nodeId, includeSelf);
+  std::lock_guard<std::mutex> lock(mu_);
+  const std::set<int64_t> wave(reachable.begin(), reachable.end());
+
+  // In-wave predecessors of every node. A dependency key is a node id (positive) or a
+  // matrix key (negative); a matrix key resolves to its producer through resultOwner_,
+  // which covers result matrices AND script-card extra outputs (both registered at
+  // creation). Two ports bound to the same producer are ONE readiness dependency, so
+  // predecessors are deduplicated per node.
+  std::map<int64_t, std::set<int64_t>> forward;  // producer -> in-wave consumers
+  std::map<int64_t, size_t> indegree;
+  for (int64_t id : wave) indegree[id] = 0;
+  for (int64_t id : wave) {
+    auto dit = dependencies_.find(id);
+    if (dit == dependencies_.end()) continue;
+    std::set<int64_t> preds;
+    for (int64_t key : dit->second) {
+      int64_t pred = -1;
+      if (key > 0) {
+        pred = key;
+      } else {
+        auto oit = resultOwner_.find(key);
+        if (oit != resultOwner_.end()) pred = oit->second.first;
+      }
+      if (pred > 0 && wave.count(pred) != 0) preds.insert(pred);
+    }
+    for (int64_t pred : preds) {
+      forward[pred].insert(id);
+      ++indegree[id];
+    }
+  }
+
+  // Kahn over the induced subgraph. The ready set is ordered by node id so one wave always
+  // walks the same sequence: reproducible runs, stable event order, golden fixtures.
+  std::set<int64_t> ready;
+  for (const auto& entry : indegree)
+    if (entry.second == 0) ready.insert(entry.first);
+  std::vector<int64_t> order;
+  order.reserve(wave.size());
+  while (!ready.empty()) {
+    const int64_t cur = *ready.begin();
+    ready.erase(ready.begin());
+    order.push_back(cur);
+    auto fit = forward.find(cur);
+    if (fit == forward.end()) continue;
+    for (int64_t consumer : fit->second)
+      if (--indegree[consumer] == 0) ready.insert(consumer);
+  }
+  // Every edge passes wouldCycle(), so the induced subgraph is acyclic and Kahn emits the
+  // whole wave. If that invariant ever breaks, append the remainder in id order instead of
+  // dropping nodes: a wrong order is visible in the numbers, a missing recompute is not.
+  if (order.size() < wave.size()) {
+    for (int64_t id : wave)
+      if (std::find(order.begin(), order.end(), id) == order.end()) order.push_back(id);
   }
   return order;
 }
@@ -2045,7 +2108,8 @@ void NodeRegistry::evaluateInOrder(const std::vector<int64_t>& order) {
 void NodeRegistry::recomputeSubtree(int64_t nodeId) {
   // The loop holds no lock: evaluateNode() takes it in short bursts itself, so a slow node
   // cannot freeze the registry (docs/decisions/2026-10-15-max-headroom-principle.md).
-  evaluateInOrder(collectSubtree(nodeId, true));
+  // Topological order, not BFS visit order: a join must wait for its LONGEST upstream path.
+  evaluateInOrder(waveOrder(nodeId, true));
 }
 
 void NodeRegistry::computeNow(int64_t nodeId) {
@@ -2058,7 +2122,7 @@ void NodeRegistry::computeNow(int64_t nodeId) {
     it->second.dirtyReason = DirtyReason::None;
   }
   evaluateNode(nodeId);
-  evaluateInOrder(collectSubtree(nodeId, false));
+  evaluateInOrder(waveOrder(nodeId, false));
 }
 
 void NodeRegistry::onMatrixChanged(int64_t matrixId) {

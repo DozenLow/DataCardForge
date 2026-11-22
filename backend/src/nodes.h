@@ -229,9 +229,18 @@ class NodeRegistry {
   // then commit the result. Looking the node up by id in each phase also removes the old
   // dangling-pointer window (the node may be deleted between phases).
   void evaluateNode(int64_t nodeId);
-  // Node ids in dependency-first order: `nodeId` itself (when includeSelf) followed by
-  // everything reachable through `dependents_`. Takes mu_ itself.
+  // The wave's node SET: `nodeId` itself (when includeSelf) plus everything reachable
+  // through `dependents_`, in BFS visit order. Visit order is NOT an evaluation order —
+  // BFS distance is the SHORTEST path from the change point, and a join fed by paths of
+  // different lengths must wait for the LONGEST one. Evaluation order comes from
+  // waveOrder(); this function only answers "who is in the wave" (also used to prune the
+  // subtree of a lazy node). Takes mu_ itself.
   std::vector<int64_t> collectSubtree(int64_t nodeId, bool includeSelf) const;
+  // The wave in evaluation order: a topological sort (Kahn) of the subgraph induced by
+  // collectSubtree's set, so every producer INSIDE the wave runs before its consumers
+  // whatever the path lengths. Ready nodes are taken in node-id order, which makes one
+  // wave's sequence reproducible. Takes mu_ itself.
+  std::vector<int64_t> waveOrder(int64_t nodeId, bool includeSelf) const;
   // Walk `order` (dependency-first) and evaluate each node, applying the laziness rule:
   // an `explicitCompute` node is marked stale instead of evaluated, and its dependents
   // are marked stale without evaluation (their input is pending, not broken).
