@@ -299,14 +299,14 @@ export function FormulaCard({
     );
     const target = focused ?? inputs.find((element) => element !== null);
     if (!target) return;
-    const row = inputs.indexOf(target);
+    const entryIndex = inputs.indexOf(target);
     // Read the selection BEFORE touching the draft; React replaces the input's value on
     // commit, which discards the caret position.
     const start = focused ? (target.selectionStart ?? target.value.length) : 0;
     const end = focused ? (target.selectionEnd ?? start) : target.value.length;
-    setDraft((rows) =>
-      rows.map((item, index) =>
-        index === row
+    setDraft((entries) =>
+      entries.map((item, index) =>
+        index === entryIndex
           ? {
               ...item,
               expression: item.expression.slice(0, start) + reference + item.expression.slice(end),
@@ -401,15 +401,15 @@ export function FormulaCard({
    */
   useEffect(() => {
     const stored = formulas ?? [];
-    setDraft((rows) => {
+    setDraft((entries) => {
       let changed = false;
-      const next = rows.map((row, index) => {
+      const next = entries.map((entry, index) => {
         const unit = stored[index]?.unit;
-        if ((row.unit ?? '') === (unit ?? '')) return row;
+        if ((entry.unit ?? '') === (unit ?? '')) return entry;
         changed = true;
-        return unit === undefined ? { name: row.name, expression: row.expression } : { ...row, unit };
+        return unit === undefined ? { name: entry.name, expression: entry.expression } : { ...entry, unit };
       });
-      return changed ? next : rows;
+      return changed ? next : entries;
     });
   }, [formulas]);
 
@@ -805,9 +805,9 @@ export function FormulaCard({
                     aria-label={t('formula.namePlaceholder')}
                     {...nameHover.anchorProps}
                     onChange={(e) =>
-                      setDraft((rows) =>
-                        rows.map((row, i) =>
-                          i === index ? { ...row, name: e.target.value } : row,
+                      setDraft((entries) =>
+                        entries.map((entry, i) =>
+                          i === index ? { ...entry, name: e.target.value } : entry,
                         ),
                       )
                     }
@@ -825,9 +825,9 @@ export function FormulaCard({
                     spellCheck={false}
                     {...expressionHover.anchorProps}
                     onChange={(e) =>
-                      setDraft((rows) =>
-                        rows.map((row, i) =>
-                          i === index ? { ...row, expression: e.target.value } : row,
+                      setDraft((entries) =>
+                        entries.map((entry, i) =>
+                          i === index ? { ...entry, expression: e.target.value } : entry,
                         ),
                       )
                     }
@@ -896,7 +896,7 @@ export function FormulaCard({
                   onClick={() => {
                     flushOperations();
                     const name = `Col${draft.length + 1}`;
-                    setDraft((rows) => [...rows, { name, expression: 'A' }]);
+                    setDraft((entries) => [...entries, { name, expression: 'A' }]);
                     setFormula(card.id, draft.length, name, 'A');
                   }}
                 >
