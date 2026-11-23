@@ -49,6 +49,8 @@ import {
 import { HoverHelp, useHoverHelp } from './HoverHelp.tsx';
 import { SummaryPanel } from './SummaryPanel.tsx';
 import { ROW_HEADER_WIDTH, VirtualTable, type ColumnUnitChip } from './VirtualTable.tsx';
+import { hasBackendCapability } from '../workspaceStore.ts';
+import { renderMathPreview } from '../mathPreview.ts';
 
 /**
  * Readable names for the relation signature's five output columns.
@@ -140,6 +142,23 @@ interface FormulaCardProps {
   onSetResultUnit?: (columnIndex: number, unit: string) => void;
 }
 
+/** Capability-gated, memoised MathML preview; falls back to nothing (the raw expression
+ *  stays visible in the editor) whenever the shape is not recognised. */
+function FormulaMathPreview({ expression }: { expression: string }) {
+  const html = useMemo(() => {
+    const preview = renderMathPreview(expression);
+    return preview.mode === 'mathml' ? preview.html ?? '' : null;
+  }, [expression]);
+  if (html === null) return null;
+  return (
+    <div
+      className="formula-card__math-preview"
+      aria-label="math preview"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
 export function FormulaCard({
   card,
   resultMatrix,
@@ -185,6 +204,7 @@ export function FormulaCard({
   // Re-send this card's parameters + binding to the backend. The card has no compute of its
   // own, so "recompute" is exactly one push — the same call the expression editor makes.
   const recomputeFormula = useWorkspace((s) => s.recomputeFormula);
+  const backendStatus = useWorkspace((s) => s.backend);
   const loadFullResult = useWorkspace((s) => s.loadFullResult);
   // Re-bind one cell port to another column: a binding change, not a parameter change.
   const setPortColumn = useWorkspace((s) => s.setPortColumn);
@@ -832,6 +852,9 @@ export function FormulaCard({
                       )
                     }
                   />
+                  {hasBackendCapability(backendStatus, 'advanced-math.v1') ? (
+                    <FormulaMathPreview expression={formula.expression} />
+                  ) : null}
                   {/* Explicit OUTPUT unit (units L1a §2). Empty = assert nothing, which is
                       what every entry did before this control existed. The choice is stored on
                       the entry (`params.formulas[i].unit`) and re-asserted into the confirmation
