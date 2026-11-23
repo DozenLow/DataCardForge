@@ -1,0 +1,32 @@
+{
+  "comment": "Advanced-math capability fixtures. C++ ExprEngine evaluates; Vitest validates the independent golden expectations and preview contract without adding frontend numeric compute.",
+  "cases": [
+    { "name": "combin-known", "expression": "COMBIN(10, 4)", "expect": [210] },
+    { "name": "permut-known", "expression": "PERMUT(10, 4)", "expect": [5040] },
+    { "name": "sum-squares", "expression": "SUM(i*i, i, 1, 4)", "expect": [30] },
+    { "name": "sum-nested-shadow", "expression": "SUM(SUM(i, i, 1, 2) + i, i, 1, 2)", "expect": [9] },
+    { "name": "product-factorial", "expression": "PRODUCT(i, i, 1, 5)", "expect": [120] },
+    { "name": "integral-x2", "expression": "INTEGRAL(x*x, x, 0, 1)", "expect": [0.3333333333333333], "tol": 1e-10 },
+    { "name": "derivative-x2", "expression": "DERIV(x*x, x, 3)", "expect": [6], "tol": 1e-6 },
+    { "name": "var-s", "columns": [{ "name": "A", "data": [1,2,3,4] }], "expression": "VAR.S(A)", "expect": [1.6666666666666667,1.6666666666666667,1.6666666666666667,1.6666666666666667], "tol": 1e-12 },
+    { "name": "var-p", "columns": [{ "name": "A", "data": [1,2,3,4] }], "expression": "VAR.P(A)", "expect": [1.25,1.25,1.25,1.25], "tol": 1e-12 },
+    { "name": "stdev-s", "columns": [{ "name": "A", "data": [1,2,3,4] }], "expression": "STDEV.S(A)", "expect": [1.2909944487358056,1.2909944487358056,1.2909944487358056,1.2909944487358056], "tol": 1e-12 },
+    { "name": "percentile-inc", "columns": [{ "name": "A", "data": [1,2,3,4] }], "expression": "PERCENTILE.INC(A, 0.25)", "expect": [1.75,1.75,1.75,1.75], "tol": 1e-12 },
+    { "name": "percentile-exc", "columns": [{ "name": "A", "data": [1,2,3,4] }], "expression": "PERCENTILE.EXC(A, 0.25)", "expect": [1.25,1.25,1.25,1.25], "tol": 1e-12 },
+    { "name": "correl", "columns": [{ "name": "A", "data": [1,2,3] }, { "name": "B", "data": [2,4,6] }], "expression": "CORREL(A,B)", "expect": [1,1,1], "tol": 1e-12 },
+    { "name": "covariance-s", "columns": [{ "name": "A", "data": [1,2,3] }, { "name": "B", "data": [2,4,6] }], "expression": "COVARIANCE.S(A,B)", "expect": [2,2,2], "tol": 1e-12 },
+    { "name": "slope", "columns": [{ "name": "A", "data": [1,2,3] }, { "name": "B", "data": [2,4,6] }], "expression": "SLOPE(B,A)", "expect": [2,2,2], "tol": 1e-12 },
+    { "name": "countif", "columns": [{ "name": "A", "data": [1,2,3,4] }], "expression": "COUNTIF(A,\">2\")", "expect": [2,2,2,2] },
+    { "name": "countif-number", "columns": [{ "name": "A", "data": [1,2,3,4] }], "expression": "COUNTIF(A,2)", "expect": [1,1,1,1] },
+    { "name": "countif-not-equal", "columns": [{ "name": "A", "data": [1,2,3,4] }], "expression": "COUNTIF(A,\"<>2\")", "expect": [3,3,3,3] },
+    { "name": "countif-precise", "columns": [{ "name": "A", "data": [0.123456789] }], "expression": "COUNTIF(A, 0.123456789)", "expect": [1] },
+    { "name": "countif-tiny", "columns": [{ "name": "A", "data": [1e-9] }], "expression": "COUNTIF(A, 0.000000001)", "expect": [1] },
+    { "name": "sumif-precise", "columns": [{ "name": "A", "data": [0.123456789] }], "expression": "SUMIF(A, 0.123456789)", "expect": [0.123456789], "tol": 1e-15 },
+    { "name": "sumif", "columns": [{ "name": "A", "data": [1,2,3,4] }], "expression": "SUMIF(A,\">2\")", "expect": [7,7,7,7] },
+    { "name": "irr", "columns": [{ "name": "A", "data": [-100,110] }], "expression": "IRR(A)", "expect": [0.1,0.1], "tol": 1e-12 },
+    { "name": "percentile-domain", "columns": [{ "name": "A", "data": [1,2,3,4] }], "expression": "PERCENTILE.INC(A,2)", "error": { "code": "domainError" } },
+    { "name": "budget", "expression": "SUM(i, i, 1, 1000001)", "error": { "code": "budgetExceeded" } },
+    { "name": "budget-nested", "expression": "SUM(SUM(i, i, 1, 1000000), i, 1, 2)", "error": { "code": "budgetExceeded" } },
+    { "name": "budget-rows", "columns": [{ "name": "A", "data": [1,1,1,1,1,1,1,1,1,1,1] }], "expression": "SUM(i, i, 1, 100000)", "error": { "code": "budgetExceeded" } }
+  ]
+}

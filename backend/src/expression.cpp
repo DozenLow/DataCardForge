@@ -3,6 +3,8 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
+#include <cstring>
 #include <functional>
 #include <memory>
 #include <numeric>
@@ -16,7 +18,7 @@ namespace {
 
 // ── tokenizer (mirrors tokenize() in expression.ts) ────────────────────
 
-enum class Tok { Number, Ident, Op, LParen, RParen, Comma, Compare, Eof };
+enum class Tok { Number, Ident, String, Op, LParen, RParen, Comma, Compare, Eof };
 
 struct Token {
   Tok type;
@@ -39,6 +41,11 @@ std::string toUpper(std::string s) {
 }
 
 bool isDigit(char c) { return c >= '0' && c <= '9'; }
+
+bool envAdvancedMathEnabled() {
+  const char* value = std::getenv("DC_ADVANCED_MATH");
+  return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+}
 
 // Identifiers are UTF-8 byte runs, and every byte >= 0x80 counts as a name byte. That is
 // what makes an annotated column addressable by the spelling the card advertises
@@ -238,6 +245,27 @@ std::vector<Token> tokenize(const std::string& input) {
       if (matchFullWidth(input, i, &wsLen, &wsAscii) && wsAscii == " ") { i += wsLen; continue; }
     }
     if (std::isspace(static_cast<unsigned char>(ch))) { ++i; continue; }
+    if (ch == '\"' || ch == '\'') {
+      if (!envAdvancedMathEnabled()) {
+        throw ExpressionError("Unexpected character '" + std::string(1, ch) +
+                                  "' at position " + std::to_string(at(i)),
+                              at(i), "unexpectedChar", std::string(1, ch));
+      }
+      char quote = ch;
+      size_t start = i;
+      ++i;
+      std::string value;
+      while (i < input.size() && input[i] != quote) {
+        value.push_back(input[i++]);
+      }
+      if (i >= input.size()) {
+        throw ExpressionError("Expected '" + std::string(1, quote) + "' to close the string", at(start),
+                              "expectedClose", "string");
+      }
+      ++i;
+      tokens.push_back({Tok::String, value, at(start)});
+      continue;
+    }
     if (isDigit(ch) || (ch == '.' && i + 1 < input.size() && isDigit(input[i + 1]))) {
       size_t start = i;
       while (i < input.size() && (isDigit(input[i]) || input[i] == '.')) ++i;
@@ -351,7 +379,7 @@ std::vector<Token> tokenize(const std::string& input) {
 struct Node;
 using NodePtr = std::shared_ptr<Node>;
 
-enum class NodeKind { Number, Column, Binary, Unary, Call };
+enum class NodeKind { Number, Column, Bound, String, Binary, Unary, Call };
 
 struct Node {
   NodeKind kind;
@@ -360,6 +388,9 @@ struct Node {
   std::string columnName;     // Column: original spelling (for references())
   std::string op;             // Binary / Unary
   std::string name;           // Call: upper-cased function name
+  std::string boundName;       // Advanced call: the identifier its first expression binds
+  int64_t boundId = -1;         // Lexical identity; nested same-name variables get distinct ids
+  std::string stringValue;     // String literal
   std::vector<NodePtr> children;
 };
 
@@ -396,7 +427,35 @@ const std::unordered_map<std::string, FunctionSpec>& functions() {
       {"MMUL", {2, 2}},
       {"EMUL", {2, 2}},
   };
-  return kFns;
+  if (!envAdvancedMathEnabled()) return kFns;
+
+  static const std::unordered_map<std::string, FunctionSpec> kAdvancedFns = [&] {
+    auto out = kFns;
+    out.emplace("COMBIN", FunctionSpec{2, 2});
+    out.emplace("PERMUT", FunctionSpec{2, 2});
+    out.emplace("VAR.S", FunctionSpec{1, 1});
+    out.emplace("VAR.P", FunctionSpec{1, 1});
+    out.emplace("STDEV.S", FunctionSpec{1, 1});
+    out.emplace("STDEV.P", FunctionSpec{1, 1});
+    out.emplace("PERCENTILE.INC", FunctionSpec{2, 2});
+    out.emplace("PERCENTILE.EXC", FunctionSpec{2, 2});
+    out.emplace("CORREL", FunctionSpec{2, 2});
+    out.emplace("COVARIANCE.S", FunctionSpec{2, 2});
+    out.emplace("COVARIANCE.P", FunctionSpec{2, 2});
+    out.emplace("SLOPE", FunctionSpec{2, 2});
+    out.emplace("INTERCEPT", FunctionSpec{2, 2});
+    out.emplace("RSQ", FunctionSpec{2, 2});
+    out.emplace("IRR", FunctionSpec{1, 1});
+    out.emplace("COUNTIF", FunctionSpec{2, 2});
+    out.emplace("SUMIF", FunctionSpec{2, 3});
+    out.erase("SUM");
+    out.emplace("SUM", FunctionSpec{1, 4});
+    out.emplace("PRODUCT", FunctionSpec{4, 4});
+    out.emplace("INTEGRAL", FunctionSpec{4, 4});
+    out.emplace("DERIV", FunctionSpec{3, 3});
+    return out;
+  }();
+  return kAdvancedFns;
 }
 
 const std::unordered_set<std::string>& aggregationNames() {
@@ -420,6 +479,8 @@ int precedence(const std::string& op) {
 struct Parser {
   const std::vector<Token>& tokens;
   const std::unordered_map<std::string, int>& columns;
+  std::unordered_map<std::string, std::vector<int64_t>> boundScopes;
+  int64_t nextBoundId = 0;
   size_t pos = 0;
 
   const Token& peek() const { return tokens[pos]; }
@@ -462,6 +523,13 @@ struct Parser {
 
   NodePtr parsePrimary() {
     const Token& t = peek();
+    if (t.type == Tok::String) {
+      advance();
+      auto n = std::make_shared<Node>();
+      n->kind = NodeKind::String;
+      n->stringValue = t.value;
+      return n;
+    }
     if (t.type == Tok::Number) {
       advance();
       auto n = std::make_shared<Node>();
@@ -482,6 +550,33 @@ struct Parser {
                                 name);
         }
         advance();  // consume '('
+
+        std::string boundName;
+        if (upper == "SUM" || upper == "PRODUCT" || upper == "INTEGRAL" || upper == "DERIV") {
+          size_t scan = pos;
+          int depth = 0;
+          size_t commaCount = 0;
+          size_t variableIndex = upper == "SUM" || upper == "PRODUCT" || upper == "INTEGRAL" ? 1 : 1;
+          for (; scan < tokens.size(); ++scan) {
+            const Tok ty = tokens[scan].type;
+            if (ty == Tok::LParen) ++depth;
+            else if (ty == Tok::RParen) {
+              if (depth == 0) break;
+              --depth;
+            } else if (ty == Tok::Comma && depth == 0) {
+              ++commaCount;
+              if (commaCount == static_cast<size_t>(variableIndex)) {
+                ++scan;
+                break;
+              }
+            }
+          }
+          if (scan < tokens.size() && tokens[scan].type == Tok::Ident) {
+            boundName = toLower(tokens[scan].value);
+            boundScopes[boundName].push_back(nextBoundId++);
+          }
+        }
+
         std::vector<NodePtr> args;
         if (peek().type != Tok::RParen) {
           args.push_back(parseExpression());
@@ -493,6 +588,13 @@ struct Parser {
         if (peek().type != Tok::RParen) {
           throw ExpressionError("Expected ')' after function arguments", peek().pos,
                                 "expectedCloseAfterArgs");
+        }
+        if (!boundName.empty()) {
+          auto scope = boundScopes.find(boundName);
+          if (scope != boundScopes.end()) {
+            scope->second.pop_back();
+            if (scope->second.empty()) boundScopes.erase(scope);
+          }
         }
         advance();  // consume ')'
         int got = static_cast<int>(args.size());
@@ -519,7 +621,16 @@ struct Parser {
         n->children = std::move(args);
         return n;
       }
-      auto cit = columns.find(toLower(name));
+      const std::string lowerName = toLower(name);
+      auto bound = boundScopes.find(lowerName);
+      if (bound != boundScopes.end() && !bound->second.empty()) {
+        auto n = std::make_shared<Node>();
+        n->kind = NodeKind::Bound;
+        n->boundName = lowerName;
+        n->boundId = bound->second.back();
+        return n;
+      }
+      auto cit = columns.find(lowerName);
       if (cit == columns.end()) {
         throw ExpressionError("Unknown column '" + name + "'", t.pos, "unknownColumn", name);
       }
@@ -557,7 +668,7 @@ struct Parser {
 
 NodePtr parseAst(const std::vector<Token>& tokens,
                  const std::unordered_map<std::string, int>& columns) {
-  Parser p{tokens, columns};
+  Parser p{tokens, columns, {}, 0, 0};
   NodePtr ast = p.parseExpression();
   if (p.peek().type != Tok::Eof) {
     throw ExpressionError("Unexpected token '" + p.peek().value + "' after expression",
@@ -589,8 +700,220 @@ double meanFinite(const std::vector<double>& v) {
   return n > 0 ? sumFinite(v) / static_cast<double>(n) : NAN;
 }
 
+constexpr uint64_t kMaxDiscreteN = 1000000;
+constexpr uint64_t kMaxDiscreteMultiplications = 1024;
+
+uint64_t exactInteger(double value, int64_t position, const char* name) {
+  if (!std::isfinite(value) || value < 0.0 || std::floor(value) != value) {
+    throw ExpressionError(std::string(name) + " requires non-negative integers", position,
+                          "domainError", name);
+  }
+  if (value > static_cast<double>(kMaxDiscreteN)) {
+    ExpressionError error(std::string(name) + " exceeded the discrete budget", position,
+                          "budgetExceeded", name);
+    error.budgetLimit = static_cast<int64_t>(kMaxDiscreteN);
+    error.budgetActual = value > static_cast<double>(INT64_MAX)
+                             ? INT64_MAX
+                             : static_cast<int64_t>(value);
+    throw error;
+  }
+  return static_cast<uint64_t>(value);
+}
+
+double combin(double nValue, double kValue, int64_t position) {
+  const uint64_t n = exactInteger(nValue, position, "COMBIN");
+  const uint64_t k = exactInteger(kValue, position, "COMBIN");
+  if (k > n) throw ExpressionError("COMBIN has k greater than n", position,
+                                   "domainError", "COMBIN");
+  const uint64_t r = std::min(k, n - k);
+  if (r > kMaxDiscreteMultiplications) {
+    ExpressionError error("COMBIN exceeded the multiplication budget", position,
+                          "budgetExceeded", "COMBIN");
+    error.budgetLimit = static_cast<int64_t>(kMaxDiscreteMultiplications);
+    error.budgetActual = static_cast<int64_t>(r);
+    throw error;
+  }
+  long double out = 1.0;
+  for (uint64_t i = 1; i <= r; ++i) {
+    out *= static_cast<long double>(n - r + i);
+    out /= static_cast<long double>(i);
+    if (!std::isfinite(static_cast<double>(out))) {
+      throw ExpressionError("COMBIN exceeded the numeric range", position,
+                            "numericOverflow", "COMBIN");
+    }
+  }
+  if (!std::isfinite(static_cast<double>(out))) {
+    throw ExpressionError("COMBIN exceeded the numeric range", position,
+                          "numericOverflow", "COMBIN");
+  }
+  return static_cast<double>(out);
+}
+
+double permut(double nValue, double kValue, int64_t position) {
+  const uint64_t n = exactInteger(nValue, position, "PERMUT");
+  const uint64_t k = exactInteger(kValue, position, "PERMUT");
+  if (k > n) throw ExpressionError("PERMUT has k greater than n", position,
+                                   "domainError", "PERMUT");
+  if (k > kMaxDiscreteMultiplications) {
+    ExpressionError error("PERMUT exceeded the multiplication budget", position,
+                          "budgetExceeded", "PERMUT");
+    error.budgetLimit = static_cast<int64_t>(kMaxDiscreteMultiplications);
+    error.budgetActual = static_cast<int64_t>(k);
+    throw error;
+  }
+  long double out = 1.0;
+  for (uint64_t i = 0; i < k; ++i) {
+    out *= static_cast<long double>(n - i);
+    if (!std::isfinite(static_cast<double>(out))) {
+      throw ExpressionError("PERMUT exceeded the numeric range", position,
+                            "numericOverflow", "PERMUT");
+    }
+  }
+  return static_cast<double>(out);
+}
+
+std::vector<double> finiteValues(const std::vector<double>& values) {
+  std::vector<double> out;
+  for (double value : values)
+    if (std::isfinite(value)) out.push_back(value);
+  return out;
+}
+
+bool pairedFinite(const std::vector<double>& xValues,
+                  const std::vector<double>& yValues,
+                  std::vector<double>* x,
+                  std::vector<double>* y) {
+  x->clear();
+  y->clear();
+  const size_t n = std::min(xValues.size(), yValues.size());
+  for (size_t i = 0; i < n; ++i) {
+    if (std::isfinite(xValues[i]) && std::isfinite(yValues[i])) {
+      x->push_back(xValues[i]);
+      y->push_back(yValues[i]);
+    }
+  }
+  return !x->empty();
+}
+
+double covarianceFinite(const std::vector<double>& x,
+                        const std::vector<double>& y,
+                        bool sample) {
+  if (x.empty() || x.size() != y.size()) return NAN;
+  if (sample && x.size() < 2) return NAN;
+  long double sumX = 0.0L;
+  long double sumY = 0.0L;
+  for (size_t i = 0; i < x.size(); ++i) {
+    sumX += static_cast<long double>(x[i]);
+    sumY += static_cast<long double>(y[i]);
+  }
+  const long double meanX = sumX / static_cast<long double>(x.size());
+  const long double meanY = sumY / static_cast<long double>(y.size());
+  long double product = 0.0L;
+  for (size_t i = 0; i < x.size(); ++i) {
+    product += (static_cast<long double>(x[i]) - meanX) *
+               (static_cast<long double>(y[i]) - meanY);
+  }
+  const long double divisor = sample
+                                ? static_cast<long double>(x.size() - 1)
+                                : static_cast<long double>(x.size());
+  return static_cast<double>(product / divisor);
+}
+
+double correlationFinite(const std::vector<double>& x,
+                         const std::vector<double>& y) {
+  if (x.empty() || x.size() != y.size()) return NAN;
+  if (x.size() < 2) return NAN;
+  long double sumX = 0.0L;
+  long double sumY = 0.0L;
+  for (size_t i = 0; i < x.size(); ++i) {
+    sumX += static_cast<long double>(x[i]);
+    sumY += static_cast<long double>(y[i]);
+  }
+  const long double meanX = sumX / static_cast<long double>(x.size());
+  const long double meanY = sumY / static_cast<long double>(y.size());
+  long double xx = 0.0L;
+  long double yy = 0.0L;
+  long double xy = 0.0L;
+  for (size_t i = 0; i < x.size(); ++i) {
+    const long double dx = static_cast<long double>(x[i]) - meanX;
+    const long double dy = static_cast<long double>(y[i]) - meanY;
+    xx += dx * dx;
+    yy += dy * dy;
+    xy += dx * dy;
+  }
+  if (!(xx > 0.0L) || !(yy > 0.0L)) return NAN;
+  return static_cast<double>(xy / std::sqrt(static_cast<double>(xx * yy)));
+}
+
+NodePtr cloneNode(const NodePtr& node) {
+  if (!node) return nullptr;
+  auto clone = std::make_shared<Node>();
+  clone->kind = node->kind;
+  clone->number = node->number;
+  clone->column = node->column;
+  clone->columnName = node->columnName;
+  clone->op = node->op;
+  clone->name = node->name;
+  clone->boundName = node->boundName;
+  clone->boundId = node->boundId;
+  clone->stringValue = node->stringValue;
+  for (const auto& child : node->children) clone->children.push_back(cloneNode(child));
+  return clone;
+}
+
+NodePtr bindNodeValue(const NodePtr& node, int64_t boundId, double value) {
+  if (!node) return nullptr;
+  if (node->kind == NodeKind::Bound && node->boundId == boundId) {
+    auto number = std::make_shared<Node>();
+    number->kind = NodeKind::Number;
+    number->number = value;
+    return number;
+  }
+  auto clone = cloneNode(node);
+  for (auto& child : clone->children)
+    child = bindNodeValue(child, boundId, value);
+  return clone;
+}
+
+bool scalarMatches(const std::vector<double>& values, double* out) {
+  if (values.empty()) return false;
+  *out = values[0];
+  if (!std::isfinite(*out)) return false;
+  for (double value : values)
+    if (value != *out) return false;
+  return true;
+}
+
+constexpr uint64_t kMaxAdvancedEvaluations = 1000000;
+thread_local uint64_t advancedEvaluations = 0;
+
+void resetAdvancedBudget() { advancedEvaluations = 0; }
+
+void consumeAdvancedBudget(uint64_t work, const std::string& name) {
+  if (work > kMaxAdvancedEvaluations - advancedEvaluations) {
+    ExpressionError error(name + " exceeded the evaluation budget", 0,
+                          "budgetExceeded", name);
+    error.budgetLimit = static_cast<int64_t>(kMaxAdvancedEvaluations);
+    const uint64_t actual = advancedEvaluations > UINT64_MAX - work
+                                ? UINT64_MAX
+                                : advancedEvaluations + work;
+    error.budgetActual = actual > static_cast<uint64_t>(INT64_MAX)
+                             ? INT64_MAX
+                             : static_cast<int64_t>(actual);
+    throw error;
+  }
+  advancedEvaluations += work;
+}
+
+constexpr size_t kMaxIntegralNodes = 100000;
+
 EvalFn compileAst(const NodePtr& node) {
   switch (node->kind) {
+    case NodeKind::String:
+      return [](const std::vector<std::vector<double>>& cols, size_t len) {
+        (void)cols;
+        return std::vector<double>(len, NAN);
+      };
     case NodeKind::Number: {
       double v = node->number;
       return [v](const std::vector<std::vector<double>>&, size_t len) {
@@ -601,6 +924,10 @@ EvalFn compileAst(const NodePtr& node) {
       int idx = node->column;
       return [idx](const std::vector<std::vector<double>>& cols, size_t) { return cols[idx]; };
     }
+    case NodeKind::Bound:
+      return [](const std::vector<std::vector<double>>&, size_t len) {
+        return std::vector<double>(len, NAN);
+      };
     case NodeKind::Unary: {
       EvalFn inner = compileAst(node->children[0]);
       return [inner](const std::vector<std::vector<double>>& cols, size_t len) {
@@ -644,6 +971,472 @@ EvalFn compileAst(const NodePtr& node) {
       // Aggregation: reduce to scalar then broadcast. MIN/MAX multi-arg fall through to
       // element-wise (same rule as the TS side).
       bool isMultiMinMax = (name == "MIN" || name == "MAX") && argFns.size() > 1;
+
+      if (envAdvancedMathEnabled() &&
+          (name == "SUM" || name == "PRODUCT" || name == "INTEGRAL" || name == "DERIV")) {
+        const bool discrete = name == "SUM" || name == "PRODUCT";
+        const size_t expected = discrete ? 4 : (name == "INTEGRAL" ? 4 : 3);
+        if (name == "SUM" && node->children.size() == 1) {
+          // Preserve the existing aggregate SUM(c) path below.
+        } else {
+          if (node->children.size() != expected) {
+            ExpressionError err(name + "() has the wrong advanced argument count", 0,
+                                "badArgCount", name);
+            err.argMin = static_cast<int64_t>(expected);
+            err.argMax = static_cast<int64_t>(expected);
+            err.argGot = static_cast<int64_t>(node->children.size());
+            throw err;
+          }
+          if (!node->children[1] || node->children[1]->kind != NodeKind::Bound) {
+            throw ExpressionError(name + " requires a bound variable", 0,
+                                  "domainError", name);
+          }
+          const int64_t bound = node->children[1]->boundId;
+
+          if (name == "SUM" || name == "PRODUCT") {
+            return [node, bound, argFns, name](const std::vector<std::vector<double>>& cols, size_t len) {
+              double startValue = NAN;
+              double endValue = NAN;
+              if (!scalarMatches(argFns[2](cols, len), &startValue) ||
+                  !scalarMatches(argFns[3](cols, len), &endValue)) {
+                throw ExpressionError(name + " bounds must be finite integers", 0,
+                                      "domainError", name);
+              }
+              if (std::floor(startValue) != startValue || std::floor(endValue) != endValue ||
+                  startValue < 0.0 || endValue < 0.0) {
+                throw ExpressionError(name + " bounds must be non-negative integers", 0,
+                                      "domainError", name);
+              }
+              if (endValue < startValue) {
+                throw ExpressionError(name + " requires start <= end", 0,
+                                      "domainError", name);
+              }
+              if (endValue > 1000000.0) {
+                ExpressionError error(name + " exceeded the discrete budget", 0,
+                                      "budgetExceeded", name);
+                error.budgetLimit = 1000000;
+                error.budgetActual = endValue > static_cast<double>(INT64_MAX)
+                                         ? INT64_MAX
+                                         : static_cast<int64_t>(endValue);
+                throw error;
+              }
+              const uint64_t start = static_cast<uint64_t>(startValue);
+              const uint64_t end = static_cast<uint64_t>(endValue);
+              const uint64_t itemCount = end - start + 1;
+              if (itemCount > 1000000) {
+                ExpressionError error(name + " exceeded the discrete budget", 0,
+                                      "budgetExceeded", name);
+                error.budgetLimit = 1000000;
+                error.budgetActual = static_cast<int64_t>(itemCount);
+                throw error;
+              }
+              const uint64_t rows = static_cast<uint64_t>(len);
+              if (rows > 0 && itemCount > UINT64_MAX / rows) {
+                ExpressionError error(name + " exceeded the evaluation budget", 0,
+                                      "budgetExceeded", name);
+                error.budgetLimit = static_cast<int64_t>(kMaxAdvancedEvaluations);
+                error.budgetActual = INT64_MAX;
+                throw error;
+              }
+              consumeAdvancedBudget(itemCount * rows, name);
+
+              std::vector<double> out(len);
+              for (size_t row = 0; row < len; ++row) {
+                long double result = name == "SUM" ? 0.0L : 1.0L;
+                for (uint64_t value = start; value <= end; ++value) {
+                  NodePtr boundExpr = bindNodeValue(node->children[0], bound,
+                                                    static_cast<double>(value));
+                  EvalFn fn = compileAst(boundExpr);
+                  const double term = fn(cols, len)[row];
+                  if (!std::isfinite(term)) {
+                    throw ExpressionError(name + " produced a non-finite intermediate", 0,
+                                          "domainError", name);
+                  }
+                  if (name == "SUM") result += static_cast<long double>(term);
+                  else result *= static_cast<long double>(term);
+                  if (!std::isfinite(static_cast<double>(result))) {
+                    throw ExpressionError(name + " exceeded the numeric range", 0,
+                                          "numericOverflow", name);
+                  }
+                }
+                out[row] = static_cast<double>(result);
+              }
+              return out;
+            };
+          }
+
+          if (name == "INTEGRAL") {
+            return [node, bound, argFns](const std::vector<std::vector<double>>& cols, size_t len) {
+              double lower = NAN;
+              double upper = NAN;
+              if (!scalarMatches(argFns[2](cols, len), &lower) ||
+                  !scalarMatches(argFns[3](cols, len), &upper)) {
+                throw ExpressionError("INTEGRAL bounds must be finite", 0,
+                                      "domainError", "INTEGRAL");
+              }
+              if (upper < lower) {
+                throw ExpressionError("INTEGRAL requires lower <= upper", 0,
+                                      "domainError", "INTEGRAL");
+              }
+              constexpr size_t n = 10000;
+              if (n > kMaxIntegralNodes) {
+                throw ExpressionError("INTEGRAL exceeded its node budget", 0,
+                                      "budgetExceeded", "INTEGRAL");
+              }
+              const uint64_t rows = static_cast<uint64_t>(len);
+              const uint64_t nodes = static_cast<uint64_t>(n + 1);
+              if (rows > 0 && nodes > UINT64_MAX / rows) {
+                throw ExpressionError("INTEGRAL exceeded its evaluation budget", 0,
+                                      "budgetExceeded", "INTEGRAL");
+              }
+              consumeAdvancedBudget(nodes * rows, "INTEGRAL");
+              const long double h = (static_cast<long double>(upper) - lower) /
+                                    static_cast<long double>(n);
+              std::vector<double> out(len);
+              for (size_t row = 0; row < len; ++row) {
+                long double sum = 0.0L;
+                for (size_t i = 0; i <= n; ++i) {
+                  const long double x = static_cast<long double>(lower) + h * i;
+                  NodePtr boundExpr = bindNodeValue(node->children[0], bound,
+                                                    static_cast<double>(x));
+                  EvalFn fn = compileAst(boundExpr);
+                  const double y = fn(cols, len)[row];
+                  if (!std::isfinite(y)) {
+                    throw ExpressionError("INTEGRAL encountered a non-finite value", 0,
+                                          "domainError", "INTEGRAL");
+                  }
+                  const long double weight = i == 0 || i == n ? 1.0L
+                                                : (i % 2 == 0 ? 2.0L : 4.0L);
+                  sum += weight * y;
+                }
+                const double result = static_cast<double>(h * sum / 3.0L);
+                if (!std::isfinite(result)) {
+                  throw ExpressionError("INTEGRAL exceeded the numeric range", 0,
+                                        "numericOverflow", "INTEGRAL");
+                }
+                out[row] = result;
+              }
+              return out;
+            };
+          }
+
+          if (name == "DERIV") {
+            return [node, bound, argFns](const std::vector<std::vector<double>>& cols, size_t len) {
+              double point = NAN;
+              if (!scalarMatches(argFns[2](cols, len), &point)) {
+                throw ExpressionError("DERIV point must be finite", 0,
+                                      "domainError", "DERIV");
+              }
+              const uint64_t rows = static_cast<uint64_t>(len);
+              if (rows > kMaxAdvancedEvaluations / 2) {
+                ExpressionError error("DERIV exceeded the evaluation budget", 0,
+                                      "budgetExceeded", "DERIV");
+                error.budgetLimit = static_cast<int64_t>(kMaxAdvancedEvaluations);
+                error.budgetActual = rows > static_cast<uint64_t>(INT64_MAX / 2)
+                                         ? INT64_MAX
+                                         : static_cast<int64_t>(rows * 2);
+                throw error;
+              }
+              consumeAdvancedBudget(rows * 2, "DERIV");
+              const double scale = std::max(1.0, std::fabs(point));
+              const double h = 1e-5 * scale;
+              std::vector<double> out(len);
+              for (size_t row = 0; row < len; ++row) {
+                NodePtr plusExpr = bindNodeValue(node->children[0], bound, point + h);
+                NodePtr minusExpr = bindNodeValue(node->children[0], bound, point - h);
+                const double plus = compileAst(plusExpr)(cols, len)[row];
+                const double minus = compileAst(minusExpr)(cols, len)[row];
+                if (!std::isfinite(plus) || !std::isfinite(minus)) {
+                  throw ExpressionError("DERIV encountered a non-finite value", 0,
+                                        "domainError", "DERIV");
+                }
+                const double result = (plus - minus) / (2.0 * h);
+                if (!std::isfinite(result)) {
+                  throw ExpressionError("DERIV exceeded the numeric range", 0,
+                                        "numericOverflow", "DERIV");
+                }
+                out[row] = result;
+              }
+              return out;
+            };
+          }
+        }
+      }
+      if (envAdvancedMathEnabled() &&
+          (name == "VAR.S" || name == "VAR.P" || name == "STDEV.S" || name == "STDEV.P")) {
+        EvalFn inner = argFns[0];
+        const bool sample = name == "VAR.S" || name == "STDEV.S";
+        const bool standardDeviation = name == "STDEV.S" || name == "STDEV.P";
+        return [inner, sample, standardDeviation](const std::vector<std::vector<double>>& cols, size_t len) {
+          const std::vector<double> finite = finiteValues(inner(cols, len));
+          if (finite.empty() || (sample && finite.size() < 2))
+            return std::vector<double>(len, NAN);
+          if (finite.size() == 1) return std::vector<double>(len, 0.0);
+          long double sum = 0.0L;
+          for (double value : finite) sum += static_cast<long double>(value);
+          const long double mean = sum / static_cast<long double>(finite.size());
+          long double ss = 0.0L;
+          for (double value : finite) {
+            const long double delta = static_cast<long double>(value) - mean;
+            ss += delta * delta;
+          }
+          const long double divisor = sample
+                                        ? static_cast<long double>(finite.size() - 1)
+                                        : static_cast<long double>(finite.size());
+          double scalar = static_cast<double>(ss / divisor);
+          if (standardDeviation) scalar = std::sqrt(scalar);
+          return std::vector<double>(len, scalar);
+        };
+      }
+
+      if (envAdvancedMathEnabled() &&
+          (name == "PERCENTILE.INC" || name == "PERCENTILE.EXC")) {
+        EvalFn valuesFn = argFns[0];
+        EvalFn kFn = argFns[1];
+        const bool exclusive = name == "PERCENTILE.EXC";
+        return [valuesFn, kFn, exclusive, name](const std::vector<std::vector<double>>& cols, size_t len) {
+          std::vector<double> sorted = finiteValues(valuesFn(cols, len));
+          double k = NAN;
+          if (!scalarMatches(kFn(cols, len), &k)) {
+            throw ExpressionError(name + " requires a finite scalar percentile", 0,
+                                  "domainError", name);
+          }
+          if (exclusive ? (k <= 0.0 || k >= 1.0) : (k < 0.0 || k > 1.0)) {
+            throw ExpressionError(name + " percentile is outside its accepted domain", 0,
+                                  "domainError", name);
+          }
+          if (sorted.empty()) return std::vector<double>(len, NAN);
+          std::sort(sorted.begin(), sorted.end());
+          double scalar = NAN;
+          if (!exclusive) {
+            const double position = static_cast<double>(sorted.size() - 1) * k;
+            const size_t lower = static_cast<size_t>(std::floor(position));
+            const size_t upper = static_cast<size_t>(std::ceil(position));
+            scalar = lower == upper
+                         ? sorted[lower]
+                         : sorted[lower] + (sorted[upper] - sorted[lower]) *
+                                               (position - static_cast<double>(lower));
+          } else {
+            const double rank = k * static_cast<double>(sorted.size() + 1);
+            if (rank < 1.0 || rank > static_cast<double>(sorted.size())) {
+              throw ExpressionError(name + " percentile is outside the exclusive ranks", 0,
+                                    "domainError", name);
+            }
+            if (rank >= 1.0 && rank <= static_cast<double>(sorted.size())) {
+              const size_t lower = static_cast<size_t>(std::floor(rank)) - 1;
+              const size_t upper = std::min(lower + 1, sorted.size() - 1);
+              const double fraction = rank - std::floor(rank);
+              scalar = lower == upper
+                           ? sorted[lower]
+                           : sorted[lower] + (sorted[upper] - sorted[lower]) * fraction;
+            }
+          }
+          return std::vector<double>(len, scalar);
+        };
+      }
+
+      if (envAdvancedMathEnabled() &&
+          (name == "CORREL" || name == "COVARIANCE.S" || name == "COVARIANCE.P" ||
+           name == "SLOPE" || name == "INTERCEPT" || name == "RSQ")) {
+        EvalFn xFn = argFns[1];
+        EvalFn yFn = argFns[0];
+        return [xFn, yFn, name](const std::vector<std::vector<double>>& cols, size_t len) {
+          std::vector<double> x;
+          std::vector<double> y;
+          pairedFinite(xFn(cols, len), yFn(cols, len), &x, &y);
+          double scalar = NAN;
+          if (name == "CORREL") {
+            scalar = correlationFinite(x, y);
+          } else if (name == "COVARIANCE.S") {
+            scalar = covarianceFinite(x, y, true);
+          } else if (name == "COVARIANCE.P") {
+            scalar = covarianceFinite(x, y, false);
+          } else if (x.size() >= 2) {
+            long double sumX = 0.0L;
+            long double sumY = 0.0L;
+            for (size_t i = 0; i < x.size(); ++i) {
+              sumX += static_cast<long double>(x[i]);
+              sumY += static_cast<long double>(y[i]);
+            }
+            const long double meanX = sumX / static_cast<long double>(x.size());
+            const long double meanY = sumY / static_cast<long double>(y.size());
+            long double xx = 0.0L;
+            long double xy = 0.0L;
+            long double yy = 0.0L;
+            for (size_t i = 0; i < x.size(); ++i) {
+              const long double dx = static_cast<long double>(x[i]) - meanX;
+              const long double dy = static_cast<long double>(y[i]) - meanY;
+              xx += dx * dx;
+              xy += dx * dy;
+              yy += dy * dy;
+            }
+            if (xx > 0.0L) {
+              const double slope = static_cast<double>(xy / xx);
+              const double intercept = static_cast<double>(meanY - static_cast<long double>(slope) * meanX);
+              if (name == "SLOPE") scalar = slope;
+              else if (name == "INTERCEPT") scalar = intercept;
+              else if (yy > 0.0L) scalar = static_cast<double>((xy * xy) / (xx * yy));
+              else if (xy == 0.0L) scalar = 1.0;
+            }
+          }
+          return std::vector<double>(len, scalar);
+        };
+      }
+
+      if (envAdvancedMathEnabled() && (name == "COUNTIF" || name == "SUMIF")) {
+        if (name == "SUMIF" && argFns.size() == 2) {
+          // SUMIF(range, criteria) uses range as the sum_range.
+        }
+        EvalFn rangeFn = argFns[0];
+        const NodePtr criteriaNode = node->children[1];
+        EvalFn sumFn = argFns.size() >= 3 ? argFns[2] : rangeFn;
+        return [rangeFn, sumFn, criteriaNode, name](const std::vector<std::vector<double>>& cols, size_t len) {
+          if (!criteriaNode ||
+              (criteriaNode->kind != NodeKind::String && criteriaNode->kind != NodeKind::Number)) {
+            throw ExpressionError(name + " requires a numeric or string criteria", 0,
+                                  "domainError", name);
+          }
+          // A numeric literal criteria keeps its full double precision: round-tripping it
+          // through std::to_string (%f, six decimals) silently rewrote 0.123456789 to
+          // 0.123457 and 1e-9 to 0, so equality tests compared against the wrong number.
+          const bool directNumber = criteriaNode->kind == NodeKind::Number;
+          std::string op = "=";
+          double numericLiteral = 0.0;
+          if (directNumber) {
+            numericLiteral = criteriaNode->number;
+            if (!std::isfinite(numericLiteral)) {
+              throw ExpressionError(name + " criteria must be numeric in v1", 0,
+                                    "domainError", name);
+            }
+          } else {
+            std::string literal = trimName(criteriaNode->stringValue);
+            for (const std::string& prefix : {">=", "<=", "<>", "!=", "=", "<", ">"}) {
+              if (literal.rfind(prefix, 0) == 0) {
+                op = prefix;
+                literal = literal.substr(prefix.size());
+                break;
+              }
+            }
+            if (literal.find('*') != std::string::npos || literal.find('?') != std::string::npos) {
+              throw ExpressionError(name + " wildcard criteria are not implemented", 0,
+                                    "unsupportedCriteria", name);
+            }
+            char* end = nullptr;
+            numericLiteral = std::strtod(literal.c_str(), &end);
+            const bool isNumericLiteral = end != literal.c_str() && end != nullptr && *end == '\0';
+            if (!isNumericLiteral || !std::isfinite(numericLiteral)) {
+              throw ExpressionError(name + " criteria must be numeric in v1", 0,
+                                    "domainError", name);
+            }
+          }
+
+          const std::vector<double> rangeValues = rangeFn(cols, len);
+          const std::vector<double> sumValues = sumFn(cols, len);
+          if (rangeValues.size() != sumValues.size()) {
+            throw ExpressionError(name + " requires matching range sizes", 0,
+                                  "shapeMismatch", name);
+          }
+          double scalar = 0.0;
+          for (size_t i = 0; i < rangeValues.size(); ++i) {
+            bool matches = false;
+            const double value = rangeValues[i];
+            if (std::isfinite(value)) {
+              if (op == "=") matches = value == numericLiteral;
+              else if (op == "!=" || op == "<>") matches = value != numericLiteral;
+              else if (op == "<") matches = value < numericLiteral;
+              else if (op == "<=") matches = value <= numericLiteral;
+              else if (op == ">") matches = value > numericLiteral;
+              else if (op == ">=") matches = value >= numericLiteral;
+            }
+            if (matches) {
+              if (name == "COUNTIF") ++scalar;
+              else if (std::isfinite(sumValues[i])) scalar += sumValues[i];
+            }
+          }
+          return std::vector<double>(len, scalar);
+        };
+      }
+
+      if (envAdvancedMathEnabled() && name == "IRR") {
+        EvalFn inner = argFns[0];
+        return [inner](const std::vector<std::vector<double>>& cols, size_t len) {
+          const std::vector<double> values = inner(cols, len);
+          if (values.empty()) {
+            throw ExpressionError("IRR requires cash flows", 0, "domainError", "IRR");
+          }
+          bool hasPositive = false;
+          bool hasNegative = false;
+          for (double value : values) {
+            if (!std::isfinite(value)) {
+              throw ExpressionError("IRR requires finite cash flows", 0,
+                                    "domainError", "IRR");
+            }
+            if (value > 0.0) hasPositive = true;
+            if (value < 0.0) hasNegative = true;
+          }
+          if (!hasPositive || !hasNegative) {
+            throw ExpressionError("IRR requires positive and negative cash flows", 0,
+                                  "domainError", "IRR");
+          }
+          auto npv = [&values](double rate) {
+            long double out = 0.0L;
+            long double factor = 1.0L;
+            for (double cf : values) {
+              if (std::isfinite(cf)) out += static_cast<long double>(cf) / factor;
+              factor *= static_cast<long double>(1.0 + rate);
+            }
+            return static_cast<double>(out);
+          };
+          double low = -0.99;
+          double high = 100.0;
+          double lowValue = npv(low);
+          double highValue = npv(high);
+          if (!std::isfinite(lowValue) || !std::isfinite(highValue)) {
+            throw ExpressionError("IRR encountered a non-finite residual", 0,
+                                  "convergenceError", "IRR");
+          }
+          if ((lowValue > 0.0) == (highValue > 0.0)) {
+            throw ExpressionError("IRR has no bracketed root in its frozen search interval", 0,
+                                  "convergenceError", "IRR");
+          }
+          double scalar = NAN;
+          bool converged = false;
+          for (int i = 0; i < 128; ++i) {
+              const double mid = low + (high - low) / 2.0;
+              const double midValue = npv(mid);
+              if (!std::isfinite(midValue)) {
+                throw ExpressionError("IRR encountered a non-finite residual", 0,
+                                      "convergenceError", "IRR");
+              }
+              if (std::fabs(midValue) < 1e-12) {
+                low = high = mid;
+                converged = true;
+                break;
+              }
+              if ((lowValue > 0.0) == (midValue > 0.0)) {
+                low = mid;
+                lowValue = midValue;
+              } else {
+                high = mid;
+                highValue = midValue;
+              }
+            }
+          const double candidate = low + (high - low) / 2.0;
+          if (std::fabs(npv(candidate)) <= 1e-10) {
+            scalar = candidate;
+            converged = true;
+          }
+          if (!converged) {
+            ExpressionError error("IRR exceeded its iteration budget", 0,
+                                  "budgetExceeded", "IRR");
+            error.budgetLimit = 128;
+            error.budgetActual = 128;
+            throw error;
+          }
+          return std::vector<double>(len, scalar);
+        };
+      }
+
       if (aggregationNames().count(name) && !isMultiMinMax) {
         EvalFn inner = argFns[0];
         return [inner, name](const std::vector<std::vector<double>>& cols, size_t len) {
@@ -761,6 +1554,26 @@ EvalFn compileAst(const NodePtr& node) {
             }
             const double fraction = position - static_cast<double>(lower);
             out[i] = sorted[lower] + (sorted[upper] - sorted[lower]) * fraction;
+          }
+          return out;
+        };
+      }
+
+      if (name == "COMBIN" || name == "PERMUT") {
+        if (!envAdvancedMathEnabled()) {
+          throw ExpressionError("Unknown function '" + name + "'", node->children.empty() ? 0 : 0,
+                                "unknownFunction", name);
+        }
+        EvalFn nFn = argFns[0];
+        EvalFn kFn = argFns[1];
+        return [nFn, kFn, name](const std::vector<std::vector<double>>& cols, size_t len) {
+          std::vector<double> nValues = nFn(cols, len);
+          std::vector<double> kValues = kFn(cols, len);
+          std::vector<double> out(len);
+          for (size_t i = 0; i < len; ++i) {
+            out[i] = name == "COMBIN"
+                         ? combin(nValues[i], kValues[i], 0)
+                         : permut(nValues[i], kValues[i], 0);
           }
           return out;
         };
@@ -1038,11 +1851,17 @@ void applyAutoConvert(const NodePtr& node, const ExprEngine::AutoConvertContext&
 
 }  // namespace
 
+bool ExprEngine::advancedMathEnabled() {
+  const char* value = std::getenv("DC_ADVANCED_MATH");
+  return value != nullptr && value[0] != '\0' && std::strcmp(value, "0") != 0;
+}
+
 std::vector<double> ExprEngine::evaluate(const std::string& expression,
                                          const std::vector<std::string>& columnNames,
                                          const std::vector<std::vector<double>>& columns,
                                          size_t length,
                                          const std::vector<AliasRange>& aliases) {
+  resetAdvancedBudget();
   auto tokens = tokenize(expression);
   auto colMap = buildColumnMap(columnNames, aliases);
   NodePtr ast = parseAst(tokens, colMap);
@@ -1057,6 +1876,7 @@ std::vector<double> ExprEngine::evaluateAuto(const std::string& expression,
                                              const AutoConvertRequest* request,
                                              std::vector<UnitConversion>* conversions) {
   if (conversions != nullptr) conversions->clear();
+  resetAdvancedBudget();
   auto tokens = tokenize(expression);
   auto colMap = buildColumnMap(columnNames, aliases);
   NodePtr ast = parseAst(tokens, colMap);
@@ -1141,8 +1961,23 @@ namespace {
 
 using MatEvalFn = std::function<MatVal(const std::vector<MatVal>&)>;
 
+bool unsupportedAdvancedMatrixCall(const NodePtr& node) {
+  if (!envAdvancedMathEnabled() || !node || node->kind != NodeKind::Call) return false;
+  static const std::unordered_set<std::string> kNames = {
+      "PRODUCT", "INTEGRAL", "DERIV", "COMBIN", "PERMUT",
+      "VAR.S", "VAR.P", "STDEV.S", "STDEV.P", "PERCENTILE.INC",
+      "PERCENTILE.EXC", "CORREL", "COVARIANCE.S", "COVARIANCE.P",
+      "SLOPE", "INTERCEPT", "RSQ", "COUNTIF", "SUMIF", "IRR"};
+  return kNames.count(node->name) != 0 ||
+         (node->name == "SUM" && node->children.size() != 1);
+}
+
 MatEvalFn compileAstMatrix(const NodePtr& node) {
   switch (node->kind) {
+    case NodeKind::String:
+    case NodeKind::Bound:
+      throw ExpressionError("This node kind is unavailable in matrix mode", 0,
+                            "unsupportedFunctionMode");
     case NodeKind::Number: {
       double v = node->number;
       return [v](const std::vector<MatVal>&) {
@@ -1192,9 +2027,13 @@ MatEvalFn compileAstMatrix(const NodePtr& node) {
       };
     }
     case NodeKind::Call: {
+      const std::string name = node->name;
+      if (unsupportedAdvancedMatrixCall(node)) {
+        throw ExpressionError(name + " is unavailable in matrix mode", 0,
+                              "unsupportedFunctionMode", name);
+      }
       std::vector<MatEvalFn> argFns;
       for (const auto& a : node->children) argFns.push_back(compileAstMatrix(a));
-      const std::string name = node->name;
 
       // Matrix-specific functions.
       if (name == "TRANSPOSE") {
