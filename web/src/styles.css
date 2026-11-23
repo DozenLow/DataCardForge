@@ -1705,6 +1705,15 @@ body {
   outline: none;
 }
 
+.formula-card__math-preview {
+  flex: 1 1 220px;
+  min-height: 24px;
+  max-width: 100%;
+  overflow-x: auto;
+  color: var(--text);
+  font-size: 14px;
+}
+
 /* Explicit output unit (units L1a): a narrow picker that sits after the expression. It is
    quiet until the user asserts something — an empty control must not read as a warning. */
 .formula-card__unit {
@@ -3620,6 +3629,12 @@ body {
   top: 12px;
   width: 8px;
   height: 8px;
+  /* Anchor only: the connection layer attaches the wire to this box. The label must never
+     paint — at 13px in normal text colour it printed "src" over the picker's first header
+     cell (the comment above claimed invisibility that no rule provided). */
+  font-size: 0;
+  color: transparent;
+  overflow: hidden;
 }
 
 .unit-convert__result {
