@@ -423,6 +423,7 @@ const dictionaries = {
     'convert.ambiguous': '待确认「{token}」',
     'convert.unknown': '无单位',
     'convert.error.upstreamPending': '上游表尚未上传到后端，稍后再换算',
+    'convert.error.unitMismatch': '「{name}」量纲不同：「{from}」不能换算为「{to}」',
     'convert.error.name': '列',
 
     // 帮助（公式 / 函数说明）：菜单项、卡片上的「?」与悬停提示共用同一份文案。
@@ -939,6 +940,8 @@ const dictionaries = {
     'convert.unknown': 'no unit',
     'convert.error.upstreamPending':
       'The upstream table is not uploaded to the backend yet — try again shortly',
+    'convert.error.unitMismatch':
+      'Column "{name}" has a different dimension: "{from}" cannot convert to "{to}"',
     'convert.error.name': 'Column',
 
     // Help (formula / function reference): the menu entries, the card's "?" and the hover

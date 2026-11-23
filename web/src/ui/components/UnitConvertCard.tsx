@@ -278,6 +278,10 @@ export function UnitConvertCard({
             ? 'done'
             : 'idle';
 
+  const columnName = (index: number): string =>
+    (sourceMatrix && (sourceMatrix.columnLabel(index) || sourceMatrix.column(index).posName)) ||
+    t('unit.unnamedColumn', { n: index + 1 });
+
   /**
    * The error sentence, built from the backend's structured `code` + params — never from
    * server prose (the backend does not send any). An unknown code still says something
@@ -285,15 +289,26 @@ export function UnitConvertCard({
    */
   const error = useMemo(() => {
     if (!run || run.status !== 'error' || run.code === null) return null;
+    // The backend names the offending column by 0-based index, but the picker lists
+    // names, not numbers: resolve the name here so the sentence points at a row the
+    // user can actually see. Fall back to the generic index sentence when the table
+    // has changed under the error.
+    if (run.code === 'unitMismatch' && sourceMatrix && typeof run.params?.column === 'number') {
+      const index = run.params.column;
+      if (index >= 0 && index < sourceMatrix.columnCount()) {
+        return t('convert.error.unitMismatch', {
+          name: columnName(index),
+          from: String(run.params.from ?? ''),
+          to: String(run.params.to ?? ''),
+        });
+      }
+    }
     const key = `formula.error.${run.code}` as MessageKey;
     const localised = t(key, normaliseParams(run.params));
     const usable = localised !== key && !/\{\w+\}/.test(localised);
     return usable ? localised : `${t('formula.error.unknown')} (${run.code})`;
-  }, [run, t]);
-
-  const columnName = (index: number): string =>
-    (sourceMatrix && (sourceMatrix.columnLabel(index) || sourceMatrix.column(index).posName)) ||
-    t('unit.unnamedColumn', { n: index + 1 });
+    // columnName closes over sourceMatrix + t; both are in the dependency list.
+  }, [run, t, sourceMatrix]);
 
   const statusText =
     state === 'computing'

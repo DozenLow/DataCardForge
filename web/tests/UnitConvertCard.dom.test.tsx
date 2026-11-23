@@ -564,12 +564,26 @@ describe('unit-convert card — errors', () => {
     const alert = host.querySelector('.unit-convert__error');
     expect(alert).not.toBeNull();
     expect(alert?.getAttribute('role')).toBe('alert');
-    // The sentence is i18n's, filled with the backend's structured params — never server prose.
-    expect(alert?.textContent).toBe('第 0 列量纲不同：「kPa」不能换算为「kN」');
+    // The sentence is i18n's, filled with the backend's structured params — never server
+    // prose. The column is named, not numbered: the picker lists names, so an index would
+    // point at nothing the user can see.
+    expect(alert?.textContent).toBe('「pressure_kpa」量纲不同：「kPa」不能换算为「kN」');
     // A refused conversion publishes no table (the backend emptied the matrix).
     expect(host.querySelector('.unit-convert__grid')).toBeNull();
     expect(host.querySelector('.unit-convert__status')?.textContent).toBe(
-      '第 0 列量纲不同：「kPa」不能换算为「kN」',
+      '「pressure_kpa」量纲不同：「kPa」不能换算为「kN」',
+    );
+  });
+
+  it('falls back to the index sentence when the table changed under the error', async () => {
+    backend?.restore();
+    backend = stubBackend({ error: { code: 'unitMismatch', params: { column: 9, from: 'kg', to: 'mm/s' } } });
+    const { card } = await setup();
+    const host = await mount(card);
+    await choose(host, 0, 'bar');
+    await pressConvert(host);
+    expect(host.querySelector('.unit-convert__error')?.textContent).toBe(
+      '第 9 列量纲不同：「kg」不能换算为「mm/s」',
     );
   });
 
