@@ -108,6 +108,16 @@ int main() {
   const auto rsq = ExprEngine::evaluate("RSQ(A, B)", {"A", "B"}, relation, 3);
   CHECK(std::fabs(rsq[0] - 1.0) < 1e-12);
 
+  // Degenerate columns: RSQ must refuse exactly like CORREL (frozen: RSQ = corr^2).
+  const std::vector<std::vector<double>> constY{{1.0, 2.0, 3.0}, {5.0, 5.0, 5.0}};
+  const auto rsqConstY = ExprEngine::evaluate("RSQ(B, A)", {"A", "B"}, constY, 3);
+  CHECK(std::isnan(rsqConstY[0]));
+  const auto correlConstY = ExprEngine::evaluate("CORREL(A, B)", {"A", "B"}, constY, 3);
+  CHECK(std::isnan(correlConstY[0]));
+  const auto slopeConstX = ExprEngine::evaluate("SLOPE(B, A)", {"A", "B"},
+                                                std::vector<std::vector<double>>{{7.0, 7.0, 7.0}, {1.0, 2.0, 3.0}}, 3);
+  CHECK(std::isnan(slopeConstX[0]));
+
   const std::vector<std::vector<double>> irrCols{{-100.0, 110.0}};
   const auto irr = ExprEngine::evaluate("IRR(A)", {"A"}, irrCols, 2);
   CHECK(std::fabs(irr[0] - 0.1) < 1e-12);

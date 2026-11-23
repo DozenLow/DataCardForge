@@ -16,6 +16,7 @@
     { "name": "correl", "columns": [{ "name": "A", "data": [1,2,3] }, { "name": "B", "data": [2,4,6] }], "expression": "CORREL(A,B)", "expect": [1,1,1], "tol": 1e-12 },
     { "name": "covariance-s", "columns": [{ "name": "A", "data": [1,2,3] }, { "name": "B", "data": [2,4,6] }], "expression": "COVARIANCE.S(A,B)", "expect": [2,2,2], "tol": 1e-12 },
     { "name": "slope", "columns": [{ "name": "A", "data": [1,2,3] }, { "name": "B", "data": [2,4,6] }], "expression": "SLOPE(B,A)", "expect": [2,2,2], "tol": 1e-12 },
+    { "name": "rsq-const-y", "columns": [{ "name": "A", "data": [1,2,3] }, { "name": "B", "data": [5,5,5] }], "expression": "RSQ(B,A)", "expect": ["NaN","NaN","NaN"] },
     { "name": "countif", "columns": [{ "name": "A", "data": [1,2,3,4] }], "expression": "COUNTIF(A,\">2\")", "expect": [2,2,2,2] },
     { "name": "countif-number", "columns": [{ "name": "A", "data": [1,2,3,4] }], "expression": "COUNTIF(A,2)", "expect": [1,1,1,1] },
     { "name": "countif-not-equal", "columns": [{ "name": "A", "data": [1,2,3,4] }], "expression": "COUNTIF(A,\"<>2\")", "expect": [3,3,3,3] },

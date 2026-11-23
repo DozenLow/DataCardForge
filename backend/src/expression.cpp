@@ -1275,8 +1275,10 @@ EvalFn compileAst(const NodePtr& node) {
               const double intercept = static_cast<double>(meanY - static_cast<long double>(slope) * meanX);
               if (name == "SLOPE") scalar = slope;
               else if (name == "INTERCEPT") scalar = intercept;
+              // RSQ is the squared correlation (frozen contract): a constant y has no
+              // correlation, so it must stay NaN exactly like CORREL — the previous
+              // `xy == 0 => 1.0` branch invented a perfect fit for a horizontal cloud.
               else if (yy > 0.0L) scalar = static_cast<double>((xy * xy) / (xx * yy));
-              else if (xy == 0.0L) scalar = 1.0;
             }
           }
           return std::vector<double>(len, scalar);
