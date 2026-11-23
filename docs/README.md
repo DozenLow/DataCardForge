@@ -28,10 +28,11 @@
   - [项目演进史（DataCardForge）](history.md) · [EN](history.en.md) ← **先读这篇再进各分册**
 - 📌 **决策记录**（`decisions/`）— 已经拍板、影响后续的方向性结论
   - [并行波调度器：就绪队列 + 脚本进程泳道](decisions/2026-11-22-parallel-wave-scheduler.md) ← 🔒 **最新**：上游一完成即开算、不等无关慢卡；脚本子进程并发封顶四、排队可取消；客户端契约零改动
+  - [高等数学与统计函数（advanced-math.v1）](decisions/2026-11-23-advanced-math-statistics.md) ← 🧪 实验态、默认关闭：自适应 Simpson/DERIV 级联+折点闸/Excel 统计口径/预算与 oracle 清单；2026-11-23 review 修复轮后口径冻结修订
   - [UI 端口术语规范：row/col 严格留给矩阵，卡上列表项一律称端口](decisions/2026-11-20-ui-port-terminology.md) ← 🔒 输出端口=一整张矩阵；类名 `__row*`→`__port*` 重构落地
   - [卡片多输入与右键拖接线：端口是变量、来源是附件；右键语义单一权威](decisions/2026-11-20-card-multi-input-and-wire-gesture.md) ← 🔒 一卡 N 口各接不同上游（契约零改动），标题栏右键拖接线、原生右键全屏蔽
   - [单位感知阶梯与三档策略：P3 提示与公式输出单位](decisions/2026-11-19-units-awareness-p3-and-formula-output.md) ← 🧭 方向已拍板；**L1/L2 已实施**、L3 无限期搁置：推断阶梯 × 严格/自动/自由三档，卡>工作区>全局 作用域
-  - [单位 v1：列元数据、三态识别、组级确认、显式换算](decisions/2026-11-18-units-v1.md) ← **已实施 P1+P2**：单位是派生元数据，数值永不自动改写
+  - [单位 v1：列元数据、三态识别、组级确认、显式换算](decisions/2026-11-18-units-v1.md) ← **已实施 P1+P2**：单位是派生元数据，数值永不自动改写；＋2026-11-23 增补（km/h 双端、换算卡显示修复）
   - [阻塞闸门：冻结传播、告警、红框标出节点（计算错误不算阻塞）](decisions/2026-11-17-blocking-gate.md) ← 停下来但保留一切状态，原因消失自动恢复
   - [脚本卡的自动运行：clean 成功一次后与公式卡同频](decisions/2026-11-17-script-autorun.md) ← **最新：首次手点，之后随数据自动重算**
   - [防抖属于用户操作：全工作区一个 200ms 结算](decisions/2026-11-17-operation-settle.md) ← 删除每卡各自的 250/500/600ms

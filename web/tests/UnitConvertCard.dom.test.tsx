@@ -490,7 +490,9 @@ describe('unit-convert card — converting', () => {
 
     await choose(host, 0, 'bar');
     await pressConvert(host);
-    await choose(host, 0, 'kPa');
+    // A second REAL target (the source unit itself is no longer offered: identity is not
+    // a conversion), so the card must PATCH the same node, not create another.
+    await choose(host, 0, 'Pa');
     await pressConvert(host);
 
     const creates = backend!.calls.filter(
