@@ -53,6 +53,11 @@ import { ROW_HEADER_WIDTH, VirtualTable } from './VirtualTable.tsx';
  */
 const KEEP = '';
 
+/** unit → dimension, for validating a choice against the column's CURRENT source unit. */
+const DIMENSION_OF = new Map<string, string | null>(
+  convertibleUnits().map((candidate) => [candidate.unit, candidate.dimension]),
+);
+
 /** Every unit that can be a conversion TARGET, grouped by dimension (registry order kept). */
 function unitsByDimension(): Map<string, UnitCandidate[]> {
   const map = new Map<string, UnitCandidate[]>();
@@ -84,6 +89,9 @@ export function buildTargets(
     if (to === KEEP || to === '') continue;
     const resolution = resolutions[column];
     if (!resolution || resolution.state !== 'recognized' || !resolution.scalar) continue;
+    // A hand-edited workspace (or a source table replaced under the picker) can hold a
+    // target whose dimension no longer matches the source: never put it on the wire.
+    if (resolution.dimension === null || DIMENSION_OF.get(to) !== resolution.dimension) continue;
     // THE line of this card: an explicit `from` is how the user's confirmation travels.
     targets.push({ column, from: resolution.unit, to });
   }
@@ -191,6 +199,37 @@ export function UnitConvertCard({
     // render (node state, lamp, …).
   }, [storedTargets]);
 
+  /**
+   * A choice survives only while its column still resolves to the same dimension. After a
+   * file replacement the picker used to keep `mm/s` for a column that became kilograms:
+   * the select clamped the unknown value to a blank/"keep" display while `buildTargets`
+   * still sent the stale cross-dimension target, so the card lied in three places at once.
+   * Pruning to keep-as-is makes the display and the wire agree again.
+   */
+  useEffect(() => {
+    setChosen((current) => {
+      let changed = false;
+      const next: Record<number, string> = {};
+      for (const [key, to] of Object.entries(current)) {
+        const column = Number(key);
+        if (to === KEEP) {
+          next[column] = to;
+          continue;
+        }
+        const resolution = resolutions[column];
+        const survives =
+          resolution !== undefined &&
+          resolution.state === 'recognized' &&
+          resolution.scalar &&
+          resolution.dimension !== null &&
+          DIMENSION_OF.get(to) === resolution.dimension;
+        if (survives) next[column] = to;
+        else changed = true;
+      }
+      return changed ? next : current;
+    });
+  }, [resolutions, chosen]);
+
   // One port, one anchor: the connection layer finds it by portId, never by position.
   const portRef = (element: HTMLElement | null) => {
     if (!element) return undefined;
@@ -201,9 +240,17 @@ export function UnitConvertCard({
   const columns = sourceMatrix ? sourceMatrix.columns() : [];
   const targets = useMemo(() => buildTargets(resolutions, chosen), [resolutions, chosen]);
   const pending = JSON.stringify(targets.map(({ column, to }) => ({ column, to })));
-  const stored = JSON.stringify(
-    unitConvertTargets(card).map(({ column, to }) => ({ column, to })),
+  /**
+   * Compare against the stored targets FILTERED to what is still convertible: after an
+   * upstream replacement the stored list holds dead entries, and counting them as "the
+   * user edited something" would show 目标单位已修改 for a change nobody made.
+   */
+  const storedValid = useMemo(
+    () => buildTargets(resolutions, initialChoices(unitConvertTargets(card))),
+    // storedTargets (the serialized parameter) is the identity; the card object churns.
+    [resolutions, storedTargets],
   );
+  const stored = JSON.stringify(storedValid.map(({ column, to }) => ({ column, to })));
   /** The picker holds choices the card has not been told about yet. */
   const edited = targets.length > 0 && pending !== stored;
 

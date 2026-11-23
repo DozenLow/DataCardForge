@@ -659,3 +659,72 @@ describe('unit-convert card — empty result zone agrees with the bar', () => {
     );
   });
 });
+
+/** Like `mount`, but the card prop is a live store subscription — what CardCanvas does.
+ *  Needed when a case replaces the source table: the port's matrixId changes, and a
+ *  snapshot prop would keep reading the deleted matrix. */
+async function mountLive(cardId: number): Promise<HTMLElement> {
+  const host = document.createElement('div');
+  document.body.appendChild(host);
+  const root = createRoot(host);
+  roots.push(root);
+  function Live() {
+    const card = useWorkspace((s) => s.cards.find((entry) => entry.id === cardId)) as FunctionCardModel;
+    const matrices = useWorkspace((s) => s.matrices);
+    return (
+      <UnitConvertCard
+        card={card}
+        resultMatrix={matrices.get(card.displayMatrixId)}
+        sourceColumnNames={[]}
+        active
+        closeBlocked={false}
+        onClose={() => {}}
+        onCloseBlocked={() => {}}
+        onActivate={() => {}}
+      />
+    );
+  }
+  await act(async () => {
+    root.render(<Live />);
+  });
+  await settle();
+  return host;
+}
+
+describe('unit-convert card — choices survive only while their dimension matches', () => {
+  const resolutions = (annotations: string[]) =>
+    columnUnitResolutions(annotations, {}).resolutions;
+
+  it('buildTargets drops a cross-dimension choice instead of wiring it', () => {
+    const source = resolutions(['mass_kg']);
+    expect(buildTargets(source, { 0: 'mm/s' })).toEqual([]);
+    expect(buildTargets(source, { 0: 'g' })).toEqual([{ column: 0, from: 'kg', to: 'g' }]);
+  });
+
+  it('prunes a stale choice when the source table is replaced under the picker', async () => {
+    const { source, card } = await setup();
+    const host = await mountLive(card.id);
+    await choose(host, 0, 'bar');
+    await pressConvert(host);
+    expect(host.querySelector('.unit-convert__grid')).not.toBeNull();
+
+    await act(async () => {
+      const mat = new MatrixData();
+      mat.appendColumn('Pos.1', [1, 2, 3]);
+      mat.setColumnAnnotation(0, 'mass_kg');
+      store().replaceCardSources(source.id, [{ name: 'v.csv', matrix: mat }]);
+    });
+    await settle();
+
+    // The picker tells the truth: keep-as-is, mass options, nothing pending on the wire.
+    const select = picker(host, 0);
+    expect(select.value).toBe('');
+    expect(optionValues(select)).toContain('g');
+    expect(optionValues(select)).not.toContain('bar');
+    expect(host.querySelector<HTMLButtonElement>('.unit-convert__convert')!.disabled).toBe(true);
+    // …and the bar does not claim an edit nobody made.
+    expect(host.querySelector('.unit-convert__status')?.textContent).not.toBe(
+      '目标单位已修改 — 点「换算」才会产出新表',
+    );
+  });
+});
