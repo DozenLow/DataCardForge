@@ -110,6 +110,24 @@ int main() {
   const auto derivAbsAway = ExprEngine::evaluate("DERIV(ABS(x), x, -2)", names(), cols, 1);
   CHECK(std::fabs(derivAbsAway[0] - (-1.0)) < 1e-8);
 
+  // Trigonometry under the capability: point values, a trig integral and derivative.
+  const auto sinHalfPi = ExprEngine::evaluate("SIN(1.5707963267948966)", names(), cols, 1);
+  CHECK(std::fabs(sinHalfPi[0] - 1.0) < 1e-12);
+  const auto trigIntegral = ExprEngine::evaluate("INTEGRAL(SIN(x), x, 0, 3.141592653589793)", names(), cols, 1);
+  CHECK(std::fabs(trigIntegral[0] - 2.0) < 1e-9);
+  const auto trigDeriv = ExprEngine::evaluate("DERIV(SIN(x), x, 0)", names(), cols, 1);
+  CHECK(std::fabs(trigDeriv[0] - 1.0) < 1e-8);
+  const auto asinDomain = ExprEngine::evaluate("ASIN(2)", names(), cols, 1);
+  CHECK(std::isnan(asinDomain[0]));
+  try {
+    int64_t rows = -1;
+    int64_t columns = -1;
+    (void)ExprEngine::evaluateMatrix("SIN(A)", {"A"}, {MatVal(Eigen::MatrixXd::Ones(2, 1))}, &rows, &columns);
+    CHECK(false);
+  } catch (const ExpressionError& e) {
+    CHECK(e.code == "unsupportedFunctionMode");
+  }
+
   const std::vector<double> samples = {1.0, 2.0, 3.0, 4.0};
   const std::vector<std::vector<double>> statsCols{{1.0, 2.0, 3.0, 4.0}};
   const auto varS = ExprEngine::evaluate("VAR.S(A)", {"A"}, statsCols, 4);

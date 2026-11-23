@@ -1,0 +1,9 @@
+{
+  "comment": "Advanced-only matrix-mode refusal fixtures. Advanced capability stays column-shaped in v1; it must never fall through to an empty matrix.",
+  "cases": [
+    { "name": "advanced-sum-refused", "vars": [], "shapes": [], "data": [], "expression": "SUM(i, i, 1, 2)", "error": { "code": "unsupportedFunctionMode" } },
+    { "name": "advanced-stats-refused", "vars": ["A"], "shapes": [[2,1]], "data": [[1,2]], "expression": "VAR.S(A)", "error": { "code": "unsupportedFunctionMode" } },
+    { "name": "advanced-criteria-refused", "vars": ["A"], "shapes": [[2,1]], "data": [[1,2]], "expression": "COUNTIF(A, 1)", "error": { "code": "unsupportedFunctionMode" } },
+    { "name": "advanced-trig-refused", "vars": ["A"], "shapes": [[2,1]], "data": [[1,2]], "expression": "SIN(A)", "error": { "code": "unsupportedFunctionMode" } }
+  ]
+}

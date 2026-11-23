@@ -433,6 +433,14 @@ const std::unordered_map<std::string, FunctionSpec>& functions() {
     auto out = kFns;
     out.emplace("COMBIN", FunctionSpec{2, 2});
     out.emplace("PERMUT", FunctionSpec{2, 2});
+    // Trigonometry lives under the capability too: the v1 surface (and the TS reference
+    // engine that diff_fuzz compares against) stays untouched.
+    out.emplace("SIN", FunctionSpec{1, 1});
+    out.emplace("COS", FunctionSpec{1, 1});
+    out.emplace("TAN", FunctionSpec{1, 1});
+    out.emplace("ASIN", FunctionSpec{1, 1});
+    out.emplace("ACOS", FunctionSpec{1, 1});
+    out.emplace("ATAN", FunctionSpec{1, 1});
     out.emplace("VAR.S", FunctionSpec{1, 1});
     out.emplace("VAR.P", FunctionSpec{1, 1});
     out.emplace("STDEV.S", FunctionSpec{1, 1});
@@ -1685,7 +1693,9 @@ EvalFn compileAst(const NodePtr& node) {
 
       if (name == "ABS" || name == "SQRT" || name == "LOG" || name == "LN" ||
           name == "LOG10" || name == "EXP" || name == "POW" || name == "FLOOR" ||
-          name == "CEIL" || name == "SIGN" || name == "ROUND") {
+          name == "CEIL" || name == "SIGN" || name == "ROUND" ||
+          name == "SIN" || name == "COS" || name == "TAN" ||
+          name == "ASIN" || name == "ACOS" || name == "ATAN") {
         return [argFns, name](const std::vector<std::vector<double>>& cols, size_t len) {
           std::vector<std::vector<double>> arrays;
           for (const auto& fn : argFns) arrays.push_back(fn(cols, len));
@@ -1698,6 +1708,12 @@ EvalFn compileAst(const NodePtr& node) {
             else if (name == "LOG" || name == "LN") out[i] = std::log(a0);
             else if (name == "LOG10") out[i] = std::log10(a0);
             else if (name == "EXP") out[i] = std::exp(a0);
+            else if (name == "SIN") out[i] = std::sin(a0);
+            else if (name == "COS") out[i] = std::cos(a0);
+            else if (name == "TAN") out[i] = std::tan(a0);
+            else if (name == "ASIN") out[i] = std::asin(a0);
+            else if (name == "ACOS") out[i] = std::acos(a0);
+            else if (name == "ATAN") out[i] = std::atan(a0);
             else if (name == "POW") out[i] = jsPow(a0, a1);
             else if (name == "FLOOR") out[i] = std::floor(a0);
             else if (name == "CEIL") out[i] = std::ceil(a0);
@@ -2048,6 +2064,7 @@ bool unsupportedAdvancedMatrixCall(const NodePtr& node) {
   if (!envAdvancedMathEnabled() || !node || node->kind != NodeKind::Call) return false;
   static const std::unordered_set<std::string> kNames = {
       "PRODUCT", "INTEGRAL", "DERIV", "COMBIN", "PERMUT",
+      "SIN", "COS", "TAN", "ASIN", "ACOS", "ATAN",
       "VAR.S", "VAR.P", "STDEV.S", "STDEV.P", "PERCENTILE.INC",
       "PERCENTILE.EXC", "CORREL", "COVARIANCE.S", "COVARIANCE.P",
       "SLOPE", "INTERCEPT", "RSQ", "COUNTIF", "SUMIF", "IRR"};

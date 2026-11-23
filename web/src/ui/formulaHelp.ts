@@ -93,6 +93,42 @@ export const HELP_FUNCTION_GROUPS: HelpFunctionGroup[] = [
   },
 ];
 
+/** Advanced functions are advertised only while advanced-math.v1 is enabled. */
+export const ADVANCED_HELP_FUNCTION_GROUPS: HelpFunctionGroup[] = [
+  {
+    titleKey: 'help.group.advanced',
+    items: [
+      { name: 'SUM', signature: 'SUM(expr, var, from, to)', descriptionKey: 'help.fn.advanced' },
+      { name: 'PRODUCT', signature: 'PRODUCT(expr, var, from, to)', descriptionKey: 'help.fn.advanced' },
+      { name: 'INTEGRAL', signature: 'INTEGRAL(expr, var, from, to)', descriptionKey: 'help.fn.advanced' },
+      { name: 'DERIV', signature: 'DERIV(expr, var, point)', descriptionKey: 'help.fn.advanced' },
+      { name: 'COMBIN', signature: 'COMBIN(n, k)', descriptionKey: 'help.fn.advanced' },
+      { name: 'PERMUT', signature: 'PERMUT(n, k)', descriptionKey: 'help.fn.advanced' },
+      { name: 'SIN', signature: 'SIN(x)', descriptionKey: 'help.fn.advanced' },
+      { name: 'COS', signature: 'COS(x)', descriptionKey: 'help.fn.advanced' },
+      { name: 'TAN', signature: 'TAN(x)', descriptionKey: 'help.fn.advanced' },
+      { name: 'ASIN', signature: 'ASIN(x)', descriptionKey: 'help.fn.advanced' },
+      { name: 'ACOS', signature: 'ACOS(x)', descriptionKey: 'help.fn.advanced' },
+      { name: 'ATAN', signature: 'ATAN(x)', descriptionKey: 'help.fn.advanced' },
+      { name: 'VAR.S', signature: 'VAR.S(range)', descriptionKey: 'help.fn.advanced' },
+      { name: 'VAR.P', signature: 'VAR.P(range)', descriptionKey: 'help.fn.advanced' },
+      { name: 'STDEV.S', signature: 'STDEV.S(range)', descriptionKey: 'help.fn.advanced' },
+      { name: 'STDEV.P', signature: 'STDEV.P(range)', descriptionKey: 'help.fn.advanced' },
+      { name: 'PERCENTILE.INC', signature: 'PERCENTILE.INC(range, k)', descriptionKey: 'help.fn.advanced' },
+      { name: 'PERCENTILE.EXC', signature: 'PERCENTILE.EXC(range, k)', descriptionKey: 'help.fn.advanced' },
+      { name: 'CORREL', signature: 'CORREL(range1, range2)', descriptionKey: 'help.fn.advanced' },
+      { name: 'COVARIANCE.S', signature: 'COVARIANCE.S(range1, range2)', descriptionKey: 'help.fn.advanced' },
+      { name: 'COVARIANCE.P', signature: 'COVARIANCE.P(range1, range2)', descriptionKey: 'help.fn.advanced' },
+      { name: 'SLOPE', signature: 'SLOPE(known_y, known_x)', descriptionKey: 'help.fn.advanced' },
+      { name: 'INTERCEPT', signature: 'INTERCEPT(known_y, known_x)', descriptionKey: 'help.fn.advanced' },
+      { name: 'RSQ', signature: 'RSQ(known_y, known_x)', descriptionKey: 'help.fn.advanced' },
+      { name: 'COUNTIF', signature: 'COUNTIF(range, criteria)', descriptionKey: 'help.fn.advanced' },
+      { name: 'SUMIF', signature: 'SUMIF(range, criteria[, sum_range])', descriptionKey: 'help.fn.advanced' },
+      { name: 'IRR', signature: 'IRR(cashflows)', descriptionKey: 'help.fn.advanced' },
+    ],
+  },
+];
+
 /** One row of the "how do I name a column" table. */
 export interface HelpSyntaxRow {
   /** The literal form(s), kept as code in both locales. */
