@@ -845,34 +845,28 @@ double correlationFinite(const std::vector<double>& x,
   return static_cast<double>(xy / std::sqrt(static_cast<double>(xx * yy)));
 }
 
-NodePtr cloneNode(const NodePtr& node) {
-  if (!node) return nullptr;
-  auto clone = std::make_shared<Node>();
-  clone->kind = node->kind;
-  clone->number = node->number;
-  clone->column = node->column;
-  clone->columnName = node->columnName;
-  clone->op = node->op;
-  clone->name = node->name;
-  clone->boundName = node->boundName;
-  clone->boundId = node->boundId;
-  clone->stringValue = node->stringValue;
-  for (const auto& child : node->children) clone->children.push_back(cloneNode(child));
-  return clone;
-}
+// Bound variables live on a thread-local lexical stack instead of being substituted
+// into cloned ASTs: the body compiles ONCE and reads its binder's current value at
+// evaluation time. The old clone+recompile-per-iteration scheme made SUM/INTEGRAL cost
+// O(rows^2 * terms) element work plus one AST rebuild per sample; nested binders keep
+// distinct lexical ids, so shadowing resolves by id, not by name.
+struct BoundSlot {
+  int64_t id;
+  double value;
+};
+thread_local std::vector<BoundSlot> boundStack;
 
-NodePtr bindNodeValue(const NodePtr& node, int64_t boundId, double value) {
-  if (!node) return nullptr;
-  if (node->kind == NodeKind::Bound && node->boundId == boundId) {
-    auto number = std::make_shared<Node>();
-    number->kind = NodeKind::Number;
-    number->number = value;
-    return number;
-  }
-  auto clone = cloneNode(node);
-  for (auto& child : clone->children)
-    child = bindNodeValue(child, boundId, value);
-  return clone;
+struct BoundPush {
+  BoundPush(int64_t id, double value) { boundStack.push_back({id, value}); }
+  ~BoundPush() { boundStack.pop_back(); }
+  BoundPush(const BoundPush&) = delete;
+  BoundPush& operator=(const BoundPush&) = delete;
+};
+
+double boundValue(int64_t id) {
+  for (auto it = boundStack.rbegin(); it != boundStack.rend(); ++it)
+    if (it->id == id) return it->value;
+  return NAN;  // parser scoping guarantees a binder; NaN keeps escapes visible, never silent 0
 }
 
 bool scalarMatches(const std::vector<double>& values, double* out) {
@@ -924,10 +918,12 @@ EvalFn compileAst(const NodePtr& node) {
       int idx = node->column;
       return [idx](const std::vector<std::vector<double>>& cols, size_t) { return cols[idx]; };
     }
-    case NodeKind::Bound:
-      return [](const std::vector<std::vector<double>>&, size_t len) {
-        return std::vector<double>(len, NAN);
+    case NodeKind::Bound: {
+      const int64_t id = node->boundId;
+      return [id](const std::vector<std::vector<double>>&, size_t len) {
+        return std::vector<double>(len, boundValue(id));
       };
+    }
     case NodeKind::Unary: {
       EvalFn inner = compileAst(node->children[0]);
       return [inner](const std::vector<std::vector<double>>& cols, size_t len) {
@@ -1005,7 +1001,7 @@ EvalFn compileAst(const NodePtr& node) {
           const int64_t bound = node->children[1]->boundId;
 
           if (name == "SUM" || name == "PRODUCT") {
-            return [node, bound, argFns, name](const std::vector<std::vector<double>>& cols, size_t len) {
+            return [bound, argFns, name](const std::vector<std::vector<double>>& cols, size_t len) {
               double startValue = NAN;
               double endValue = NAN;
               if (!scalarMatches(argFns[2](cols, len), &startValue) ||
@@ -1051,33 +1047,35 @@ EvalFn compileAst(const NodePtr& node) {
               }
               consumeAdvancedBudget(itemCount * rows, name);
 
-              std::vector<double> out(len);
-              for (size_t row = 0; row < len; ++row) {
-                long double result = name == "SUM" ? 0.0L : 1.0L;
-                for (uint64_t value = start; value <= end; ++value) {
-                  NodePtr boundExpr = bindNodeValue(node->children[0], bound,
-                                                    static_cast<double>(value));
-                  EvalFn fn = compileAst(boundExpr);
-                  const double term = fn(cols, len)[row];
-                  if (!std::isfinite(term)) {
+              // One body evaluation per iteration serves every row: the binder value is
+              // pushed on the lexical stack, so no AST clone or recompile happens here.
+              const EvalFn body = argFns[0];
+              std::vector<long double> acc(len, name == "SUM" ? 0.0L : 1.0L);
+              for (uint64_t value = start; value <= end; ++value) {
+                const BoundPush push(bound, static_cast<double>(value));
+                const std::vector<double> term = body(cols, len);
+                for (size_t row = 0; row < len; ++row) {
+                  const double t = term[row];
+                  if (!std::isfinite(t)) {
                     throw ExpressionError(name + " produced a non-finite intermediate", 0,
                                           "domainError", name);
                   }
-                  if (name == "SUM") result += static_cast<long double>(term);
-                  else result *= static_cast<long double>(term);
-                  if (!std::isfinite(static_cast<double>(result))) {
+                  if (name == "SUM") acc[row] += static_cast<long double>(t);
+                  else acc[row] *= static_cast<long double>(t);
+                  if (!std::isfinite(static_cast<double>(acc[row]))) {
                     throw ExpressionError(name + " exceeded the numeric range", 0,
                                           "numericOverflow", name);
                   }
                 }
-                out[row] = static_cast<double>(result);
               }
+              std::vector<double> out(len);
+              for (size_t row = 0; row < len; ++row) out[row] = static_cast<double>(acc[row]);
               return out;
             };
           }
 
           if (name == "INTEGRAL") {
-            return [node, bound, argFns](const std::vector<std::vector<double>>& cols, size_t len) {
+            return [bound, argFns](const std::vector<std::vector<double>>& cols, size_t len) {
               double lower = NAN;
               double upper = NAN;
               if (!scalarMatches(argFns[2](cols, len), &lower) ||
@@ -1103,24 +1101,25 @@ EvalFn compileAst(const NodePtr& node) {
               consumeAdvancedBudget(nodes * rows, "INTEGRAL");
               const long double h = (static_cast<long double>(upper) - lower) /
                                     static_cast<long double>(n);
-              std::vector<double> out(len);
-              for (size_t row = 0; row < len; ++row) {
-                long double sum = 0.0L;
-                for (size_t i = 0; i <= n; ++i) {
-                  const long double x = static_cast<long double>(lower) + h * i;
-                  NodePtr boundExpr = bindNodeValue(node->children[0], bound,
-                                                    static_cast<double>(x));
-                  EvalFn fn = compileAst(boundExpr);
-                  const double y = fn(cols, len)[row];
-                  if (!std::isfinite(y)) {
+              const EvalFn body = argFns[0];
+              std::vector<long double> sum(len, 0.0L);
+              for (size_t i = 0; i <= n; ++i) {
+                const long double x = static_cast<long double>(lower) + h * i;
+                const BoundPush push(bound, static_cast<double>(x));
+                const std::vector<double> y = body(cols, len);
+                const long double weight = i == 0 || i == n ? 1.0L
+                                              : (i % 2 == 0 ? 2.0L : 4.0L);
+                for (size_t row = 0; row < len; ++row) {
+                  if (!std::isfinite(y[row])) {
                     throw ExpressionError("INTEGRAL encountered a non-finite value", 0,
                                           "domainError", "INTEGRAL");
                   }
-                  const long double weight = i == 0 || i == n ? 1.0L
-                                                : (i % 2 == 0 ? 2.0L : 4.0L);
-                  sum += weight * y;
+                  sum[row] += weight * y[row];
                 }
-                const double result = static_cast<double>(h * sum / 3.0L);
+              }
+              std::vector<double> out(len);
+              for (size_t row = 0; row < len; ++row) {
+                const double result = static_cast<double>(h * sum[row] / 3.0L);
                 if (!std::isfinite(result)) {
                   throw ExpressionError("INTEGRAL exceeded the numeric range", 0,
                                         "numericOverflow", "INTEGRAL");
@@ -1132,7 +1131,7 @@ EvalFn compileAst(const NodePtr& node) {
           }
 
           if (name == "DERIV") {
-            return [node, bound, argFns](const std::vector<std::vector<double>>& cols, size_t len) {
+            return [bound, argFns](const std::vector<std::vector<double>>& cols, size_t len) {
               double point = NAN;
               if (!scalarMatches(argFns[2](cols, len), &point)) {
                 throw ExpressionError("DERIV point must be finite", 0,
@@ -1151,17 +1150,24 @@ EvalFn compileAst(const NodePtr& node) {
               consumeAdvancedBudget(rows * 2, "DERIV");
               const double scale = std::max(1.0, std::fabs(point));
               const double h = 1e-5 * scale;
+              const EvalFn body = argFns[0];
+              std::vector<double> plus;
+              std::vector<double> minus;
+              {
+                const BoundPush push(bound, point + h);
+                plus = body(cols, len);
+              }
+              {
+                const BoundPush push(bound, point - h);
+                minus = body(cols, len);
+              }
               std::vector<double> out(len);
               for (size_t row = 0; row < len; ++row) {
-                NodePtr plusExpr = bindNodeValue(node->children[0], bound, point + h);
-                NodePtr minusExpr = bindNodeValue(node->children[0], bound, point - h);
-                const double plus = compileAst(plusExpr)(cols, len)[row];
-                const double minus = compileAst(minusExpr)(cols, len)[row];
-                if (!std::isfinite(plus) || !std::isfinite(minus)) {
+                if (!std::isfinite(plus[row]) || !std::isfinite(minus[row])) {
                   throw ExpressionError("DERIV encountered a non-finite value", 0,
                                         "domainError", "DERIV");
                 }
-                const double result = (plus - minus) / (2.0 * h);
+                const double result = (plus[row] - minus[row]) / (2.0 * h);
                 if (!std::isfinite(result)) {
                   throw ExpressionError("DERIV exceeded the numeric range", 0,
                                         "numericOverflow", "DERIV");

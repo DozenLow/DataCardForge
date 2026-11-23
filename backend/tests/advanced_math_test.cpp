@@ -73,6 +73,13 @@ int main() {
   const auto nested = ExprEngine::evaluate(
       "SUM(SUM(i, i, 1, 2) + i, i, 1, 2)", names(), cols, 3);
   CHECK(nested == std::vector<double>({9.0, 9.0, 9.0}));
+  // Dependent inner bounds resolve through the lexical stack, not AST substitution.
+  const auto triangular = ExprEngine::evaluate(
+      "SUM(SUM(i*j, j, 1, i), i, 1, 3)", names(), cols, 3);
+  CHECK(triangular == std::vector<double>({25.0, 25.0, 25.0}));
+  const auto nestedIntegral = ExprEngine::evaluate(
+      "SUM(INTEGRAL(x*i, x, 0, 1), i, 1, 3)", names(), cols, 3);
+  CHECK(std::fabs(nestedIntegral[0] - 3.0) < 1e-9);
   const auto integral = ExprEngine::evaluate("INTEGRAL(x*x, x, 0, 1)", names(), cols, 3);
   CHECK(std::fabs(integral[0] - 1.0 / 3.0) < 1e-10);
   const auto derivative = ExprEngine::evaluate("DERIV(x*x, x, 3)", names(), cols, 3);
