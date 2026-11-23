@@ -1163,41 +1163,80 @@ EvalFn compileAst(const NodePtr& node) {
                                       "domainError", "DERIV");
               }
               const uint64_t rows = static_cast<uint64_t>(len);
-              if (rows > kMaxAdvancedEvaluations / 2) {
+              // Worst case per row: 2 initial + 2*12 cascade + 3 kink probe = 29 samples.
+              constexpr uint64_t kMaxDerivLevels = 12;
+              constexpr uint64_t kMaxDerivSamples = 2 + 2 * kMaxDerivLevels + 3;
+              if (rows > kMaxAdvancedEvaluations / kMaxDerivSamples) {
                 ExpressionError error("DERIV exceeded the evaluation budget", 0,
                                       "budgetExceeded", "DERIV");
                 error.budgetLimit = static_cast<int64_t>(kMaxAdvancedEvaluations);
-                error.budgetActual = rows > static_cast<uint64_t>(INT64_MAX / 2)
-                                         ? INT64_MAX
-                                         : static_cast<int64_t>(rows * 2);
+                error.budgetActual = static_cast<int64_t>(rows * kMaxDerivSamples);
                 throw error;
               }
-              consumeAdvancedBudget(rows * 2, "DERIV");
-              const double scale = std::max(1.0, std::fabs(point));
-              const double h = 1e-5 * scale;
               const EvalFn body = argFns[0];
-              std::vector<double> plus;
-              std::vector<double> minus;
-              {
-                const BoundPush push(bound, point + h);
-                plus = body(cols, len);
-              }
-              {
-                const BoundPush push(bound, point - h);
-                minus = body(cols, len);
-              }
+              const double scale = std::max(1.0, std::fabs(point));
               std::vector<double> out(len);
               for (size_t row = 0; row < len; ++row) {
-                if (!std::isfinite(plus[row]) || !std::isfinite(minus[row])) {
-                  throw ExpressionError("DERIV encountered a non-finite value", 0,
-                                        "domainError", "DERIV");
+                uint64_t samples = 0;
+                auto sample = [&](double x) {
+                  ++samples;
+                  const BoundPush push(bound, x);
+                  const std::vector<double> y = body(cols, len);
+                  if (!std::isfinite(y[row])) {
+                    throw ExpressionError("DERIV encountered a non-finite value", 0,
+                                          "domainError", "DERIV");
+                  }
+                  return y[row];
+                };
+                // Richardson cascade over halved central differences: the single fixed
+                // h=1e-5 step had no error estimate and silently returned 0 at kinks.
+                double h = 1e-2 * scale;
+                double fPlus = sample(point + h);
+                double fMinus = sample(point - h);
+                double central = (fPlus - fMinus) / (2.0 * h);
+                double estimate = central;
+                bool converged = false;
+                for (uint64_t level = 0; level < kMaxDerivLevels; ++level) {
+                  h /= 2.0;
+                  const double nextPlus = sample(point + h);
+                  const double nextMinus = sample(point - h);
+                  const double nextCentral = (nextPlus - nextMinus) / (2.0 * h);
+                  const double richardson = (4.0 * nextCentral - central) / 3.0;
+                  if (std::fabs(richardson - estimate) <= 1e-9 * std::max(1.0, std::fabs(richardson))) {
+                    estimate = richardson;
+                    converged = true;
+                    fPlus = nextPlus;
+                    fMinus = nextMinus;
+                    break;
+                  }
+                  estimate = richardson;
+                  central = nextCentral;
+                  fPlus = nextPlus;
+                  fMinus = nextMinus;
                 }
-                const double result = (plus[row] - minus[row]) / (2.0 * h);
-                if (!std::isfinite(result)) {
+                if (!converged) {
+                  throw ExpressionError("DERIV did not stabilise under refinement", 0,
+                                        "convergenceError", "DERIV");
+                }
+                // Kink gate: for a smooth f the one-sided gap d(h) = f'_+(h) - f'_-(h)
+                // halves with h (d ~ h*f''), while at a corner it stays O(1). Comparing
+                // d(h) with d(h/2) separates the two without assuming a bound on f''.
+                const double f0 = sample(point);
+                const double fPlus2 = sample(point + h / 2.0);
+                const double fMinus2 = sample(point - h / 2.0);
+                const double d1 = (fPlus - f0) / h - (f0 - fMinus) / h;
+                const double d2 = (fPlus2 - f0) / (h / 2.0) - (f0 - fMinus2) / (h / 2.0);
+                if (std::fabs(d2 - d1 / 2.0) >
+                    0.25 * std::fabs(d1) + 1e-9 * std::max(1.0, std::fabs(estimate))) {
+                  throw ExpressionError("DERIV point is a kink: left and right derivatives disagree",
+                                        0, "notDifferentiable", "DERIV");
+                }
+                consumeAdvancedBudget(rows * samples, "DERIV");
+                if (!std::isfinite(estimate)) {
                   throw ExpressionError("DERIV exceeded the numeric range", 0,
                                         "numericOverflow", "DERIV");
                 }
-                out[row] = result;
+                out[row] = estimate;
               }
               return out;
             };

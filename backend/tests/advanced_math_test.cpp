@@ -95,7 +95,20 @@ int main() {
     CHECK(e.code == "domainError");
   }
   const auto derivative = ExprEngine::evaluate("DERIV(x*x, x, 3)", names(), cols, 3);
-  CHECK(std::fabs(derivative[0] - 6.0) < 1e-6);
+  CHECK(std::fabs(derivative[0] - 6.0) < 1e-8);
+  // Richardson cascade keeps large-scale points accurate; kinks refuse instead of 0.
+  const auto derivBig = ExprEngine::evaluate("DERIV(x*x*x, x, 1000000)", names(), cols, 1);
+  CHECK(std::fabs(derivBig[0] - 3e12) / 3e12 < 1e-8);
+  const auto derivCubicZero = ExprEngine::evaluate("DERIV(x*x*x, x, 0)", names(), cols, 1);
+  CHECK(std::fabs(derivCubicZero[0]) < 1e-8);
+  try {
+    (void)ExprEngine::evaluate("DERIV(ABS(x), x, 0)", names(), cols, 1);
+    CHECK(false);
+  } catch (const ExpressionError& e) {
+    CHECK(e.code == "notDifferentiable");
+  }
+  const auto derivAbsAway = ExprEngine::evaluate("DERIV(ABS(x), x, -2)", names(), cols, 1);
+  CHECK(std::fabs(derivAbsAway[0] - (-1.0)) < 1e-8);
 
   const std::vector<double> samples = {1.0, 2.0, 3.0, 4.0};
   const std::vector<std::vector<double>> statsCols{{1.0, 2.0, 3.0, 4.0}};

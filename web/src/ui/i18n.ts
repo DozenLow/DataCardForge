@@ -228,6 +228,13 @@ const dictionaries = {
     'formula.error.unknownSignature': '未知函数签名「{name}」',
     'formula.error.badSignatureParams': '函数参数不完整或非法（缺少「{name}」）',
     'formula.error.internalError': '内部错误（函数计算未完成）',
+    'formula.error.budgetExceeded': '计算预算已超限（上限 {limit}，请求 {actual}）',
+    'formula.error.domainError': '「{name}」的参数或定义域不合法',
+    'formula.error.convergenceError': '「{name}」未收敛到可信结果',
+    'formula.error.notDifferentiable': '「{name}」在该点不可导（左右导数不一致）',
+    'formula.error.numericOverflow': '「{name}」超出可表示数值范围',
+    'formula.error.unsupportedFunctionMode': '「{name}」当前不支持矩阵模式',
+    'formula.error.unsupportedCriteria': '当前条件语法不支持',
     // units v1 P2 — the conversion card's structured failures (decision §四). Each one is a
     // refusal, never a silent conversion; `{column}` is the 0-based index the backend named.
     'formula.error.unitMismatch': '第 {column} 列量纲不同：「{from}」不能换算为「{to}」',
@@ -433,6 +440,8 @@ const dictionaries = {
     'formula.bracketHint':
       '名字含 / 、空格、括号或以数字开头时这样写：[列名]；也可以点左侧「可用列」插入 Pos.N',
     'help.group.aggregate': '聚合（整列 → 一个数，再逐行展开）',
+    'help.group.advanced': '实验能力 · 高等数学与统计（advanced-math.v1）',
+    'help.fn.advanced': '实验能力；由 C++ 后端按冻结口径计算，结果与普通公式卡输出形状一致。',
     'help.group.math': '数学',
     'help.group.signal': '信号处理',
     'help.group.conditional': '条件',
@@ -721,6 +730,13 @@ const dictionaries = {
     'formula.error.unknownSignature': "Unknown function signature '{name}'",
     'formula.error.badSignatureParams': "Function parameters are incomplete or invalid (missing '{name}')",
     'formula.error.internalError': 'Internal error (the function did not finish)',
+    'formula.error.budgetExceeded': 'Calculation budget exceeded (limit {limit}, requested {actual})',
+    'formula.error.domainError': 'The arguments or domain of {name} are invalid',
+    'formula.error.convergenceError': '{name} did not converge to a reliable result',
+    'formula.error.notDifferentiable': '{name} is not differentiable at this point (left and right derivatives disagree)',
+    'formula.error.numericOverflow': '{name} exceeded the representable numeric range',
+    'formula.error.unsupportedFunctionMode': '{name} does not support matrix mode',
+    'formula.error.unsupportedCriteria': 'The current criteria syntax is unsupported',
     // units v1 P2 — the conversion card's structured failures (decision §四).
     'formula.error.unitMismatch':
       'Column {column} has a different dimension: "{from}" cannot be converted to "{to}"',
@@ -940,6 +956,8 @@ const dictionaries = {
     'formula.bracketHint':
       'A name containing /, a space, a parenthesis, or starting with a digit must be written [column name] — or click an available-column chip to insert its Pos.N',
     'help.group.aggregate': 'Reducing (column → one number, broadcast per row)',
+    'help.group.advanced': 'Experimental advanced math and statistics (advanced-math.v1)',
+    'help.fn.advanced': 'Experimental capability; calculated by the C++ backend under the frozen contract.',
     'help.group.math': 'Math',
     'help.group.signal': 'Signal processing',
     'help.group.conditional': 'Conditional',
