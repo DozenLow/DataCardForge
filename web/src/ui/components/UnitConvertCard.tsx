@@ -458,7 +458,19 @@ export function UnitConvertCard({
               </div>
             ) : (
               <div className="unit-convert__empty">
-                {run?.status === 'error' ? t('convert.resultError') : t('convert.nothingChosen')}
+                {/* The zone must agree with the status bar: "nothing chosen" is only true
+                    when no target is pending. Saying it while choices await the first
+                    conversion (or while an upstream change invalidated the last table)
+                    contradicted the bar one line above. */}
+                {run?.status === 'error'
+                  ? t('convert.resultError')
+                  : state === 'computing'
+                    ? t('convert.converting')
+                    : state === 'stale'
+                      ? t('convert.resultStale')
+                      : targets.length > 0
+                        ? t('convert.resultPending')
+                        : t('convert.nothingChosen')}
               </div>
             )}
           </section>

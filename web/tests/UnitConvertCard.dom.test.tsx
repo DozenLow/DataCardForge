@@ -615,3 +615,47 @@ describe('unit-convert targets', () => {
     ]);
   });
 });
+describe('unit-convert card — empty result zone agrees with the bar', () => {
+  it('says nothing chosen only while no target is pending', async () => {
+    const { card } = await setup();
+    const host = await mount(card);
+    expect(host.querySelector('.unit-convert__result .unit-convert__empty')?.textContent).toBe(
+      '还没有选目标单位：所有列都保持原样',
+    );
+  });
+
+  it('says pending, not "nothing chosen", while choices await the first conversion', async () => {
+    const { card } = await setup();
+    const host = await mount(card);
+    await choose(host, 0, 'bar');
+    await settle();
+    expect(host.querySelector('.unit-convert__status')?.textContent).toBe(
+      '目标单位已修改 — 点「换算」才会产出新表',
+    );
+    expect(host.querySelector('.unit-convert__result .unit-convert__empty')?.textContent).toBe(
+      '尚未换算 — 选好目标单位后点「换算」',
+    );
+  });
+
+  it('says stale, not "nothing chosen", after an upstream change emptied the result', async () => {
+    const { card } = await setup();
+    const host = await mount(card);
+    await choose(host, 0, 'bar');
+    await pressConvert(host);
+    const nodeId = (
+      store().cards.find((entry) => entry.id === card.id) as FunctionCardModel
+    ).node!.nodeId;
+    await act(async () => {
+      store().applyNodeEvent({
+        seq: 1,
+        nodeId,
+        state: 'dirty',
+        reason: 'upstreamChanged',
+      } as NodeEvent & { reason: 'upstreamChanged' });
+    });
+    await settle();
+    expect(host.querySelector('.unit-convert__result .unit-convert__empty')?.textContent).toBe(
+      '上游已变 — 上次换算的结果已失效，点「换算」重算',
+    );
+  });
+});
