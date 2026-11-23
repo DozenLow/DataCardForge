@@ -81,7 +81,19 @@ int main() {
       "SUM(INTEGRAL(x*i, x, 0, 1), i, 1, 3)", names(), cols, 3);
   CHECK(std::fabs(nestedIntegral[0] - 3.0) < 1e-9);
   const auto integral = ExprEngine::evaluate("INTEGRAL(x*x, x, 0, 1)", names(), cols, 3);
-  CHECK(std::fabs(integral[0] - 1.0 / 3.0) < 1e-10);
+  CHECK(std::fabs(integral[0] - 1.0 / 3.0) < 1e-12);
+  // Adaptive quadrature must resolve narrow features the fixed panel rule missed by 19%.
+  const auto narrow = ExprEngine::evaluate("INTEGRAL(EXP(-100000000*x*x), x, -1, 1)", names(), cols, 1);
+  const long double narrowExact = std::sqrt(acosl(-1.0L) / 100000000.0L);
+  CHECK(std::fabs(narrow[0] - static_cast<double>(narrowExact)) < 1e-9);
+  const auto zeroWidth = ExprEngine::evaluate("INTEGRAL(x*x, x, 2, 2)", names(), cols, 3);
+  CHECK(zeroWidth == std::vector<double>({0.0, 0.0, 0.0}));
+  try {
+    (void)ExprEngine::evaluate("INTEGRAL(LN(x), x, 0, 1)", names(), cols, 1);
+    CHECK(false);
+  } catch (const ExpressionError& e) {
+    CHECK(e.code == "domainError");
+  }
   const auto derivative = ExprEngine::evaluate("DERIV(x*x, x, 3)", names(), cols, 3);
   CHECK(std::fabs(derivative[0] - 6.0) < 1e-6);
 
@@ -189,12 +201,14 @@ int main() {
   }
 
   try {
+    // 101 rows x adaptive nodes x 101 element evaluations outruns the global budget;
+    // the refusal must stay structured (the old fixed rule "passed" here and was wrong).
     const std::vector<double> integralRows(101, 1.0);
-    (void)ExprEngine::evaluate("INTEGRAL(1, x, 0, 1)", {"A"}, {integralRows}, 101);
+    (void)ExprEngine::evaluate("INTEGRAL(EXP(-100000000*x*x), x, -1, 1)", {"A"}, {integralRows}, 101);
     CHECK(false);
   } catch (const ExpressionError& e) {
     CHECK(e.code == "budgetExceeded");
-    CHECK(e.budgetActual == 1010101);
+    CHECK(e.budgetLimit == 1000000);
   }
 
   try {

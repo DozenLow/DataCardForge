@@ -900,6 +900,7 @@ void consumeAdvancedBudget(uint64_t work, const std::string& name) {
 }
 
 constexpr size_t kMaxIntegralNodes = 100000;
+constexpr int kMaxIntegralDepth = 32;
 
 EvalFn compileAst(const NodePtr& node) {
   switch (node->kind) {
@@ -1087,44 +1088,68 @@ EvalFn compileAst(const NodePtr& node) {
                 throw ExpressionError("INTEGRAL requires lower <= upper", 0,
                                       "domainError", "INTEGRAL");
               }
-              constexpr size_t n = 10000;
-              if (n > kMaxIntegralNodes) {
-                throw ExpressionError("INTEGRAL exceeded its node budget", 0,
-                                      "budgetExceeded", "INTEGRAL");
-              }
+              // Adaptive Simpson with an absolute+relative error target. The previous
+              // fixed 10000-panel rule had no error control at all: a narrow Gaussian
+              // (EXP(-1e8*x*x) over [-1,1]) came back 19% wrong while looking converged.
+              // Endpoints are sampled once per row; subdivision stops when the Richardson
+              // delta meets 15*eps, and refuses (budgetExceeded) when the node or depth
+              // budget runs out instead of publishing an unverified number.
               const uint64_t rows = static_cast<uint64_t>(len);
-              const uint64_t nodes = static_cast<uint64_t>(n + 1);
-              if (rows > 0 && nodes > UINT64_MAX / rows) {
-                throw ExpressionError("INTEGRAL exceeded its evaluation budget", 0,
-                                      "budgetExceeded", "INTEGRAL");
-              }
-              consumeAdvancedBudget(nodes * rows, "INTEGRAL");
-              const long double h = (static_cast<long double>(upper) - lower) /
-                                    static_cast<long double>(n);
               const EvalFn body = argFns[0];
-              std::vector<long double> sum(len, 0.0L);
-              for (size_t i = 0; i <= n; ++i) {
-                const long double x = static_cast<long double>(lower) + h * i;
-                const BoundPush push(bound, static_cast<double>(x));
-                const std::vector<double> y = body(cols, len);
-                const long double weight = i == 0 || i == n ? 1.0L
-                                              : (i % 2 == 0 ? 2.0L : 4.0L);
-                for (size_t row = 0; row < len; ++row) {
+              uint64_t nodesUsed = 0;
+              std::vector<double> out(len, 0.0);
+              if (upper == lower) return out;
+              for (size_t row = 0; row < len; ++row) {
+                auto sample = [&](double x) {
+                  if (nodesUsed >= kMaxIntegralNodes) {
+                    ExpressionError error("INTEGRAL exceeded its node budget", 0,
+                                          "budgetExceeded", "INTEGRAL");
+                    error.budgetLimit = static_cast<int64_t>(kMaxIntegralNodes);
+                    error.budgetActual = static_cast<int64_t>(nodesUsed + 1);
+                    throw error;
+                  }
+                  ++nodesUsed;
+                  consumeAdvancedBudget(rows, "INTEGRAL");
+                  const BoundPush push(bound, x);
+                  const std::vector<double> y = body(cols, len);
                   if (!std::isfinite(y[row])) {
                     throw ExpressionError("INTEGRAL encountered a non-finite value", 0,
                                           "domainError", "INTEGRAL");
                   }
-                  sum[row] += weight * y[row];
-                }
-              }
-              std::vector<double> out(len);
-              for (size_t row = 0; row < len; ++row) {
-                const double result = static_cast<double>(h * sum[row] / 3.0L);
-                if (!std::isfinite(result)) {
+                  return y[row];
+                };
+                const double fa = sample(lower);
+                const double fb = sample(upper);
+                const double mid = lower + (upper - lower) / 2.0;
+                const double fm = sample(mid);
+                const double s0 = (upper - lower) / 6.0 * (fa + 4.0 * fm + fb);
+                const double tol = 1e-10 * std::max(1.0, std::fabs(s0));
+                auto adapt = [&](auto&& self, double a, double b, double fA, double fB,
+                                 double fM, double s, double eps, int depth) -> double {
+                  const double m = a + (b - a) / 2.0;
+                  const double flm = sample(a + (m - a) / 2.0);
+                  const double frm = sample(m + (b - m) / 2.0);
+                  const double sl = (m - a) / 6.0 * (fA + 4.0 * flm + fM);
+                  const double sr = (b - m) / 6.0 * (fM + 4.0 * frm + fB);
+                  const double delta = sl + sr - s;
+                  if (std::fabs(delta) <= 15.0 * eps) return sl + sr + delta / 15.0;
+                  if (depth <= 0) {
+                    ExpressionError error("INTEGRAL exceeded its subdivision budget", 0,
+                                          "budgetExceeded", "INTEGRAL");
+                    error.budgetLimit = kMaxIntegralDepth;
+                    error.budgetActual = kMaxIntegralDepth;
+                    throw error;
+                  }
+                  return self(self, a, m, fA, fM, flm, sl, eps / 2.0, depth - 1) +
+                         self(self, m, b, fM, fB, frm, sr, eps / 2.0, depth - 1);
+                };
+                const double value = adapt(adapt, lower, upper, fa, fb, fm, s0, tol,
+                                           kMaxIntegralDepth);
+                if (!std::isfinite(value)) {
                   throw ExpressionError("INTEGRAL exceeded the numeric range", 0,
                                         "numericOverflow", "INTEGRAL");
                 }
-                out[row] = result;
+                out[row] = value;
               }
               return out;
             };
