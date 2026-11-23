@@ -95,6 +95,7 @@ std::vector<Entry> extras() {
       {"L/min", "flow", 1e-3 / 60.0, true, {"L/min", "L_min", "lpm"}},
       {"m/s", "velocity", 1.0, true, {"m/s", "m_s", "ms"}},
       {"mm/s", "velocity", 1e-3, true, {"mm/s", "mm_s"}},
+      {"km/h", "velocity", 1.0 / 3.6, true, {"km/h", "km_h", "kmh"}},
       {"N\u00b7m", "torque", 1.0, true, {"N\u00b7m", "N_m", "Nm"}},
       {"A\u00b7h", "charge", 3600.0, true, {"A\u00b7h", "Ah", "AH"}},
       {"kWh", "energy", 3.6e6, true, {"kWh"}},

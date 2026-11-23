@@ -167,6 +167,13 @@ const EXTRAS: readonly ExtraDef[] = [
     scalar: true,
     spellings: ['mm/s', 'mm_s'],
   },
+  {
+    unit: 'km/h',
+    dimension: 'velocity',
+    factor: 1 / 3.6,
+    scalar: true,
+    spellings: ['km/h', 'km_h', 'kmh'],
+  },
   { unit: 'N·m', dimension: 'torque', factor: 1, scalar: true, spellings: ['N·m', 'N_m', 'Nm'] },
   { unit: 'A·h', dimension: 'charge', factor: 3600, scalar: true, spellings: ['A·h', 'Ah', 'AH'] },
   { unit: 'kWh', dimension: 'energy', factor: 3.6e6, scalar: true, spellings: ['kWh'] },

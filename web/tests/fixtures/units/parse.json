@@ -1,55 +1,301 @@
 {
   "comment": "Shared unit-resolution fixtures. The TS resolver (web/tests/units.test.ts) is the reference; backend/tests/units_test.cpp reads the same file from P2 on, so both tiers must agree on every case. `candidates` are canonical unit strings in the resolver's priority order.",
   "cases": [
-    { "annotation": "pressure_kpa", "state": "recognized", "unit": "kPa", "scalar": true },
-    { "annotation": "压力_kPa", "state": "recognized", "unit": "kPa" },
-    { "annotation": "tensile_mpa", "state": "ambiguous", "token": "mpa", "candidates": ["mPa", "MPa"] },
-    { "annotation": "pressure_bar", "state": "recognized", "unit": "bar" },
-    { "annotation": "pressure_hpa", "state": "recognized", "unit": "hPa" },
-    { "annotation": "load_kn", "state": "recognized", "unit": "kN" },
-    { "annotation": "height_mm", "state": "ambiguous", "token": "mm", "candidates": ["mm", "mM"] },
-    { "annotation": "substrate_mm", "state": "ambiguous", "token": "mm", "candidates": ["mm", "mM"] },
-    { "annotation": "temp_c", "state": "ambiguous", "token": "c", "candidates": ["°C"] },
-    { "annotation": "时间_s", "state": "ambiguous", "token": "s", "candidates": ["s"] },
-    { "annotation": "current_a", "state": "ambiguous", "token": "a", "candidates": ["A"] },
-    { "annotation": "voltage_v", "state": "ambiguous", "token": "v", "candidates": ["V"] },
-    { "annotation": "accel_x_g", "state": "ambiguous", "token": "g", "candidates": ["g"] },
-    { "annotation": "time_ms", "state": "ambiguous", "token": "ms", "candidates": ["ms", "m/s"] },
-    { "annotation": "wind_ms", "state": "ambiguous", "token": "ms", "candidates": ["ms", "m/s"] },
-    { "annotation": "output_mw", "state": "ambiguous", "token": "mw", "candidates": ["mW", "MW"] },
-    { "annotation": "sensor_a", "state": "ambiguous", "token": "a", "candidates": ["A"] },
-    { "annotation": "group_d", "state": "ambiguous", "token": "d", "candidates": ["d"] },
-    { "annotation": "温度_℃", "state": "recognized", "unit": "°C", "scalar": false },
-    { "annotation": "hardness_hrc", "state": "recognized", "unit": "HRC", "scalar": false },
-    { "annotation": "absorbance_au", "state": "recognized", "unit": "AU", "scalar": false },
-    { "annotation": "capacity_ah", "state": "recognized", "unit": "A·h" },
-    { "annotation": "strain_1_ue", "state": "recognized", "unit": "µε" },
-    { "annotation": "flow_lpm", "state": "recognized", "unit": "L/min" },
-    { "annotation": "流量_L_min", "state": "recognized", "unit": "L/min" },
-    { "annotation": "cycle_time_min", "state": "recognized", "unit": "min" },
-    { "annotation": "转速_rpm", "state": "recognized", "unit": "rpm" },
-    { "annotation": "扭矩_Nm", "state": "recognized", "unit": "N·m" },
-    { "annotation": "wavelength_nm", "state": "recognized", "unit": "nm" },
-    { "annotation": "功率_kW", "state": "recognized", "unit": "kW" },
-    { "annotation": "vibration_mm_s", "state": "recognized", "unit": "mm/s" },
-    { "annotation": "irradiance_kwh_m2", "state": "recognized", "unit": "kWh/m²" },
-    { "annotation": "solar_wm2", "state": "recognized", "unit": "W/m²" },
-    { "annotation": "dose_mg_l", "state": "recognized", "unit": "mg/L" },
-    { "annotation": "velocity_umol_min", "state": "recognized", "unit": "µmol/min" },
-    { "annotation": "pm25_ugm3", "state": "recognized", "unit": "µg/m³" },
-    { "annotation": "concentration_ppm", "state": "recognized", "unit": "ppm" },
-    { "annotation": "no2_ppb", "state": "recognized", "unit": "ppb" },
-    { "annotation": "efficiency_pct", "state": "recognized", "unit": "pct" },
-    { "annotation": "north_kusd", "state": "recognized", "unit": "kUSD" },
-    { "annotation": "noise_uv", "state": "recognized", "unit": "µV" },
-    { "annotation": "fast_twitch_mv", "state": "recognized", "unit": "mV" },
-    { "annotation": "ch_001", "state": "unknown" },
-    { "annotation": "batch_1", "state": "unknown" },
-    { "annotation": "c1", "state": "unknown" },
-    { "annotation": "sample_id", "state": "unknown" },
-    { "annotation": "line_a_units", "state": "unknown" },
-    { "annotation": "month", "state": "unknown" },
-    { "annotation": "x", "state": "unknown" },
-    { "annotation": "temperature", "state": "unknown" }
+    {
+      "annotation": "pressure_kpa",
+      "state": "recognized",
+      "unit": "kPa",
+      "scalar": true
+    },
+    {
+      "annotation": "压力_kPa",
+      "state": "recognized",
+      "unit": "kPa"
+    },
+    {
+      "annotation": "tensile_mpa",
+      "state": "ambiguous",
+      "token": "mpa",
+      "candidates": [
+        "mPa",
+        "MPa"
+      ]
+    },
+    {
+      "annotation": "pressure_bar",
+      "state": "recognized",
+      "unit": "bar"
+    },
+    {
+      "annotation": "pressure_hpa",
+      "state": "recognized",
+      "unit": "hPa"
+    },
+    {
+      "annotation": "load_kn",
+      "state": "recognized",
+      "unit": "kN"
+    },
+    {
+      "annotation": "height_mm",
+      "state": "ambiguous",
+      "token": "mm",
+      "candidates": [
+        "mm",
+        "mM"
+      ]
+    },
+    {
+      "annotation": "substrate_mm",
+      "state": "ambiguous",
+      "token": "mm",
+      "candidates": [
+        "mm",
+        "mM"
+      ]
+    },
+    {
+      "annotation": "temp_c",
+      "state": "ambiguous",
+      "token": "c",
+      "candidates": [
+        "°C"
+      ]
+    },
+    {
+      "annotation": "时间_s",
+      "state": "ambiguous",
+      "token": "s",
+      "candidates": [
+        "s"
+      ]
+    },
+    {
+      "annotation": "current_a",
+      "state": "ambiguous",
+      "token": "a",
+      "candidates": [
+        "A"
+      ]
+    },
+    {
+      "annotation": "voltage_v",
+      "state": "ambiguous",
+      "token": "v",
+      "candidates": [
+        "V"
+      ]
+    },
+    {
+      "annotation": "accel_x_g",
+      "state": "ambiguous",
+      "token": "g",
+      "candidates": [
+        "g"
+      ]
+    },
+    {
+      "annotation": "time_ms",
+      "state": "ambiguous",
+      "token": "ms",
+      "candidates": [
+        "ms",
+        "m/s"
+      ]
+    },
+    {
+      "annotation": "wind_ms",
+      "state": "ambiguous",
+      "token": "ms",
+      "candidates": [
+        "ms",
+        "m/s"
+      ]
+    },
+    {
+      "annotation": "output_mw",
+      "state": "ambiguous",
+      "token": "mw",
+      "candidates": [
+        "mW",
+        "MW"
+      ]
+    },
+    {
+      "annotation": "sensor_a",
+      "state": "ambiguous",
+      "token": "a",
+      "candidates": [
+        "A"
+      ]
+    },
+    {
+      "annotation": "group_d",
+      "state": "ambiguous",
+      "token": "d",
+      "candidates": [
+        "d"
+      ]
+    },
+    {
+      "annotation": "温度_℃",
+      "state": "recognized",
+      "unit": "°C",
+      "scalar": false
+    },
+    {
+      "annotation": "hardness_hrc",
+      "state": "recognized",
+      "unit": "HRC",
+      "scalar": false
+    },
+    {
+      "annotation": "absorbance_au",
+      "state": "recognized",
+      "unit": "AU",
+      "scalar": false
+    },
+    {
+      "annotation": "capacity_ah",
+      "state": "recognized",
+      "unit": "A·h"
+    },
+    {
+      "annotation": "strain_1_ue",
+      "state": "recognized",
+      "unit": "µε"
+    },
+    {
+      "annotation": "flow_lpm",
+      "state": "recognized",
+      "unit": "L/min"
+    },
+    {
+      "annotation": "流量_L_min",
+      "state": "recognized",
+      "unit": "L/min"
+    },
+    {
+      "annotation": "cycle_time_min",
+      "state": "recognized",
+      "unit": "min"
+    },
+    {
+      "annotation": "转速_rpm",
+      "state": "recognized",
+      "unit": "rpm"
+    },
+    {
+      "annotation": "扭矩_Nm",
+      "state": "recognized",
+      "unit": "N·m"
+    },
+    {
+      "annotation": "wavelength_nm",
+      "state": "recognized",
+      "unit": "nm"
+    },
+    {
+      "annotation": "功率_kW",
+      "state": "recognized",
+      "unit": "kW"
+    },
+    {
+      "annotation": "vibration_mm_s",
+      "state": "recognized",
+      "unit": "mm/s"
+    },
+    {
+      "annotation": "irradiance_kwh_m2",
+      "state": "recognized",
+      "unit": "kWh/m²"
+    },
+    {
+      "annotation": "solar_wm2",
+      "state": "recognized",
+      "unit": "W/m²"
+    },
+    {
+      "annotation": "dose_mg_l",
+      "state": "recognized",
+      "unit": "mg/L"
+    },
+    {
+      "annotation": "velocity_umol_min",
+      "state": "recognized",
+      "unit": "µmol/min"
+    },
+    {
+      "annotation": "pm25_ugm3",
+      "state": "recognized",
+      "unit": "µg/m³"
+    },
+    {
+      "annotation": "concentration_ppm",
+      "state": "recognized",
+      "unit": "ppm"
+    },
+    {
+      "annotation": "no2_ppb",
+      "state": "recognized",
+      "unit": "ppb"
+    },
+    {
+      "annotation": "efficiency_pct",
+      "state": "recognized",
+      "unit": "pct"
+    },
+    {
+      "annotation": "north_kusd",
+      "state": "recognized",
+      "unit": "kUSD"
+    },
+    {
+      "annotation": "noise_uv",
+      "state": "recognized",
+      "unit": "µV"
+    },
+    {
+      "annotation": "fast_twitch_mv",
+      "state": "recognized",
+      "unit": "mV"
+    },
+    {
+      "annotation": "ch_001",
+      "state": "unknown"
+    },
+    {
+      "annotation": "batch_1",
+      "state": "unknown"
+    },
+    {
+      "annotation": "c1",
+      "state": "unknown"
+    },
+    {
+      "annotation": "sample_id",
+      "state": "unknown"
+    },
+    {
+      "annotation": "line_a_units",
+      "state": "unknown"
+    },
+    {
+      "annotation": "month",
+      "state": "unknown"
+    },
+    {
+      "annotation": "x",
+      "state": "unknown"
+    },
+    {
+      "annotation": "temperature",
+      "state": "unknown"
+    },
+    {
+      "annotation": "speed_km_h",
+      "state": "recognized",
+      "unit": "km/h"
+    }
   ]
 }

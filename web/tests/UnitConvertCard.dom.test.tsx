@@ -391,7 +391,9 @@ describe('unit-convert card — the picker', () => {
     expect(optionValues(pressure)[0]).toBe('');
     expect(pressure.options[0].textContent).toBe('保持原样');
     expect(optionValues(pressure)).toContain('bar');
-    expect(optionValues(pressure)).toContain('kPa');
+    expect(optionValues(pressure)).toContain('Pa');
+    // The source unit itself is not a target: converting kPa to kPa changes nothing.
+    expect(optionValues(pressure)).not.toContain('kPa');
     // A target of ANOTHER dimension is never offered (the backend would refuse it anyway).
     expect(optionValues(pressure)).not.toContain('mm');
     expect(optionValues(pressure)).not.toContain('A');
@@ -436,6 +438,7 @@ describe('unit-convert card — the picker', () => {
     expect(row(host, 1).querySelector('.unit-convert__source')?.textContent).toBe('A');
     expect(optionValues(current)).toContain('mA');
     expect(optionValues(current)).not.toContain('bar');
+    expect(optionValues(current)).not.toContain('A');
   });
 });
 
@@ -704,6 +707,17 @@ async function mountLive(cardId: number): Promise<HTMLElement> {
   await settle();
   return host;
 }
+
+describe('unit-convert card — velocity targets', () => {
+  it('offers km/h and never the source unit itself', async () => {
+    const card = await setupWith(['wind_m_s']);
+    const host = await mount(card);
+    const values = optionValues(picker(host, 0));
+    expect(values).toContain('km/h');
+    expect(values).toContain('mm/s');
+    expect(values).not.toContain('m/s');
+  });
+});
 
 describe('unit-convert card — choices survive only while their dimension matches', () => {
   const resolutions = (annotations: string[]) =>

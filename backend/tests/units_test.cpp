@@ -150,6 +150,7 @@ void runFactorChecks() {
   expectFactor("mbar", 1e5 * 1e-3);
   expectFactor("m/s", 1.0);
   expectFactor("mm/s", 1e-3);
+  expectFactor("km/h", 1.0 / 3.6);
   expectFactor("rpm", 1.0 / 60.0);
   expectFactor("Hz", 1.0);
   expectFactor("ppm", 1e-6);
@@ -250,6 +251,9 @@ void runConversionChecks() {
   // m/s → mm/s.
   expectConverted("m/s->mm/s", {makeColumn("Pos.1", "wind_m_s", {5, 0.5, 12})},
                   targets("[{\"column\":0,\"to\":\"mm/s\"}]"), "wind_mm/s", {5000.0, 500.0, 12000.0});
+  // km/h → m/s (factor 1/3.6): the everyday velocity unit the registry used to lack.
+  expectConverted("km/h->m/s", {makeColumn("Pos.1", "speed_km_h", {36, 72, 3.6})},
+                  targets("[{\"column\":0,\"to\":\"m/s\"}]"), "speed_m/s", {10.0, 20.0, 1.0});
   // rpm → Hz (factor 1/60).
   expectConverted("rpm->Hz", {makeColumn("Pos.1", "speed_rpm", {120, 60, 30})},
                   targets("[{\"column\":0,\"to\":\"Hz\"}]"), "speed_Hz", {2.0, 1.0, 0.5});

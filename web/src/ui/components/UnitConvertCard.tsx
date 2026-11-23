@@ -342,7 +342,11 @@ export function UnitConvertCard({
       resolution !== undefined && resolution.state === 'recognized' && resolution.scalar;
     const targetsForDimension =
       convertible && resolution.dimension !== null
-        ? (dimensions.get(resolution.dimension) ?? [])
+        ? (dimensions.get(resolution.dimension) ?? []).filter(
+            // Converting a unit to itself is not a conversion: keep the option list to
+            // the units that actually change the numbers.
+            (candidate) => candidate.unit !== resolution.unit,
+          )
         : [];
 
     /** Why the picker cannot be used, or `null` when it can. */
