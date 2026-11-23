@@ -24,6 +24,8 @@
     { "name": "countif-tiny", "columns": [{ "name": "A", "data": [1e-9] }], "expression": "COUNTIF(A, 0.000000001)", "expect": [1] },
     { "name": "sumif-precise", "columns": [{ "name": "A", "data": [0.123456789] }], "expression": "SUMIF(A, 0.123456789)", "expect": [0.123456789], "tol": 1e-15 },
     { "name": "sumif", "columns": [{ "name": "A", "data": [1,2,3,4] }], "expression": "SUMIF(A,\">2\")", "expect": [7,7,7,7] },
+    { "name": "sumif-three-arg", "columns": [{ "name": "A", "data": [1,2,3,4] }, { "name": "B", "data": [10,20,30,40] }], "expression": "SUMIF(A,\">2\",B)", "expect": [70,70,70,70] },
+    { "name": "string-arithmetic-refused", "expression": "1+\"abc\"", "error": { "code": "domainError" } },
     { "name": "irr", "columns": [{ "name": "A", "data": [-100,110] }], "expression": "IRR(A)", "expect": [0.1,0.1], "tol": 1e-12 },
     { "name": "percentile-domain", "columns": [{ "name": "A", "data": [1,2,3,4] }], "expression": "PERCENTILE.INC(A,2)", "error": { "code": "domainError" } },
     { "name": "budget", "expression": "SUM(i, i, 1, 1000001)", "error": { "code": "budgetExceeded" } },

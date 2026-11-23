@@ -149,6 +149,23 @@ int main() {
   const auto sumPrecise = ExprEngine::evaluate("SUMIF(A, 0.123456789)", {"A"}, precise, 1);
   CHECK(std::fabs(sumPrecise[0] - 0.123456789) < 1e-15);
 
+  // Strings are criteria data, not values: arithmetic on them must refuse, not NaN.
+  try {
+    (void)ExprEngine::evaluate("1+\"abc\"", names(), cols, 3);
+    CHECK(false);
+  } catch (const ExpressionError& e) {
+    CHECK(e.code == "domainError");
+  }
+  try {
+    (void)ExprEngine::evaluate("\"abc\"", names(), cols, 3);
+    CHECK(false);
+  } catch (const ExpressionError& e) {
+    CHECK(e.code == "domainError");
+  }
+  const auto sumIfThree = ExprEngine::evaluate("SUMIF(A, \">2\", B)", {"A", "B"},
+                                               std::vector<std::vector<double>>{{1,2,3,4},{10,20,30,40}}, 4);
+  CHECK(sumIfThree == std::vector<double>({70.0, 70.0, 70.0, 70.0}));
+
   try {
     (void)ExprEngine::evaluate("PERCENTILE.INC(A, 2)", {"A"}, statsCols, 4);
     CHECK(false);

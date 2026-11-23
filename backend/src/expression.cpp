@@ -910,10 +910,10 @@ constexpr size_t kMaxIntegralNodes = 100000;
 EvalFn compileAst(const NodePtr& node) {
   switch (node->kind) {
     case NodeKind::String:
-      return [](const std::vector<std::vector<double>>& cols, size_t len) {
-        (void)cols;
-        return std::vector<double>(len, NAN);
-      };
+      // A string literal is data for COUNTIF/SUMIF criteria, never a value: compiling
+      // one into a NaN column let `1+"abc"` silently produce NaN instead of refusing.
+      throw ExpressionError("String literals are only valid as COUNTIF/SUMIF criteria", 0,
+                            "domainError", "string");
     case NodeKind::Number: {
       double v = node->number;
       return [v](const std::vector<std::vector<double>>&, size_t len) {
@@ -965,7 +965,18 @@ EvalFn compileAst(const NodePtr& node) {
     }
     case NodeKind::Call: {
       std::vector<EvalFn> argFns;
-      for (const auto& a : node->children) argFns.push_back(compileAst(a));
+      for (const auto& a : node->children) {
+        if (a->kind == NodeKind::String) {
+          // COUNTIF/SUMIF read the criteria straight from the AST; every other position
+          // keeps a refusing evaluator so a stray string can never become a NaN value.
+          argFns.push_back([](const std::vector<std::vector<double>>&, size_t) -> std::vector<double> {
+            throw ExpressionError("String literals are only valid as COUNTIF/SUMIF criteria", 0,
+                                  "domainError", "string");
+          });
+        } else {
+          argFns.push_back(compileAst(a));
+        }
+      }
       const std::string name = node->name;
 
       // Aggregation: reduce to scalar then broadcast. MIN/MAX multi-arg fall through to
