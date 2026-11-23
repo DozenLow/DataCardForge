@@ -68,6 +68,18 @@ int main() {
 
   const auto sumSquares = ExprEngine::evaluate("SUM(i*i, i, 1, 4)", names(), cols, 3);
   CHECK(sumSquares == std::vector<double>({30.0, 30.0, 30.0}));
+  // Negative integer bounds are legal; the term-count budget still binds.
+  const auto sumSymmetric = ExprEngine::evaluate("SUM(i, i, -3, 3)", names(), cols, 3);
+  CHECK(sumSymmetric == std::vector<double>({0.0, 0.0, 0.0}));
+  const auto sumNegSquares = ExprEngine::evaluate("SUM(i*i, i, -2, 2)", names(), cols, 3);
+  CHECK(sumNegSquares == std::vector<double>({10.0, 10.0, 10.0}));
+  try {
+    (void)ExprEngine::evaluate("1+SUM(A, 1)", names(), cols, 3);
+    CHECK(false);
+  } catch (const ExpressionError& e) {
+    CHECK(e.code == "badArgCount");
+    CHECK(e.position == 2);
+  }
   const auto factorial = ExprEngine::evaluate("PRODUCT(i, i, 1, 5)", names(), cols, 3);
   CHECK(factorial == std::vector<double>({120.0, 120.0, 120.0}));
   const auto nested = ExprEngine::evaluate(

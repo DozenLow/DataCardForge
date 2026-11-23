@@ -606,6 +606,17 @@ struct Parser {
         }
         advance();  // consume ')'
         int got = static_cast<int>(args.size());
+        // SUM's arity is discontiguous (1 = aggregate, 4 = bounded): reject the gap at
+        // parse time with the token position, not at compute time with position 0.
+        if (upper == "SUM" && (got == 2 || got == 3)) {
+          ExpressionError err("SUM() takes either SUM(column) or SUM(expr, var, from, to), got " +
+                                  std::to_string(got) + " arguments",
+                              t.pos, "badArgCount", name);
+          err.argMin = 1;
+          err.argMax = 4;
+          err.argGot = got;
+          throw err;
+        }
         if (got < fit->second.minArgs || got > fit->second.maxArgs) {
           std::string maxStr = fit->second.maxArgs == INT32_MAX
                                    ? "∞"
@@ -1018,16 +1029,17 @@ EvalFn compileAst(const NodePtr& node) {
                 throw ExpressionError(name + " bounds must be finite integers", 0,
                                       "domainError", name);
               }
-              if (std::floor(startValue) != startValue || std::floor(endValue) != endValue ||
-                  startValue < 0.0 || endValue < 0.0) {
-                throw ExpressionError(name + " bounds must be non-negative integers", 0,
+              if (std::floor(startValue) != startValue || std::floor(endValue) != endValue) {
+                throw ExpressionError(name + " bounds must be integers", 0,
                                       "domainError", name);
               }
               if (endValue < startValue) {
                 throw ExpressionError(name + " requires start <= end", 0,
                                       "domainError", name);
               }
-              if (endValue > 1000000.0) {
+              // Negative bounds are legal mathematics (SUM(i, i, -3, 3) = 0); the budget
+              // caps the term count and the magnitude so the int64 casts stay safe.
+              if (startValue < -1000000.0 || endValue > 1000000.0) {
                 ExpressionError error(name + " exceeded the discrete budget", 0,
                                       "budgetExceeded", name);
                 error.budgetLimit = 1000000;
@@ -1036,9 +1048,9 @@ EvalFn compileAst(const NodePtr& node) {
                                          : static_cast<int64_t>(endValue);
                 throw error;
               }
-              const uint64_t start = static_cast<uint64_t>(startValue);
-              const uint64_t end = static_cast<uint64_t>(endValue);
-              const uint64_t itemCount = end - start + 1;
+              const int64_t start = static_cast<int64_t>(startValue);
+              const int64_t end = static_cast<int64_t>(endValue);
+              const uint64_t itemCount = static_cast<uint64_t>(end - start + 1);
               if (itemCount > 1000000) {
                 ExpressionError error(name + " exceeded the discrete budget", 0,
                                       "budgetExceeded", name);
@@ -1060,7 +1072,7 @@ EvalFn compileAst(const NodePtr& node) {
               // pushed on the lexical stack, so no AST clone or recompile happens here.
               const EvalFn body = argFns[0];
               std::vector<long double> acc(len, name == "SUM" ? 0.0L : 1.0L);
-              for (uint64_t value = start; value <= end; ++value) {
+              for (int64_t value = start; value <= end; ++value) {
                 const BoundPush push(bound, static_cast<double>(value));
                 const std::vector<double> term = body(cols, len);
                 for (size_t row = 0; row < len; ++row) {
@@ -1862,6 +1874,11 @@ void collectRefs(const NodePtr& node, std::vector<std::string>* out) {
       break;
     case NodeKind::Unary:
       collectRefs(node->children[0], out);
+      break;
+    case NodeKind::Bound:
+    case NodeKind::String:
+      // Binders and criteria literals are not column references; listed explicitly so a
+      // future node kind cannot silently fall through this switch.
       break;
     case NodeKind::Number:
       break;
