@@ -112,6 +112,11 @@ import {
 
 export { lineColor };
 
+/** Pure capability gate for experimental, opt-in formula functions. */
+export function hasBackendCapability(state: BackendStatus, capability: string): boolean {
+  return state.state === 'online' && (state.capabilities ?? []).includes(capability);
+}
+
 /**
  * Compute-backend availability. Unreachable is a VISIBLE state with a reason —
  * the UI renders a banner from this; nothing ever falls back to local compute silently.
@@ -120,6 +125,8 @@ export interface BackendStatus {
   state: 'unknown' | 'online' | 'offline' | 'mismatch';
   build?: string;
   protocol?: number;
+  /** Additive capability advertisements; UI visibility is gated by this snapshot. */
+  capabilities?: string[];
   /** Structured detail for the banner (code-style, not user prose). */
   error?: string;
 }
@@ -6306,7 +6313,14 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         return;
       }
       if (info.ok) {
-        set({ backend: { state: 'online', build: info.build, protocol: info.protocol } });
+        set({
+          backend: {
+            state: 'online',
+            build: info.build,
+            protocol: info.protocol,
+            capabilities: [...(info.capabilities ?? [])],
+          },
+        });
         // Advertised signatures (built-ins today, plugin registrations later).
         void backendClient.signatures().then((signatures: SignatureDto[]) => {
           if (signatures.length > 0) set({ signatures });

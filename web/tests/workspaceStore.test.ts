@@ -11,7 +11,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { MatrixData } from '../src/core/MatrixData.ts';
-import { useWorkspace } from '../src/ui/workspaceStore.ts';
+import { hasBackendCapability, useWorkspace } from '../src/ui/workspaceStore.ts';
 import {
   isChartCard,
   isMatrixCard,
@@ -1245,6 +1245,22 @@ describe('backend capability gate', () => {
       // `signatureId` and evaluate an empty formula, producing a node that looks alive.
       expect(store().backend.state).toBe('mismatch');
       expect(store().backend.error).toContain('signature.v1');
+    } finally {
+      store().stopBackendEventLoop();
+      stub.restore();
+    }
+  });
+
+  it('gates advanced-math visibility to an advertised capability', async () => {
+    expect(hasBackendCapability({ state: 'offline', capabilities: ['advanced-math.v1'] }, 'advanced-math.v1')).toBe(false);
+    expect(hasBackendCapability({ state: 'online', capabilities: [] }, 'advanced-math.v1')).toBe(false);
+    expect(hasBackendCapability({ state: 'online', capabilities: ['advanced-math.v1'] }, 'advanced-math.v1')).toBe(true);
+
+    const stub = stubBackend({ capabilities: ['expr.v1', 'matrix.v1', 'signature.v1', 'card.v2', 'advanced-math.v1'] });
+    try {
+      await store().connectBackend();
+      expect(store().backend.capabilities).toContain('advanced-math.v1');
+      expect(hasBackendCapability(store().backend, 'advanced-math.v1')).toBe(true);
     } finally {
       store().stopBackendEventLoop();
       stub.restore();

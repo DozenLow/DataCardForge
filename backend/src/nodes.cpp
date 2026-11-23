@@ -1564,6 +1564,8 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
   int64_t errorArgMin = -1;
   int64_t errorArgMax = -1;
   int64_t errorArgGot = -1;
+  int64_t errorBudgetLimit = -1;
+  int64_t errorBudgetActual = -1;
   // Script cards (builtin:python) carry their own structured detail (stderr tail, exit code,
   // parsed manifest fields) and their declared outputs beyond output 0.
   Json scriptErrorDetail = Json::object();
@@ -1852,6 +1854,8 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
     errorArgMin = e.argMin;
     errorArgMax = e.argMax;
     errorArgGot = e.argGot;
+    errorBudgetLimit = e.budgetLimit;
+    errorBudgetActual = e.budgetActual;
   } catch (const ShapeError& e) {
     // Matrix-mode shape failures are structured too (never a silent garbage matrix).
     errorCode = e.code;
@@ -1933,6 +1937,10 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
       params_out.set("got", Json(errorArgGot));
     }
     if (!errorName.empty()) params_out.set("name", Json(errorName));
+    if (errorCode == "budgetExceeded") {
+      params_out.set("limit", Json(errorBudgetLimit));
+      params_out.set("actual", Json(errorBudgetActual));
+    }
     if (contractExpected >= 0) {
       params_out.set("expected", Json(contractExpected));
       params_out.set("actual", Json(contractActual));

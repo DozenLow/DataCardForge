@@ -859,6 +859,11 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
     // and evaluate an empty `formula`). Capabilities are that seam.
     caps.push(Json("signature.v1"));
     caps.push(Json("card.v2"));
+    if (std::getenv("DC_ADVANCED_MATH") != nullptr) {
+      const char* value = std::getenv("DC_ADVANCED_MATH");
+      if (value[0] != '\0' && std::strcmp(value, "0") != 0)
+        caps.push(Json("advanced-math.v1"));
+    }
     Json limits = Json::object({{"maxWindowRows", Json(5000)}});
     return jsonOk(Json::object({{"protocol", Json(1)},
                                 {"build", Json(std::string(DC_BUILD_SHA))},

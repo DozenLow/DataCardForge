@@ -15,10 +15,11 @@
 import { useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
-import { useTranslator, useWorkspace } from '../workspaceStore.ts';
+import { hasBackendCapability, useTranslator, useWorkspace } from '../workspaceStore.ts';
 import {
   HELP_ERROR_ROWS,
   HELP_EXAMPLES,
+  ADVANCED_HELP_FUNCTION_GROUPS,
   HELP_FUNCTION_GROUPS,
   HELP_SYNTAX_ROWS,
   type HelpSection,
@@ -36,6 +37,7 @@ export function HelpDialog() {
   const open = useWorkspace((s) => s.helpOpen);
   const requested = useWorkspace((s) => s.helpSection);
   const closeHelp = useWorkspace((s) => s.closeHelp);
+  const backend = useWorkspace((s) => s.backend);
   const closeRef = useRef<HTMLButtonElement | null>(null);
   const bodyRef = useRef<HTMLDivElement | null>(null);
 
@@ -137,7 +139,7 @@ export function HelpDialog() {
             'functions',
             <>
               <p className="help-dialog__note">{t('help.functions.note')}</p>
-              {HELP_FUNCTION_GROUPS.map((group) => (
+              {[...HELP_FUNCTION_GROUPS, ...(hasBackendCapability(backend, 'advanced-math.v1') ? ADVANCED_HELP_FUNCTION_GROUPS : [])].map((group) => (
                 <div className="help-dialog__group" key={group.titleKey}>
                   <h4 className="help-dialog__group-title">{t(group.titleKey)}</h4>
                   <dl className="help-dialog__fn-list">

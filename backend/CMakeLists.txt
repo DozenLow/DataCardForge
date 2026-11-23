@@ -284,6 +284,16 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 add_test(NAME dd_oracle COMMAND dc_dd_oracle_test)
 
+# Opt-in advanced-math capability: default unknown, explicit enable known.
+add_executable(dc_advanced_math_test tests/advanced_math_test.cpp)
+target_link_libraries(dc_advanced_math_test PRIVATE dc_core)
+add_test(NAME advanced_math COMMAND dc_advanced_math_test)
+add_test(NAME advanced_math_fixtures
+  COMMAND ${CMAKE_COMMAND} -E env DC_ADVANCED_MATH=1
+          $<TARGET_FILE:dc_fixture_run>
+          ${CMAKE_SOURCE_DIR}/../web/tests/fixtures/xlayer/advanced_math.v1.json
+          ${CMAKE_SOURCE_DIR}/../web/tests/fixtures/xlayer/advanced_math_matrix.v1.json)
+
 # Algebraic invariants (tests/matrix_invariants_test.cpp): identities that hold for ANY
 # correct implementation — A*I == A, (A·B)ᵀ = Bᵀ·Aᵀ, det(A·B) = det(A)·det(B),
 # solve(A, A·y) == y. This is the third failure class, and the only gate that sees it: a

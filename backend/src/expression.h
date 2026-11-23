@@ -33,6 +33,8 @@ struct ExpressionError : std::runtime_error {
   int64_t argMin = -1;
   int64_t argMax = -1;
   int64_t argGot = -1;
+  int64_t budgetLimit = -1;
+  int64_t budgetActual = -1;
   ExpressionError(std::string message, int64_t pos, std::string code_)
       : std::runtime_error(std::move(message)), code(std::move(code_)), position(pos) {}
   ExpressionError(std::string message, int64_t pos, std::string code_, std::string detail_)
@@ -71,6 +73,11 @@ class ExprEngine {
                                       const std::vector<std::vector<double>>& columns,
                                       size_t length,
                                       const std::vector<AliasRange>& aliases = {});
+
+  // Opt-in capability gate. It is false unless DC_ADVANCED_MATH=1 (or another
+  // non-empty value other than 0), so existing formula cards cannot discover or
+  // use advanced functions after an ordinary upgrade.
+  static bool advancedMathEnabled();
 
   /**
    * The `+`/`-` conversions an `auto` unit policy performs, keyed by the INDEX of the pair in

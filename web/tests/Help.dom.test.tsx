@@ -177,6 +177,23 @@ describe('help dialog', () => {
     }
   });
 
+  it('shows advanced functions only when the backend advertises the capability', async () => {
+    await mountMenuAndDialog();
+    await openMenu('帮助');
+    await clickMenuItem('公式与函数说明');
+    expect(document.querySelector('.help-dialog')!.textContent).not.toContain('COMBIN(n, k)');
+
+    await act(async () => {
+      useWorkspace.setState({
+        backend: { state: 'online', capabilities: ['advanced-math.v1'] },
+      });
+    });
+    const text = document.querySelector('.help-dialog')!.textContent ?? '';
+    expect(text).toContain('实验能力');
+    expect(text).toContain('COMBIN(n, k)');
+    expect(text).toContain('SLOPE(known_y, known_x)');
+  });
+
   it('opens at the section the menu item asked for', async () => {
     await mountMenuAndDialog();
     await openMenu('帮助');
