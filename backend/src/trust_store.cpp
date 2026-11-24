@@ -296,6 +296,12 @@ bool TrustStore::record(const std::string& workspaceHash,
                         const std::vector<std::string>& scripts) {
   std::lock_guard<std::mutex> lock(mu_);
   if (!decided_) return false;
+  // Persistent path: keep a rollback copy (the eviction below can drop other entries too).
+  // A failed save must not leave the mutation in memory — returning true while nothing was
+  // persisted is a 200 answer that lies about trust. The session-only path is unchanged.
+  const bool persistent = !sessionOnly_;
+  std::map<std::string, TrustEntry> previous;
+  if (persistent) previous = entries_;
   TrustEntry& entry = entries_[workspaceHash];
   entry.at = nowSeconds();
   for (const auto& script : scripts) {
@@ -310,7 +316,11 @@ bool TrustStore::record(const std::string& workspaceHash,
     }
     entries_.erase(oldest);
   }
-  if (!sessionOnly_ && !save()) unavailable_ = true;
+  if (persistent && !save()) {
+    entries_ = std::move(previous);
+    unavailable_ = true;
+    return false;
+  }
   return true;
 }
 

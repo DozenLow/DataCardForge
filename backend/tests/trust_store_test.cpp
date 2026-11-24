@@ -141,6 +141,29 @@ int main() {
     CHECK(store.status().entries == 100);
   }
 
+  // ── save failure: record() must roll back and return false, not a false success ──
+  {
+    const fs::path failDir = fs::temp_directory_path() / "dc_trust_savefail_test";
+    fs::remove_all(failDir, ec);
+    setTrustDir(failDir.string());
+    dc::TrustStore store("dc_probe_exe");
+    CHECK(store.decidePersistence(true));
+    CHECK(store.record(hashA, {"1"}));
+    // Turn the record file into a NON-EMPTY directory: the atomic rename can neither
+    // replace nor remove it, so save() fails even when the test runs privileged.
+    fs::remove(failDir / "trust.json", ec);
+    fs::create_directory(failDir / "trust.json", ec);
+    std::ofstream(failDir / "trust.json" / "blocker") << "x";
+    CHECK(!store.record(hashB, {"9"}));
+    CHECK(!store.lookup(hashB).known);
+    CHECK(!store.record(hashA, {"2"}));
+    const dc::TrustLookup rolledBack = store.lookup(hashA);
+    CHECK(rolledBack.known);
+    CHECK(rolledBack.scripts.size() == 1 && rolledBack.scripts[0] == "1");
+    CHECK(store.status().persistence == "unavailable");
+    fs::remove_all(failDir, ec);
+  }
+
   if (failures == 0) {
     std::printf("trust_store: all checks passed\n");
     return 0;

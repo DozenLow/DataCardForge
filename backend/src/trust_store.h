@@ -56,7 +56,8 @@ class TrustStore {
 
   TrustLookup lookup(const std::string& workspaceHash) const;
 
-  /** Merge `scripts` into the hash's entry. False until a persistence decision exists. */
+  /** Merge `scripts` into the hash's entry. False until a persistence decision exists, and
+      false when a persistent save fails — the in-memory mutation is then rolled back. */
   bool record(const std::string& workspaceHash, const std::vector<std::string>& scripts);
 
   bool revoke(const std::string& workspaceHash);
