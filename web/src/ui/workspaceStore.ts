@@ -1142,7 +1142,9 @@ async function runScriptCardNow(cardId: number, mode: 'clean' | 'debug'): Promis
     // A clean run publishes: pull the result into the display cache BEFORE reporting done.
     // The run bar's light, the card badge and every dependent read this cache, so a `done`
     // reported while the numbers are still in flight is exactly the reported "green light
-    // before it finished". Debug deliberately does not publish, so it skips this.
+    // before it finished". Debug deliberately does not publish, so it skips this. This is
+    // the run's ONLY result pull: a second one after `done` would re-fetch the same table
+    // and refresh every dependent twice.
     if (mode === 'clean') await pullResultIntoCache(cardId);
     if (!scriptCardStillCurrent(cardId, epoch)) return;
     patchScriptRun(cardId, {
@@ -1165,9 +1167,6 @@ async function runScriptCardNow(cardId: number, mode: 'clean' | 'debug'): Promis
           ),
         }));
       }
-      // The ordinary result-cache path: display matrix + `card.result` + every dependent
-      // refreshed. Debug deliberately skips this whole line.
-      await pullResultIntoCache(cardId);
     }
   } finally {
     scriptRunsInFlight.delete(cardId);
@@ -3287,7 +3286,9 @@ async function pullResultIntoCache(cardId: number): Promise<void> {
   const inflight = pullsInFlight.get(cardId);
   if (inflight) return inflight;
   const task = pullPreviewIntoCache(cardId).finally(() => {
-    pullsInFlight.delete(cardId);
+    // A full load may have taken the slot while this preview was on the wire; only the
+    // current owner clears it, so the full load keeps its coalescing entry.
+    if (pullsInFlight.get(cardId) === task) pullsInFlight.delete(cardId);
     // A chart may have asked for the full column while the preview was in flight.
     ensureChartData(cardId);
   });
@@ -3295,11 +3296,25 @@ async function pullResultIntoCache(cardId: number): Promise<void> {
   return task;
 }
 
+/** Full-table loads in flight per card: concurrent identical "show all" requests coalesce. */
+const fullPullsInFlight = new Map<number, Promise<void>>();
+
 /** Fetch the WHOLE result into the display cache ("show more"). */
 async function loadFullResultIntoCache(cardId: number): Promise<void> {
+  const running = fullPullsInFlight.get(cardId);
+  if (running) return running;
+  // Capture the pull already on the wire BEFORE registering this task. A preview answers
+  // only the first screenful, so an explicit "show all" must not be dropped on it: wait the
+  // preview out, then re-evaluate completeness and fetch whatever is still missing.
   const inflight = pullsInFlight.get(cardId);
-  if (inflight) return inflight;
   const task = (async () => {
+    const epoch = workspaceEpoch;
+    // The preview's own failure is its caller's business; the explicit full request still
+    // re-evaluates what the cache holds and fetches the rest.
+    if (inflight) await inflight.catch(() => {});
+    // A reset / restore while the preview was on the wire: local ids restart, so this
+    // request has no reader any more (the same epoch rule every other async write follows).
+    if (epoch !== workspaceEpoch) return;
     const card = useWorkspace.getState().cards.find((c) => c.id === cardId);
     if (!card || !isFormulaCard(card)) return;
     // "Complete" is a property of every slot, not of ordinal 0: a card whose display cache
@@ -3318,7 +3333,11 @@ async function loadFullResultIntoCache(cardId: number): Promise<void> {
       if (await pullOutputSlot(card, index, MAX_CACHE_ROWS)) wrote = true;
     }
     if (wrote) useWorkspace.getState().refreshDependentsOf(cardId);
-  })().finally(() => pullsInFlight.delete(cardId));
+  })().finally(() => {
+    if (fullPullsInFlight.get(cardId) === task) fullPullsInFlight.delete(cardId);
+    if (pullsInFlight.get(cardId) === task) pullsInFlight.delete(cardId);
+  });
+  fullPullsInFlight.set(cardId, task);
   pullsInFlight.set(cardId, task);
   return task;
 }
@@ -5560,6 +5579,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           // The one trigger (decision §四). Never a GET, never a PATCH: reading a status
           // must not spend compute.
           const computed = await backendClient.computeNode(nodeId);
+          // The source (or the whole workspace) can change while the compute is on the wire;
+          // a failure must not paint a red error onto a panel that now describes a different
+          // table. Same currency rule as the create answer above, applied to every branch.
+          if (epoch !== workspaceEpoch || !summaryStillCurrent(cardId, source.localMatrixId)) return;
           if (!computed.ok) {
             if (computed.code === 'backendUnavailable') {
               set({ backend: { state: 'offline', error: computed.code } });

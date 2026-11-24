@@ -1956,3 +1956,217 @@ describe('closeAllCards releases the compute graph', () => {
     }
   });
 });
+
+// ── in-flight regressions: stale summary error, dropped "show all", double clean-run pull ──
+describe('in-flight regressions: summary currency, explicit full load, single clean-run pull', () => {
+  /** Spy-level backend: uploads and node teardown answer at once; each race gates its own call. */
+  function stubClient() {
+    let nextServerMatrix = 600;
+    const spies = [
+      vi.spyOn(BackendClient.prototype, 'registerMatrix').mockImplementation(async () => ({
+        ok: true,
+        matrixId: nextServerMatrix++,
+        revision: 1,
+      })),
+      vi.spyOn(BackendClient.prototype, 'deleteNode').mockResolvedValue({ ok: true }),
+    ];
+    return {
+      restore: () => {
+        for (const spy of spies) spy.mockRestore();
+      },
+    };
+  }
+
+  type ComputeAnswer = Awaited<ReturnType<BackendClient['computeNode']>>;
+
+  /**
+   * Start a summary compute, switch the card's active file while the compute is on the
+   * wire, then land the given failure. Returns the panel entry the failure left behind.
+   */
+  async function summaryFailureAfterFileSwitch(answer: ComputeAnswer) {
+    const backend = stubClient();
+    const createSpy = vi.spyOn(BackendClient.prototype, 'createNode').mockResolvedValue({
+      ok: true,
+      nodeId: 700,
+      state: 'dirty',
+    });
+    let settleCompute!: (answer: ComputeAnswer) => void;
+    const computeGate = new Promise<ComputeAnswer>((resolve) => {
+      settleCompute = resolve;
+    });
+    const computeSpy = vi
+      .spyOn(BackendClient.prototype, 'computeNode')
+      .mockImplementation(() => computeGate);
+    try {
+      const cardId = store().addMatrixCard([
+        { name: 'a.txt', matrix: matrix([[1], [2]]) },
+        { name: 'b.txt', matrix: matrix([[3], [4]]) },
+      ]);
+      await tick();
+      store().computeSummary(cardId);
+      await flush();
+      expect(store().summaries[cardId]?.status).toBe('computing');
+      // The user switches the file mid-compute: the panel's node is released, it goes idle.
+      store().setActiveSource(cardId, 1);
+      expect(store().summaries[cardId]?.status).toBe('idle');
+      settleCompute(answer);
+      await flush();
+      return store().summaries[cardId];
+    } finally {
+      computeSpy.mockRestore();
+      createSpy.mockRestore();
+      backend.restore();
+    }
+  }
+
+  it('computeSummary: a transport failure after the source switched paints no error on the new source', async () => {
+    const entry = await summaryFailureAfterFileSwitch({ ok: false, code: 'internalError' });
+    expect(entry?.status).toBe('idle');
+    expect(entry?.code).toBeUndefined();
+    expect(entry?.result ?? null).toBeNull();
+  });
+
+  it('computeSummary: a node error after the source switched paints no error on the new source', async () => {
+    const entry = await summaryFailureAfterFileSwitch({
+      ok: true,
+      state: 'error',
+      code: 'runtimeError',
+    });
+    expect(entry?.status).toBe('idle');
+    expect(entry?.code).toBeUndefined();
+    expect(entry?.result ?? null).toBeNull();
+  });
+
+  it('loadFullResult: an explicit full load during an in-flight preview still caches every row', async () => {
+    const backend = stubClient();
+    const createSpy = vi.spyOn(BackendClient.prototype, 'createNode').mockResolvedValue({
+      ok: true,
+      nodeId: 800,
+      state: 'done',
+      resultMatrixId: 900,
+      resultMatrixIds: [900],
+    });
+    const totalRows = 12_000;
+    let releasePreview!: () => void;
+    const previewGate = new Promise<void>((resolve) => {
+      releasePreview = resolve;
+    });
+    let previewHeld = false;
+    const windowSpy = vi
+      .spyOn(BackendClient.prototype, 'window')
+      .mockImplementation(async (_matrixId, start, count) => {
+        // Hold only the preview read (the first screenful); full-load paging runs free.
+        if (count === 100 && !previewHeld) {
+          previewHeld = true;
+          await previewGate;
+        }
+        const end = Math.min(totalRows, start + count);
+        const rows = Math.max(0, end - start);
+        return {
+          ok: true,
+          rows,
+          columns: 1,
+          data: [Float64Array.from({ length: rows }, (_, i) => start + i)],
+          names: ['Pos.1 big'],
+          totalRows,
+          totalCols: 1,
+        };
+      });
+    try {
+      const srcId = await loadSource([[1], [2]], ['A']);
+      const fId = store().addFormulaCard(srcId)!;
+      await flush();
+      const card = store().cards.find((c) => c.id === fId) as FunctionCardModel;
+      // The preview is still on the wire: nothing has landed in the cache yet.
+      expect(store().matrices.get(card.displayMatrixId)!.rowCount()).toBe(0);
+
+      // "Show all" mid-preview — twice: identical explicit requests coalesce, and neither
+      // may be dropped onto the preview's first screenful.
+      store().loadFullResult(fId);
+      store().loadFullResult(fId);
+      await flush();
+      releasePreview();
+      await flush();
+      await flush();
+
+      const full = store().matrices.get(card.displayMatrixId)!;
+      expect(full.rowCount()).toBe(totalRows);
+      expect(full.cell(totalRows - 1, 0)).toBe(totalRows - 1);
+      const done = store().cards.find((c) => c.id === fId) as FunctionCardModel;
+      expect(done.result?.complete).toBe(true);
+      // One preview window + one full pass (5000 + 5000 + 2000): no dropped request, no duplicate.
+      expect(windowSpy.mock.calls.length).toBe(4);
+    } finally {
+      windowSpy.mockRestore();
+      createSpy.mockRestore();
+      backend.restore();
+    }
+  });
+
+  it('runScriptCard: a clean run fetches the result exactly once and refreshes dependents once', async () => {
+    const backend = stubClient();
+    const spies: Array<{ mockRestore: () => void }> = [
+      vi.spyOn(BackendClient.prototype, 'createNode').mockResolvedValue({
+        ok: true,
+        nodeId: 850,
+        state: 'dirty',
+        resultMatrixId: 950,
+        resultMatrixIds: [950],
+      }),
+      vi.spyOn(BackendClient.prototype, 'patchNode').mockResolvedValue({
+        ok: true,
+        nodeId: 850,
+        state: 'dirty',
+      }),
+      vi.spyOn(BackendClient.prototype, 'computeNode').mockResolvedValue({
+        ok: true,
+        state: 'done',
+        resultMatrixIds: [950],
+      }),
+    ];
+    const windowSpy = vi
+      .spyOn(BackendClient.prototype, 'window')
+      .mockImplementation(async (_matrixId, start, count) => {
+        const end = Math.min(2, start + count);
+        const rows = Math.max(0, end - start);
+        return {
+          ok: true,
+          rows,
+          columns: 1,
+          data: [Float64Array.from({ length: rows }, (_, i) => (start + i + 1) * 10)],
+          names: ['Pos.1'],
+          totalRows: 2,
+          totalCols: 1,
+        };
+      });
+    try {
+      const srcId = await loadSource([[1], [2]], ['A']);
+      const scriptId = store().addScriptCard([srcId])!;
+      await flush(); // creation push: the node is born dirty, nothing is pulled yet
+      const refreshSpy = vi.spyOn(store(), 'refreshDependentsOf');
+      spies.push(refreshSpy);
+
+      store().runScriptCard(scriptId);
+      await flush();
+      await flush();
+
+      expect(store().scriptRuns[scriptId]?.status).toBe('done');
+      // The fetch path: display-cache reads ask for more than the 5-row panel preview.
+      const resultFetches = windowSpy.mock.calls.filter(([id, , count]) => id === 950 && count > 5);
+      expect(resultFetches.length).toBe(1);
+      expect(refreshSpy).toHaveBeenCalledTimes(1);
+      const card = store().cards.find((c) => c.id === scriptId) as FunctionCardModel;
+      // The autoRun arming must survive the single-pull fix.
+      expect(card.autoRun).toBe(true);
+      expect(card.result?.complete).toBe(true);
+      const cached = store().matrices.get(card.displayMatrixId)!;
+      expect(cached.rowCount()).toBe(2);
+      expect(cached.cell(0, 0)).toBe(10);
+      expect(cached.cell(1, 0)).toBe(20);
+    } finally {
+      for (const spy of spies) spy.mockRestore();
+      windowSpy.mockRestore();
+      backend.restore();
+    }
+  });
+});
