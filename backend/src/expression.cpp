@@ -2128,10 +2128,14 @@ MatEvalFn compileAstMatrix(const NodePtr& node) {
         auto cmpOp = [&](const std::function<bool(double,double)>& fn) {
           int64_t rows, cols;
           MatVal::broadcastShapes(a, b, &rows, &cols);
+          // A scalar operand broadcasts: read it at (0,0), never at (i,j) — indexing
+          // the raw 1×1 buffer at the result shape read past its end (heap overread).
+          const bool aScalar = a.isScalar(), bScalar = b.isScalar();
           Eigen::MatrixXd r(rows, cols);
           for (int64_t i = 0; i < rows; ++i)
             for (int64_t j = 0; j < cols; ++j)
-              r(i,j) = fn(a.eigen()(i,j), b.eigen()(i,j)) ? 1.0 : 0.0;
+              r(i,j) = fn(aScalar ? a.scalar() : a.eigen()(i,j),
+                          bScalar ? b.scalar() : b.eigen()(i,j)) ? 1.0 : 0.0;
           return MatVal(r);
         };
         if (op == ">")  return cmpOp([](double x, double y){ return x > y; });
@@ -2284,16 +2288,30 @@ MatEvalFn compileAstMatrix(const NodePtr& node) {
         return [argFns, name](const std::vector<MatVal>& inputs) {
           MatVal m = argFns[0](inputs);
           const auto& e = m.eigen();
-          Eigen::MatrixXd r(e.rows(), e.cols());
           if (name == "POW") {
             MatVal exp = argFns[1](inputs);
-            for (int64_t i = 0; i < e.rows(); ++i)
-              for (int64_t j = 0; j < e.cols(); ++j)
-                r(i,j) = jsPow(e(i,j), exp.isScalar() ? exp.scalar() : exp.eigen()(i,j));
-          } else if (name == "ROUND") {
+            // The exponent must be scalar (broadcast) or match the base shape;
+            // indexing a mismatched exponent per element read past its buffer.
+            int64_t rows, cols;
+            MatVal::broadcastShapes(m, exp, &rows, &cols);
+            const bool mScalar = m.isScalar(), expScalar = exp.isScalar();
+            Eigen::MatrixXd pr(rows, cols);
+            for (int64_t i = 0; i < rows; ++i)
+              for (int64_t j = 0; j < cols; ++j)
+                pr(i,j) = jsPow(mScalar ? m.scalar() : e(i,j),
+                                expScalar ? exp.scalar() : exp.eigen()(i,j));
+            return MatVal(pr);
+          }
+          Eigen::MatrixXd r(e.rows(), e.cols());
+          if (name == "ROUND") {
             double f = 1.0;
             if (argFns.size() > 1) {
               MatVal d = argFns[1](inputs);
+              // Digits must be scalar: a matrix argument silently used element (0,0)
+              // (and read (0,0) of an empty matrix). Refuse like other shape errors.
+              if (!d.isScalar())
+                throw ShapeError("ROUND requires scalar digits, got " +
+                                 std::to_string(d.rows()) + "×" + std::to_string(d.cols()));
               f = jsPow(10.0, d.scalar());  // exponent as-is, matching the TS reference
             }
             for (int64_t i = 0; i < e.rows(); ++i)
@@ -2326,13 +2344,23 @@ MatEvalFn compileAstMatrix(const NodePtr& node) {
           MatVal c = condFn(inputs);
           MatVal t = trueFn(inputs);
           MatVal f = falseFn(inputs);
-          int64_t rows = c.rows(), cols = c.cols();
+          // Result shape is the broadcast of condition AND both branches: a scalar
+          // condition must not truncate matrix branches to 1×1, and a non-scalar
+          // condition must match the branches it indexes.
+          int64_t rows, cols;
+          if (c.isScalar()) {
+            MatVal::broadcastShapes(t, f, &rows, &cols);
+          } else {
+            MatVal::broadcastShapes(c, t, &rows, &cols);
+            MatVal::broadcastShapes(c, f, &rows, &cols);
+          }
+          const bool cScalar = c.isScalar(), tScalar = t.isScalar(), fScalar = f.isScalar();
           Eigen::MatrixXd r(rows, cols);
           for (int64_t i = 0; i < rows; ++i)
             for (int64_t j = 0; j < cols; ++j) {
-              double cv = c.eigen()(i,j);
-              double tv = t.isScalar() ? t.scalar() : t.eigen()(i,j);
-              double fv = f.isScalar() ? f.scalar() : f.eigen()(i,j);
+              double cv = cScalar ? c.scalar() : c.eigen()(i,j);
+              double tv = tScalar ? t.scalar() : t.eigen()(i,j);
+              double fv = fScalar ? f.scalar() : f.eigen()(i,j);
               r(i,j) = cv != 0.0 ? tv : fv;
             }
           return MatVal(r);

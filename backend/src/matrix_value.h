@@ -70,7 +70,7 @@ class MatVal {
   /** Build from a column vector (std::vector<double>). Result is N×1. */
   static MatVal fromColumn(const std::vector<double>& v);
 
-  /** Build from a flat row-major array with given shape. */
+  /** Build from a flat column-major array with given shape. */
   static MatVal fromFlat(const double* data, int64_t rows, int64_t cols);
 
   /** Extract as column-major std::vector<double> (for result storage). */

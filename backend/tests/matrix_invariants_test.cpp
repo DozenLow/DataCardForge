@@ -23,6 +23,7 @@
 #include <random>
 #include <vector>
 
+#include "expression.h"
 #include "matrix_value.h"
 
 namespace {
@@ -190,6 +191,104 @@ void runContracts() {
                [&] { dc::MatVal::inverse(mv(singular, 2, 2)); });
 }
 
+// ── matrix-mode expression contracts ───────────────────────────────────
+// The gates above call MatVal directly and cannot see the expression layer:
+// compileAstMatrix indexes operands itself, and a broadcast bug there (a scalar read
+// at (i,j), a result shape taken from only one operand) is invisible to every
+// direct-call gate. These cases pin the shape/broadcast contract of evaluateMatrix.
+
+// Exact-value gate: every case below is a 0/1 mask, an integer power or a picked branch
+// element, so bit equality is the right bound. Shape is part of the contract — a
+// truncated 1×1 result must fail even when its single element matches the expected
+// prefix, which a common-prefix comparison like relMaxDiff would silently accept.
+void expectMatrix(const char* name, const char* expr, const std::vector<std::string>& vars,
+                  const std::vector<dc::MatVal>& inputs, int64_t wantRows, int64_t wantCols,
+                  const std::vector<double>& want) {
+  ++checks;
+  int64_t rows = -1, cols = -1;
+  try {
+    const std::vector<double> got =
+        dc::ExprEngine::evaluateMatrix(expr, vars, inputs, &rows, &cols);
+    const bool ok = rows == wantRows && cols == wantCols && got == want;
+    if (!ok) ++failures;
+    std::printf("%-4s %-46s %lld×%lld\n", ok ? "ok" : "FAIL", name,
+                static_cast<long long>(rows), static_cast<long long>(cols));
+  } catch (const std::exception& e) {
+    ++failures;
+    std::printf("%-4s %-46s threw: %s\n", "FAIL", name, e.what());
+  }
+}
+
+void runMatrixModeContracts() {
+  const std::vector<double> a23 = {1, 2, 3, 4, 5, 6};  // column-major 2×3: [[1,3,5],[2,4,6]]
+  const std::vector<double> b32 = {1, 2, 3, 4, 5, 6};  // column-major 3×2
+  const std::vector<double> p22 = {1, 3, 2, 4};        // column-major 2×2: [[1,2],[3,4]]
+  const std::vector<double> e22 = {2, 0, 1, 3};        // column-major 2×2: [[2,1],[0,3]]
+  const dc::MatVal mA = mv(a23, 2, 3);
+  const dc::MatVal mB = mv(b32, 3, 2);
+  const dc::MatVal mP = mv(p22, 2, 2);
+  const dc::MatVal mE = mv(e22, 2, 2);
+
+  // A scalar comparison operand broadcasts; reading the raw 1×1 at (i,j) was an overread.
+  expectMatrix("comparison scalar rhs broadcasts", "A > 3", {"A"}, {mA}, 2, 3,
+               {0, 0, 0, 1, 1, 1});
+  expectMatrix("comparison scalar lhs broadcasts", "3 < A", {"A"}, {mA}, 2, 3,
+               {0, 0, 0, 1, 1, 1});
+  expectThrows("comparison incompatible shapes refused", [&] {
+    int64_t r = 0, c = 0;
+    (void)dc::ExprEngine::evaluateMatrix("A > B", {"A", "B"}, {mA, mB}, &r, &c);
+  });
+
+  // The exponent must be scalar (broadcast) or match the base shape.
+  expectMatrix("POW scalar exponent broadcasts", "POW(A, 2)", {"A"}, {mP}, 2, 2,
+               {1, 9, 4, 16});
+  expectMatrix("POW same-shape exponent element-wise", "POW(A, B)", {"A", "B"}, {mP, mE},
+               2, 2, {1, 1, 2, 64});
+  expectMatrix("POW scalar base over matrix exponent", "POW(2, A)", {"A"}, {mE}, 2, 2,
+               {4, 1, 2, 8});
+  expectThrows("POW mismatched exponent shape refused", [&] {
+    int64_t r = 0, c = 0;
+    (void)dc::ExprEngine::evaluateMatrix("POW(A, B)", {"A", "B"}, {mP, mB}, &r, &c);
+  });
+
+  // Digits must be scalar; a matrix argument used to silently take element (0,0).
+  const std::vector<double> r22 = {1.234, 9.012, 5.678, 3.456};  // 2×2
+  const dc::MatVal mR = mv(r22, 2, 2);
+  expectMatrix("ROUND scalar digits", "ROUND(A, 1)", {"A"}, {mR}, 2, 2,
+               {1.2, 9.0, 5.7, 3.5});
+  expectThrows("ROUND matrix digits refused", [&] {
+    int64_t r = 0, c = 0;
+    (void)dc::ExprEngine::evaluateMatrix("ROUND(A, B)", {"A", "B"}, {mR, mP}, &r, &c);
+  });
+  expectThrows("ROUND empty digits refused", [&] {
+    int64_t r = 0, c = 0;
+    (void)dc::ExprEngine::evaluateMatrix("ROUND(A, B)", {"A", "B"}, {mR, dc::MatVal(0, 0)},
+                                         &r, &c);
+  });
+
+  // Result shape is the broadcast of condition AND both branches.
+  const std::vector<double> f23 = {10, 20, 30, 40, 50, 60};  // 2×3
+  const std::vector<double> c22 = {1, 0, 0, 1};              // 2×2 diagonal mask
+  const dc::MatVal mF = mv(f23, 2, 3);
+  const dc::MatVal mC = mv(c22, 2, 2);
+  expectMatrix("IF scalar condition keeps branch shape", "IF(1, T, F)", {"T", "F"}, {mA, mF},
+               2, 3, a23);
+  expectMatrix("IF scalar false condition keeps branch shape", "IF(0, T, F)", {"T", "F"},
+               {mA, mF}, 2, 3, f23);
+  expectMatrix("IF scalar condition with scalar else branch", "IF(1, T, 0)", {"T"}, {mA},
+               2, 3, a23);
+  expectMatrix("IF matrix condition with scalar branches", "IF(C, 10, 20)", {"C"}, {mC},
+               2, 2, {10, 20, 20, 10});
+  expectThrows("IF incompatible branch shapes refused", [&] {
+    int64_t r = 0, c = 0;
+    (void)dc::ExprEngine::evaluateMatrix("IF(1, T, F)", {"T", "F"}, {mA, mB}, &r, &c);
+  });
+  expectThrows("IF condition shape mismatch refused", [&] {
+    int64_t r = 0, c = 0;
+    (void)dc::ExprEngine::evaluateMatrix("IF(C, T, F)", {"C", "T", "F"}, {mC, mA, mF}, &r, &c);
+  });
+}
+
 }  // namespace
 
 int main() {
@@ -199,6 +298,8 @@ int main() {
   for (int64_t n : {4, 8, 12}) runDeterminantProducts(n);
   std::printf("\n");
   runContracts();
+  std::printf("\n");
+  runMatrixModeContracts();
   std::printf("\n%d checks, %d failed\n", checks, failures);
   return failures == 0 ? 0 : 1;
 }
