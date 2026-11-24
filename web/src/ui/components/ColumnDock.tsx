@@ -227,18 +227,34 @@ export function ColumnDock({ card, open, onToggle, onScroll }: ColumnDockProps) 
     portIds.length === 0 ? (
       <span className="side-panel__rail-empty">—</span>
     ) : (
-      card.config.sources.map((source) => (
-        <button
-          type="button"
-          className="rail-port"
-          key={portIdOfColumn(source.matrixId, source.columnIndex)}
-          ref={portRefFor(portIdOfColumn(source.matrixId, source.columnIndex), 'left')}
-          title={source.label}
-          onClick={() => onToggle(true)}
-        >
-          {source.label}
-        </button>
-      ))
+      <>
+        {card.config.sources.map((source) => (
+          <button
+            type="button"
+            className="rail-port"
+            key={portIdOfColumn(source.matrixId, source.columnIndex)}
+            ref={portRefFor(portIdOfColumn(source.matrixId, source.columnIndex), 'left')}
+            title={source.label}
+            onClick={() => onToggle(true)}
+          >
+            {source.label}
+          </button>
+        ))}
+        {card.config.xAxisSource ? (
+          // `portIds` names CHART_PORT_X too, so the folded rail must keep its anchor
+          // registered — otherwise the explicit X-axis wire falls back to the card edge.
+          <button
+            type="button"
+            className="rail-port"
+            key={CHART_PORT_X}
+            ref={portRefFor(CHART_PORT_X, 'left')}
+            title={t('chart.xAxisPort')}
+            onClick={() => onToggle(true)}
+          >
+            {t('chart.xAxisPort')}
+          </button>
+        ) : null}
+      </>
     );
 
   return (

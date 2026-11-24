@@ -17,6 +17,7 @@ import {
 } from '../src/charts/chartOptions.ts';
 import { defaultChartConfig, resolveSeries, isDrawable } from '../src/charts/chartModel.ts';
 import type { ChartSource } from '../src/charts/chartModel.ts';
+import { pngToPdf } from '../src/charts/pdf.ts';
 import { CHART_TYPES, minimumColumns, type ChartTypeId } from '../src/charts/chartTypes.ts';
 import { DEFAULT_SMOOTHING } from '../src/core/Smoothing.ts';
 import {
@@ -546,5 +547,151 @@ describe('computeBounds', () => {
     const yAxis = option.yAxis as { type: string; min?: number };
     expect(yAxis.type).toBe('log');
     expect(yAxis.min).toBeUndefined();
+  });
+});
+
+// ── PDF export: the PNG colour type must survive the raster → PDF split (#14) ────────────
+//
+// decodePng admits 8-bit truecolour (type 2, RGB) AND truecolour+alpha (type 6, RGBA), but
+// pngToPdf used to unfilter/split every PNG with a hard-coded 4-channel stride — a type-2
+// PNG was read with the wrong stride and embedded scrambled. These cases build minimal PNGs
+// byte by byte and assert the embedded samples match the input exactly.
+
+/** CRC-32 as PNG chunk checksums use it (reflected polynomial 0xEDB88320). */
+function crc32(bytes: Uint8Array): number {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; ++bit) {
+      crc = (crc >>> 1) ^ (0xedb88320 & -(crc & 1));
+    }
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+/** One PNG chunk: length + type + data + CRC. */
+function pngChunk(type: string, data: Uint8Array): Uint8Array {
+  const out = new Uint8Array(12 + data.length);
+  const view = new DataView(out.buffer);
+  view.setUint32(0, data.length);
+  for (let i = 0; i < 4; ++i) out[4 + i] = type.charCodeAt(i);
+  out.set(data, 8);
+  view.setUint32(8 + data.length, crc32(out.subarray(4, 8 + data.length)));
+  return out;
+}
+
+/** zlib wrap/unwrap — the same formats pdf.ts's own deflate/inflate use. */
+async function zlibDeflate(bytes: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new CompressionStream('deflate'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+async function zlibInflate(bytes: Uint8Array): Promise<Uint8Array> {
+  const stream = new Blob([bytes as BlobPart]).stream().pipeThrough(new DecompressionStream('deflate'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+/** Minimal non-interlaced 8-bit PNG: signature + IHDR + one filter-0 IDAT + IEND. */
+async function makePng(
+  width: number,
+  height: number,
+  colourType: 2 | 6,
+  pixels: Uint8Array,
+): Promise<Uint8Array> {
+  const stride = width * (colourType === 2 ? 3 : 4);
+  const raw = new Uint8Array((stride + 1) * height);
+  for (let y = 0; y < height; ++y) {
+    // The filter byte stays 0 (None); the row's samples follow it verbatim.
+    raw.set(pixels.subarray(y * stride, (y + 1) * stride), y * (stride + 1) + 1);
+  }
+  const ihdr = new Uint8Array(13);
+  const header = new DataView(ihdr.buffer);
+  header.setUint32(0, width);
+  header.setUint32(4, height);
+  ihdr[8] = 8; // bit depth
+  ihdr[9] = colourType;
+  const parts = [
+    Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    pngChunk('IHDR', ihdr),
+    pngChunk('IDAT', await zlibDeflate(raw)),
+    pngChunk('IEND', new Uint8Array(0)),
+  ];
+  const png = new Uint8Array(parts.reduce((sum, part) => sum + part.length, 0));
+  let cursor = 0;
+  for (const part of parts) {
+    png.set(part, cursor);
+    cursor += part.length;
+  }
+  return png;
+}
+
+/** Latin-1 view of a PDF — one byte per char, so text offsets ARE byte offsets. */
+function latin1(bytes: Uint8Array): string {
+  let out = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    out += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return out;
+}
+
+/** The embedded image XObject of a colour space: its dictionary and inflated samples. */
+async function pdfImage(
+  pdf: Uint8Array,
+  colorSpace: 'DeviceRGB' | 'DeviceGray',
+): Promise<{ dict: string; samples: Uint8Array }> {
+  const text = latin1(pdf);
+  const marker = '<< /Type /XObject /Subtype /Image';
+  let from = 0;
+  for (;;) {
+    const dictStart = text.indexOf(marker, from);
+    expect(dictStart, `no /${colorSpace} image in the PDF`).toBeGreaterThan(-1);
+    const dictEnd = text.indexOf('>>', dictStart);
+    const dict = text.slice(dictStart, dictEnd + 2);
+    if (dict.includes(`/ColorSpace /${colorSpace}`)) {
+      const length = Number(/\/Length (\d+)/.exec(dict)![1]);
+      const streamStart = text.indexOf('stream\n', dictEnd) + 'stream\n'.length;
+      const samples = await zlibInflate(pdf.subarray(streamStart, streamStart + length));
+      return { dict, samples };
+    }
+    from = dictEnd + 2;
+  }
+}
+
+describe('pngToPdf', () => {
+  it('embeds an 8-bit RGB PNG (colour type 2) without scrambling its channels', async () => {
+    // 3×2 pixels, every sample distinct: a wrong stride shifts samples across rows and
+    // channels, so byte-for-byte equality is the anti-scramble assertion.
+    const pixels = Uint8Array.from({ length: 18 }, (_, i) => 10 + i * 7);
+    const png = await makePng(3, 2, 2, pixels);
+    const pdf = await pngToPdf(png, { pageWidth: 200, pageHeight: 150, margin: 10 });
+
+    expect(latin1(pdf)).toContain('/MediaBox [0 0 200.00 150.00]');
+    const image = await pdfImage(pdf, 'DeviceRGB');
+    expect(image.dict).toContain('/Width 3 /Height 2');
+    // RGB carries no alpha: no soft mask may be invented for it.
+    expect(image.dict).not.toContain('/SMask');
+    expect(image.samples).toEqual(pixels);
+  });
+
+  it('keeps RGBA (colour type 6) samples and transparency in an SMask', async () => {
+    const pixels = Uint8Array.from([
+      10, 20, 30, 255,
+      40, 50, 60, 128,
+      70, 80, 90, 255,
+      100, 110, 120, 0,
+    ]);
+    const png = await makePng(2, 2, 6, pixels);
+    const pdf = await pngToPdf(png);
+
+    const image = await pdfImage(pdf, 'DeviceRGB');
+    expect(image.dict).toContain('/Width 2 /Height 2');
+    expect(image.dict).toContain('/SMask');
+    expect(image.samples).toEqual(
+      Uint8Array.from([10, 20, 30, 40, 50, 60, 70, 80, 90, 100, 110, 120]),
+    );
+
+    const mask = await pdfImage(pdf, 'DeviceGray');
+    expect(mask.dict).toContain('/Width 2 /Height 2');
+    expect(mask.samples).toEqual(Uint8Array.from([255, 128, 255, 0]));
   });
 });

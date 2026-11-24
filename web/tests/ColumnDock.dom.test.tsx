@@ -553,3 +553,83 @@ describe('chart input ports', () => {
     expect(portAnchor(chartId, chartPortId(matrixId, 0))).toBeNull();
   });
 });
+
+// ── the folded rail keeps the X-axis port registered (#15) ───────────────────────────────
+//
+// `portIds` names CHART_PORT_X when an explicit X axis is set, but the folded rail used to
+// map only `config.sources` to chips — so the X-axis wire had no registered anchor and fell
+// back to the card edge. The rail must offer one chip per port id, X included.
+
+describe('folded rail X-axis port', () => {
+  it('registers CHART_PORT_X on a rail chip when the dock is folded', async () => {
+    const { matrixId, chartId } = setupScene();
+    store().setChartConfig(chartId, {
+      xAxisSource: { matrixId, columnIndex: 1, label: 'Pos.2 sensor 1', raw: [1, 2, 3, 4, 5] },
+    });
+    const host = await mount(chartOf(chartId), false);
+
+    const t = translatorFor(store().locale);
+    const chips = [...host.querySelectorAll<HTMLElement>('.rail-port')];
+    // One chip per registered port: the plotted column AND the explicit X axis.
+    expect(chips).toHaveLength(2);
+    const xChip = chips.find((chip) => chip.title === t('chart.xAxisPort'));
+    expect(xChip).toBeDefined();
+    stubRect(cardRoot(host), { left: 100, top: 100, width: 640, height: 480 });
+    stubRect(xChip!, { left: 102, top: 240, width: 26, height: 40 });
+    expect(portAnchor(chartId, CHART_PORT_X)).toEqual({ x: 102, y: 260, side: 'left' });
+
+    // The source chip keeps its own anchor beside it — the X chip adds, never replaces.
+    const srcChip = chips.find((chip) => chip.title === 'Pos.1 sensor 0')!;
+    stubRect(srcChip, { left: 102, top: 150, width: 26, height: 80 });
+    expect(portAnchor(chartId, chartPortId(matrixId, 0))).toEqual({ x: 102, y: 190, side: 'left' });
+  });
+
+  it('hands the X anchor to the expanded badge on unfold and drops it on unmount', async () => {
+    const { matrixId, chartId } = setupScene();
+    store().setChartConfig(chartId, {
+      xAxisSource: { matrixId, columnIndex: 1, label: 'Pos.2 sensor 1', raw: [1, 2, 3, 4, 5] },
+    });
+
+    // One root re-rendered across the fold, so the ref detach/attach order is the real one
+    // (a remount would leave the folded root registered beside the expanded one).
+    const host = document.createElement('div');
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    roots.push(root);
+    const render = async (open: boolean) => {
+      await act(async () => {
+        root.render(
+          <StrictMode>
+            <ColumnDock card={chartOf(chartId)} open={open} onToggle={() => {}} />
+          </StrictMode>,
+        );
+      });
+    };
+
+    await render(false);
+    const t = translatorFor(store().locale);
+    const xChip = [...host.querySelectorAll<HTMLElement>('.rail-port')].find(
+      (chip) => chip.title === t('chart.xAxisPort'),
+    )!;
+    expect(xChip).toBeDefined();
+    stubRect(cardRoot(host), { left: 100, top: 100, width: 640, height: 480 });
+    stubRect(xChip, { left: 102, top: 240, width: 26, height: 40 });
+    expect(portAnchor(chartId, CHART_PORT_X)).toEqual({ x: 102, y: 260, side: 'left' });
+
+    // Unfold: the rail chip unmounts and its registration goes with it; the expanded row's
+    // X badge takes over the same port id.
+    await render(true);
+    expect(host.querySelector('.rail-port')).toBeNull();
+    const xBadge = host.querySelector<HTMLElement>('.chart-card__dock-x')!;
+    expect(xBadge).not.toBeNull();
+    stubRect(xBadge, { left: 210, top: 300, width: 20, height: 14 });
+    expect(portAnchor(chartId, CHART_PORT_X)).toEqual({ x: 210, y: 307, side: 'left' });
+
+    // Unmount: no element registers the port any more.
+    await act(async () => {
+      root.unmount();
+    });
+    roots.splice(roots.indexOf(root), 1);
+    expect(portAnchor(chartId, CHART_PORT_X)).toBeNull();
+  });
+});

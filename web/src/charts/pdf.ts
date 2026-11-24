@@ -30,10 +30,8 @@ interface DecodedPng {
   height: number;
   /** Raw concatenated IDAT payload (still zlib-compressed). */
   idat: Uint8Array;
-  /** Raw RGB samples when the PNG was colour type 2. */
-  rgb?: Uint8Array;
-  /** Raw RGBA samples when the PNG was colour type 6. */
-  rgba?: Uint8Array;
+  /** Samples per pixel: 3 for colour type 2 (RGB), 4 for colour type 6 (RGBA). */
+  channels: number;
 }
 
 /**
@@ -96,7 +94,10 @@ function decodePng(bytes: Uint8Array): DecodedPng {
     cursor += part.length;
   }
 
-  return { width, height, idat };
+  // Colour type 2 is RGB (3 samples/pixel); type 6 is RGBA (4). The stride used to
+  // unfilter and split MUST match, or every row after the first misaligns.
+  const channels = colourType === 2 ? 3 : 4;
+  return { width, height, idat, channels };
 }
 
 /**
@@ -276,9 +277,17 @@ export async function pngToPdf(
   const pixels = decoded.width * decoded.height;
 
   const raw = await inflate(decoded.idat);
-  const channels = 4; // canvas PNGs are RGBA; the decoder above guarantees it
-  const pixelsData = unfilter(raw, decoded.width, decoded.height, channels);
-  const { rgb, alpha } = splitRgba(pixelsData, pixels);
+  const pixelsData = unfilter(raw, decoded.width, decoded.height, decoded.channels);
+  let rgb: Uint8Array;
+  let alpha: Uint8Array;
+  if (decoded.channels === 4) {
+    ({ rgb, alpha } = splitRgba(pixelsData, pixels));
+  } else {
+    // Colour type 2 (RGB) carries no alpha samples: the image is fully opaque, and the
+    // unfiltered data already IS the RGB plane the PDF wants.
+    rgb = pixelsData;
+    alpha = new Uint8Array(pixels).fill(255);
+  }
   rgbStream = await deflate(rgb);
 
   // Only add a soft mask when the image actually has transparent pixels.
