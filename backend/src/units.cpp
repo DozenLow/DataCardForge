@@ -246,16 +246,51 @@ bool isAsciiDigit(char ch) {
 }
 
 bool isSpaceChar(char ch) {
-  // JS `\s` plus trim(): space, tab, LF, CR, VT, FF, NBSP. Enough for header text; the
-  // resolver never trims anything else.
+  // The single-byte members of JS `\s` plus trim(): space, tab, LF, CR, VT, FF. NBSP is
+  // multi-byte in UTF-8 and is handled code-point-aware at the trim boundaries below.
+  // Enough for header text; the resolver never trims anything else.
   return ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r' || ch == '\v' || ch == '\f';
 }
 
-std::string trimAscii(const std::string& s) {
+// U+00A0 (UTF-8 0xC2 0xA0). JS String.trim() removes it, so a boundary NBSP must not keep
+// the C++ resolver from seeing the same suffix the TS side sees.
+bool isNbspAt(const std::string& s, size_t i) {
+  return i + 1 < s.size() && static_cast<unsigned char>(s[i]) == 0xC2 &&
+         static_cast<unsigned char>(s[i + 1]) == 0xA0;
+}
+
+// Byte length of the leading whitespace run — the same boundary rule trimAscii applies,
+// exposed so resolveUnit can shift its spans back into the original annotation's offsets.
+size_t leadingTrimBytes(const std::string& s) {
   size_t begin = 0;
+  while (begin < s.size()) {
+    if (isSpaceChar(s[begin])) {
+      ++begin;
+      continue;
+    }
+    if (isNbspAt(s, begin)) {
+      begin += 2;
+      continue;
+    }
+    break;
+  }
+  return begin;
+}
+
+std::string trimAscii(const std::string& s) {
+  const size_t begin = leadingTrimBytes(s);
   size_t end = s.size();
-  while (begin < end && isSpaceChar(s[begin])) ++begin;
-  while (end > begin && isSpaceChar(s[end - 1])) --end;
+  while (end > begin) {
+    if (isSpaceChar(s[end - 1])) {
+      --end;
+      continue;
+    }
+    if (end - begin >= 2 && isNbspAt(s, end - 2)) {
+      end -= 2;
+      continue;
+    }
+    break;
+  }
   return s.substr(begin, end - begin);
 }
 
@@ -496,7 +531,14 @@ UnitResolution resolveUnit(const std::string& annotation) {
   const std::string text = trimAscii(annotation);
   if (text.empty()) return makeUnknown("", nullptr);
 
-  for (const Suffix& suffix : suffixes(text)) {
+  // Suffix spans are measured on the TRIMMED text, but rewriteUnitAnnotation splices the
+  // ORIGINAL annotation — shift them back by the leading trim so the offsets line up and
+  // the leading whitespace survives the rewrite instead of being swallowed.
+  const size_t lead = leadingTrimBytes(annotation);
+  for (const Suffix& trimmed : suffixes(text)) {
+    Suffix suffix = trimmed;
+    suffix.start += lead;
+    suffix.end += lead;
     const std::string token = normalizeUnitToken(suffix.token);
     if (token.empty() || isNumericToken(token) || stopTokens().count(foldAscii(token)) != 0) {
       continue;

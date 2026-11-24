@@ -363,6 +363,40 @@ void runRewriteChecks() {
   check(rewriteUnitAnnotation("length", none, "m") == "length_m", "rewrite: append when no span");
 }
 
+// ── Whitespace regressions: span offset (#5) and NBSP trim (#6) ─────────────────────────
+
+void runWhitespaceRegressions() {
+  // The span is measured on the trimmed text but must splice the ORIGINAL annotation:
+  // leading whitespace shifts the offset, and the rewrite must preserve the spaces.
+  const UnitResolution lead = resolveUnit(" pressure (kPa)");
+  check(lead.state == UnitState::Recognized && lead.unit == "kPa",
+        "span offset: leading-space bracket annotation resolves kPa");
+  check(rewriteUnitAnnotation(" pressure (kPa)", lead, "MPa") == " pressure (MPa)",
+        "span offset: leading-space bracket rewrite keeps the spaces");
+  const UnitResolution leadSuffix = resolveUnit("  pressure_kpa");
+  check(rewriteUnitAnnotation("  pressure_kpa", leadSuffix, "bar") == "  pressure_bar",
+        "span offset: leading-space underscore rewrite keeps the spaces");
+  const UnitResolution trail = resolveUnit("pressure_kpa ");
+  check(rewriteUnitAnnotation("pressure_kpa ", trail, "bar") == "pressure_bar ",
+        "span offset: trailing space survives the rewrite");
+
+  // U+00A0 is whitespace to JS String.trim(); the C++ boundary trim must agree, or the TS
+  // side resolves a unit the C++ side calls unknown.
+  const std::string nbsp = "\u00a0";
+  const UnitResolution trailing = resolveUnit("temp (kPa)" + nbsp);
+  check(trailing.state == UnitState::Recognized && trailing.unit == "kPa",
+        "nbsp: trailing-NBSP annotation resolves kPa");
+  check(rewriteUnitAnnotation("temp (kPa)" + nbsp, trailing, "MPa") == "temp (MPa)" + nbsp,
+        "nbsp: trailing NBSP survives the rewrite");
+  const UnitResolution leading = resolveUnit(nbsp + "temp_kpa");
+  check(leading.state == UnitState::Recognized && leading.unit == "kPa",
+        "nbsp: leading-NBSP annotation resolves kPa");
+  check(rewriteUnitAnnotation(nbsp + "temp_kpa", leading, "bar") == nbsp + "temp_bar",
+        "nbsp: leading-NBSP rewrite keeps the offset");
+  check(normalizeUnitToken(nbsp + "kPa" + nbsp) == "kPa",
+        "nbsp: normalizeUnitToken trims NBSP like TS normalizeToken");
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
@@ -372,6 +406,7 @@ int main(int argc, char** argv) {
   runFactorChecks();
   runConversionChecks();
   runRewriteChecks();
+  runWhitespaceRegressions();
 
   if (g_failures != 0) {
     std::printf("FAILED: %d check(s)\n", g_failures);
