@@ -168,8 +168,13 @@ class NodeRegistry {
   CreateResult createV2(const std::string& signatureId, const std::vector<PortBinding>& inputs,
                         const Json& params);
 
+  // `params` (optional) is committed atomically with `inputs`: it is applied only after every
+  // new edge passes the cycle check, under the same lock and with the SAME single
+  // definitionVersion bump. A refused update (cycle) therefore leaves params untouched — the
+  // PATCH route relies on this so a 409 never half-applies a {params, inputs} edit.
   bool update(int64_t nodeId, const std::string* formula,
-              const std::vector<PortBinding>* inputs, std::vector<int64_t>* cycleOut);
+              const std::vector<PortBinding>* inputs, std::vector<int64_t>* cycleOut,
+              const Json* params = nullptr);
 
   // Replace the parameter bag (v2). Marks the node dirty.
   bool updateParams(int64_t nodeId, const Json& params);

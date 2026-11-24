@@ -769,6 +769,72 @@ int main() {
     CHECK(again.column(1).data[0] == joinMatrix.column(1).data[0]);
   }
 
+  // ── Regression (#3): a {params, inputs} update that forms a cycle is refused ATOMICALLY.
+  // The PATCH route now commits params inside update() AFTER the cycle gate, so a 409 must
+  // leave the parameter bag AND definitionVersion exactly as they were (the old route called
+  // updateParams first, half-applying the edit even when update() then refused the cycle).
+  {
+    Column rc;
+    rc.posName = "Pos.1";
+    rc.data = {1, 2, 3};
+    const int64_t rm = store.insert(Matrix({rc}));
+
+    PortBinding ra;
+    ra.varName = "a";
+    ra.mode = "cell";
+    ra.sourceMatrixId = rm;
+    const auto nodeA = nodes.create({ra}, "a * 2");
+    CHECK(nodeA.nodeId > 0);
+
+    PortBinding rb;
+    rb.varName = "x";
+    rb.mode = "cell";
+    rb.sourceNodeId = nodeA.nodeId;  // B depends on A
+    const auto nodeB = nodes.create({rb}, "x + 1");
+    CHECK(nodeB.nodeId > 0);
+    nodes.recomputeSubtree(nodeA.nodeId);
+
+    // A known params bag + a recorded version to compare against after the refused update.
+    Json aParams = Json::object();
+    aParams.set("marker", Json(std::string("original")));
+    CHECK(nodes.updateParams(nodeA.nodeId, aParams));
+    const auto before = nodes.get(nodeA.nodeId);
+    CHECK(before.has_value());
+    const uint64_t versionBefore = before ? before->definitionVersion : 0;
+
+    // Make A depend on B (A -> B -> A closes a loop) while ALSO sending a new params bag.
+    PortBinding cyc;
+    cyc.varName = "y";
+    cyc.mode = "cell";
+    cyc.sourceNodeId = nodeB.nodeId;
+    std::vector<PortBinding> cycInputs{cyc};
+    Json newParams = Json::object();
+    newParams.set("marker", Json(std::string("mutated")));
+    std::vector<int64_t> cycPath;
+    const bool refused = nodes.update(nodeA.nodeId, nullptr, &cycInputs, &cycPath, &newParams);
+    CHECK(!refused && !cycPath.empty());
+    const auto after = nodes.get(nodeA.nodeId);
+    CHECK(after.has_value());
+    CHECK(after && after->params["marker"].asString() == "original");  // params untouched
+    CHECK(after && after->definitionVersion == versionBefore);         // version untouched
+    // …and the previous binding is intact (still reads the matrix, not B).
+    CHECK(after && after->inputs.size() == 1 && after->inputs[0].sourceMatrixId == rm);
+
+    // The accepted path still commits params + inputs together with a SINGLE version bump.
+    PortBinding okBind;
+    okBind.varName = "a";
+    okBind.mode = "cell";
+    okBind.sourceMatrixId = rm;
+    std::vector<PortBinding> okInputs{okBind};
+    Json okParams = Json::object();
+    okParams.set("marker", Json(std::string("accepted")));
+    std::vector<int64_t> okPath;
+    CHECK(nodes.update(nodeA.nodeId, nullptr, &okInputs, &okPath, &okParams));
+    const auto committed = nodes.get(nodeA.nodeId);
+    CHECK(committed && committed->params["marker"].asString() == "accepted");
+    CHECK(committed && committed->definitionVersion == versionBefore + 1);
+  }
+
   std::printf("%s: node_registry (%d failures)\n", failures == 0 ? "PASS" : "FAILED", failures);
   return failures == 0 ? 0 : 1;
 }

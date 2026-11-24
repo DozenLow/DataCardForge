@@ -239,11 +239,23 @@ enum class ReadStatus { Ok, Closed, BadRequest, TooLarge };
 // Reads exactly one HTTP/1.1 request. Never throws: every numeric field goes through
 // from_chars and the whole routine is additionally guarded by a catch-all, because this
 // runs on a detached per-connection thread where an escaping exception kills the process.
-ReadStatus readRequestImpl(socket_t fd, HttpRequest* req, OriginHeader* origin) {
-  std::string buf;
+ReadStatus readRequestImpl(socket_t fd, HttpRequest* req, OriginHeader* origin,
+                           std::string* pending) {
+  // Keep-alive: the HttpRequest is reused across requests on one connection, so every
+  // accumulating field starts empty — request N's query string must not leak into request
+  // N+1 (audit: `?start=…&count=…` then a query-less /result served the wrong window).
+  req->method.clear();
+  req->path.clear();
+  req->query.clear();
+  req->body.clear();
+  // The read buffer belongs to the connection and is carried across requests: bytes already
+  // recv'd past this one (a pipelined next request in the same TCP segment) stay here rather
+  // than being dropped, and recv() runs only when more bytes are actually needed.
+  std::string& buf = *pending;
   char tmp[8192];
-  size_t headerEnd = std::string::npos;
+  size_t headerEnd = buf.find("\r\n\r\n");
   while (headerEnd == std::string::npos) {
+    if (buf.size() > kMaxHeaderBytes) return ReadStatus::BadRequest;
     const int n = recv(fd, tmp, sizeof tmp, 0);
     if (n <= 0) return ReadStatus::Closed;
     buf.append(tmp, static_cast<size_t>(n));
@@ -251,6 +263,7 @@ ReadStatus readRequestImpl(socket_t fd, HttpRequest* req, OriginHeader* origin) 
     if (headerEnd == std::string::npos && buf.size() > kMaxHeaderBytes) return ReadStatus::BadRequest;
   }
   const std::string head = buf.substr(0, headerEnd);
+  buf.erase(0, headerEnd + 4);  // consume the header; buf now holds the body (+ any pipeline)
 
   // Read on every request, not just the ones the router will answer: the CORS decision is
   // made before routing and must not inherit a previous request's value on a keep-alive
@@ -273,49 +286,71 @@ ReadStatus readRequestImpl(socket_t fd, HttpRequest* req, OriginHeader* origin) 
       if (!parseUnsigned(value.substr(0, crlf), &contentLength)) return ReadStatus::BadRequest;
       haveContentLength = true;
     }
-    if (lower.find("\r\ntransfer-encoding:") != std::string::npos &&
-        lower.find("chunked") != std::string::npos)
-      chunked = true;
+  }
+  // Chunked is decided from the Transfer-Encoding header VALUE only. The old test matched the
+  // word "chunked" anywhere in the head, so `X-Foo: chunked` + `Transfer-Encoding: identity`
+  // (or the word in the request line / another header) was mis-framed as a chunked body.
+  {
+    std::string te;
+    if (findRequestHeader(head, "Transfer-Encoding", &te)) {
+      std::transform(te.begin(), te.end(), te.begin(),
+                     [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+      chunked = te.find("chunked") != std::string::npos;
+    }
   }
 
-  std::string body = buf.substr(headerEnd + 4);
+  // buf starts at the body. Consume exactly this request's body and leave any trailing
+  // (pipelined) bytes in buf for the next readRequest call instead of discarding them.
   if (chunked) {
     std::string decoded;
     size_t i = 0;
     for (;;) {
-      size_t eol = body.find("\r\n", i);
+      size_t eol = buf.find("\r\n", i);
       while (eol == std::string::npos) {
         const int n = recv(fd, tmp, sizeof tmp, 0);
         if (n <= 0) return ReadStatus::Closed;
-        body.append(tmp, static_cast<size_t>(n));
-        if (body.size() > kMaxBodyBytes + kMaxHeaderBytes) return ReadStatus::TooLarge;
-        eol = body.find("\r\n", i);
+        buf.append(tmp, static_cast<size_t>(n));
+        if (buf.size() > kMaxBodyBytes + kMaxHeaderBytes) return ReadStatus::TooLarge;
+        eol = buf.find("\r\n", i);
       }
       size_t size = 0;
-      if (!parseHexSize(std::string_view(body).substr(i, eol - i), &size)) return ReadStatus::BadRequest;
-      if (size == 0) break;
+      if (!parseHexSize(std::string_view(buf).substr(i, eol - i), &size)) return ReadStatus::BadRequest;
+      if (size == 0) {
+        // Consume the terminating chunk's CRLF plus the final blank line (any trailers ride
+        // along) so a pipelined next request is not desynced by leftover chunk framing.
+        size_t termEnd = buf.find("\r\n\r\n", i);
+        while (termEnd == std::string::npos) {
+          const int n = recv(fd, tmp, sizeof tmp, 0);
+          if (n <= 0) return ReadStatus::Closed;
+          buf.append(tmp, static_cast<size_t>(n));
+          if (buf.size() > kMaxBodyBytes + kMaxHeaderBytes) return ReadStatus::TooLarge;
+          termEnd = buf.find("\r\n\r\n", i);
+        }
+        i = termEnd + 4;
+        break;
+      }
       if (size > kMaxBodyBytes) return ReadStatus::TooLarge;
-      while (body.size() < eol + 2 + size + 2) {
+      while (buf.size() < eol + 2 + size + 2) {
         const int n = recv(fd, tmp, sizeof tmp, 0);
         if (n <= 0) return ReadStatus::Closed;
-        body.append(tmp, static_cast<size_t>(n));
-        if (body.size() > kMaxBodyBytes + kMaxHeaderBytes) return ReadStatus::TooLarge;
+        buf.append(tmp, static_cast<size_t>(n));
+        if (buf.size() > kMaxBodyBytes + kMaxHeaderBytes) return ReadStatus::TooLarge;
       }
       if (decoded.size() + size > kMaxBodyBytes) return ReadStatus::TooLarge;
-      decoded.append(body, eol + 2, size);
+      decoded.append(buf, eol + 2, size);
       i = eol + 2 + size + 2;
     }
-    body = std::move(decoded);
+    buf.erase(0, i);
+    req->body = std::move(decoded);
   } else {
     if (haveContentLength && contentLength > kMaxBodyBytes) return ReadStatus::TooLarge;
-    while (body.size() < contentLength) {
+    while (buf.size() < contentLength) {
       const int n = recv(fd, tmp, sizeof tmp, 0);
       if (n <= 0) return ReadStatus::Closed;
-      body.append(tmp, static_cast<size_t>(n));
-      if (body.size() > contentLength) break;
+      buf.append(tmp, static_cast<size_t>(n));
     }
-    if (body.size() < contentLength) return ReadStatus::Closed;
-    body.resize(contentLength);
+    req->body = buf.substr(0, contentLength);
+    buf.erase(0, contentLength);
   }
 
   const size_t sp1 = head.find(' ');
@@ -340,13 +375,12 @@ ReadStatus readRequestImpl(socket_t fd, HttpRequest* req, OriginHeader* origin) 
       start = amp + 1;
     }
   }
-  req->body = std::move(body);
   return ReadStatus::Ok;
 }
 
-ReadStatus readRequest(socket_t fd, HttpRequest* req, OriginHeader* origin) {
+ReadStatus readRequest(socket_t fd, HttpRequest* req, OriginHeader* origin, std::string* pending) {
   try {
-    return readRequestImpl(fd, req, origin);
+    return readRequestImpl(fd, req, origin, pending);
   } catch (...) {
     // Allocation failure or any other unexpected throw: refuse the request, keep serving.
     return ReadStatus::BadRequest;
@@ -1248,9 +1282,15 @@ HttpResponse HttpServer::route(const HttpRequest& req) {
         }
       }
       const std::string* formula = parsed["formula"].isString() ? &parsed["formula"].asString() : nullptr;
-      if (parsed["params"].isObject()) nodes_->updateParams(id, parsed["params"]);
+      const bool haveParams = parsed["params"].isObject();
+      // Params commit atomically with inputs: when the PATCH carries an inputs array they ride
+      // into update() and are applied only after the cycle check passes, so a refused (409)
+      // PATCH leaves the parameter bag and definitionVersion untouched. A params-only PATCH
+      // (no inputs array) keeps the updateParams path.
+      if (!haveInputs && haveParams) nodes_->updateParams(id, parsed["params"]);
       std::vector<int64_t> cycleOut;
-      if (!nodes_->update(id, formula, haveInputs ? &inputs : nullptr, &cycleOut)) {
+      if (!nodes_->update(id, formula, haveInputs ? &inputs : nullptr, &cycleOut,
+                          haveInputs && haveParams ? &parsed["params"] : nullptr)) {
         if (!cycleOut.empty()) {
           Json path = Json::array();
           for (auto p : cycleOut) path.push(Json(p));
@@ -1442,8 +1482,9 @@ bool HttpServer::serve() {
 void HttpServer::handleConnection(socket_t fd) {
   HttpRequest req;
   OriginHeader origin;
+  std::string pending;  // connection-owned read buffer: pipelined bytes survive across requests
   for (;;) {
-    const ReadStatus status = readRequest(fd, &req, &origin);
+    const ReadStatus status = readRequest(fd, &req, &origin, &pending);
     if (status == ReadStatus::Closed) break;
     if (status == ReadStatus::BadRequest || status == ReadStatus::TooLarge) {
       // Framing is unusable; answer once and drop the connection instead of looping. The

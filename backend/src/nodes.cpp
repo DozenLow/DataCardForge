@@ -567,7 +567,7 @@ bool NodeRegistry::updateParams(int64_t nodeId, const Json& params) {
 
 bool NodeRegistry::update(int64_t nodeId, const std::string* formula,
                           const std::vector<PortBinding>* inputs,
-                          std::vector<int64_t>* cycleOut) {
+                          std::vector<int64_t>* cycleOut, const Json* params) {
   std::lock_guard<std::mutex> lock(mu_);
   auto it = nodes_.find(nodeId);
   if (it == nodes_.end()) return false;
@@ -603,6 +603,10 @@ bool NodeRegistry::update(int64_t nodeId, const std::string* formula,
     }
   }
   if (formula) it->second.formula = *formula;
+  // Params land here — AFTER the wouldCycle() gate above returned false on any offending edge —
+  // so a refused update never mutates the parameter bag. One state/definitionVersion bump below
+  // covers inputs + formula + params together (atomic {params, inputs} PATCH).
+  if (params) it->second.params = *params;
   it->second.state = NodeState::Dirty;
   it->second.dirtyReason = DirtyReason::DefinitionChanged;
   ++it->second.definitionVersion;
