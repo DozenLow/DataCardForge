@@ -269,7 +269,14 @@ function migrateMatrices(raw: unknown): MatrixSnapshot[] {
       columns: item.columns.map((col) => ({
         posName: asString(col?.posName),
         annotation: asString(col?.annotation),
-        data: Array.isArray(col?.data) ? col.data.map((v) => (typeof v === 'number' ? v : Number(v))) : [],
+        // Missing cells (null/undefined/'') are NaN, never an invented 0: Number(null) and
+        // Number('') are both 0, which would silently corrupt the table. Other strings keep
+        // Number(v) (a non-numeric string already yields NaN).
+        data: Array.isArray(col?.data)
+          ? col.data.map((v: unknown) =>
+              typeof v === 'number' ? v : v === null || v === undefined || v === '' ? NaN : Number(v),
+            )
+          : [],
       })),
     };
   });

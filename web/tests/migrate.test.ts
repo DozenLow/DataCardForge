@@ -216,3 +216,34 @@ describe('restoring a migrated workspace', () => {
     expect(store().dependencies.getDependents(1)).toEqual([2]);
   });
 });
+
+describe('migrateMatrices — missing cells stay missing (bug #18)', () => {
+  it('maps null/undefined/empty-string cells to NaN, never an invented 0', () => {
+    const snapshot = migrateWorkspace({
+      version: 1,
+      savedAt: '2026-10-20T00:00:00.000Z',
+      cards: [],
+      matrices: [
+        {
+          id: 10,
+          name: 'a.txt',
+          columns: [
+            { posName: 'Pos.1', annotation: 'A', data: [1, null, '', undefined, '2', 'abc', 3] },
+          ],
+        },
+      ],
+      nextCardId: 1,
+      nextMatrixId: 11,
+    });
+    const data = snapshot.matrices[0].columns[0].data;
+    expect(data[0]).toBe(1);
+    expect(data[1]).toBeNaN(); // null — the old code turned it into Number(null) === 0
+    expect(data[2]).toBeNaN(); // ''   — the old code turned it into Number('') === 0
+    expect(data[3]).toBeNaN(); // undefined
+    expect(data[4]).toBe(2); // a numeric string is still parsed
+    expect(data[5]).toBeNaN(); // a non-numeric string stays NaN
+    expect(data[6]).toBe(3);
+    expect(data[1]).not.toBe(0);
+    expect(data[2]).not.toBe(0);
+  });
+});

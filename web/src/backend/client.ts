@@ -716,6 +716,10 @@ export function decodeMatrixFrame(buffer: ArrayBuffer): MatrixWindow {
   const isV2 = magic === 0x44434d32;
   if (magic !== 0x44434d31 && !isV2) return { ok: false, code: 'badFrame' };
   const headerLen = isV2 ? 24 : 16;
+  // A V2 header is 24 bytes. Reading totalRows/totalCols at offsets 16/20 on a 16..23-byte
+  // frame would throw RangeError, which window()'s catch misreports as a dead backend
+  // ('backendUnavailable'). Reject the short header as a malformed frame first.
+  if (buffer.byteLength < headerLen) return { ok: false, code: 'badFrame' };
   const rows = view.getUint32(4, true);
   const cols = view.getUint32(8, true);
   const namesLen = view.getUint32(12, true);

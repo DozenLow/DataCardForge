@@ -79,7 +79,15 @@ class ParseWorkerClient {
         resolve: (columns) => resolve(payloadToMatrix(columns)),
         reject,
       });
-      worker.postMessage({ id, name, file } satisfies ParseRequest);
+      try {
+        worker.postMessage({ id, name, file } satisfies ParseRequest);
+      } catch (error) {
+        // postMessage can throw (e.g. DataCloneError on an uncloneable File). The promise
+        // rejects, but the pending entry must be removed too — otherwise it leaks for the
+        // life of the worker (and a later failAll would reject an already-settled promise).
+        this.pending.delete(id);
+        reject(error);
+      }
     });
   }
 

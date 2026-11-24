@@ -9,9 +9,10 @@
  * It binds to the dev instance on 37811. Every matrix/node it creates is scoped to itself
  * and deleted afterwards, so a developer's running workspace is not disturbed.
  */
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
-import { BackendClient } from '../src/backend/client.ts';
+import { BackendClient, decodeMatrixFrame } from '../src/backend/client.ts';
+import { client as parseClient, disposeParseWorker } from '../src/loaders/parseWorker.ts';
 import { migrateWorkspace } from '../src/ui/migrate.ts';
 
 const enabled = process.env.DC_RUN_INTEGRATION === '1';
@@ -387,5 +388,92 @@ describe.skipIf(!enabled)('live backend integration', () => {
       expect(a[5]).toBe(2); // min
       expect(a[9]).toBe(100); // max
     });
+  });
+});
+
+// ── Hermetic regressions ──────────────────────────────────────────────────────────────
+// These never touch the live backend, so they sit OUTSIDE the opt-in `describe.skipIf`
+// above and run on every CI pass (a regression that only runs with DC_RUN_INTEGRATION=1
+// would not protect anything).
+
+describe('decodeMatrixFrame — short DCM2 header (bug #13)', () => {
+  const originalFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = originalFetch;
+  });
+
+  /** A DCM2 frame truncated to `bytes`: magic + rows/cols/namesLen, no totalRows/totalCols. */
+  function shortDcm2(bytes: number): ArrayBuffer {
+    const buffer = new ArrayBuffer(bytes);
+    const view = new DataView(buffer);
+    view.setUint32(0, 0x44434d32, true); // 'DCM2'
+    view.setUint32(4, 0, true); // rows
+    view.setUint32(8, 0, true); // cols
+    view.setUint32(12, 0, true); // namesLen
+    return buffer;
+  }
+
+  it('returns badFrame for a 16-byte DCM2 frame instead of throwing RangeError', () => {
+    expect(decodeMatrixFrame(shortDcm2(16))).toEqual({ ok: false, code: 'badFrame' });
+  });
+
+  it('returns badFrame for a 23-byte DCM2 frame (one byte short of the V2 header)', () => {
+    expect(decodeMatrixFrame(shortDcm2(23))).toEqual({ ok: false, code: 'badFrame' });
+  });
+
+  it('window() reports badFrame, not backendUnavailable, for a short DCM2 body', async () => {
+    const body = shortDcm2(16);
+    globalThis.fetch = (async () =>
+      ({ ok: true, arrayBuffer: async () => body }) as unknown as Response) as typeof fetch;
+    const frame = await new BackendClient('http://backend.test/api').window(1, 0, 10);
+    expect(frame).toEqual({ ok: false, code: 'badFrame' });
+  });
+
+  it('still decodes a complete DCM2 frame (24-byte header + payload)', () => {
+    const buffer = new ArrayBuffer(24 + 8);
+    const view = new DataView(buffer);
+    view.setUint32(0, 0x44434d32, true);
+    view.setUint32(4, 1, true); // rows
+    view.setUint32(8, 1, true); // cols
+    view.setUint32(12, 0, true); // namesLen
+    view.setUint32(16, 1, true); // totalRows
+    view.setUint32(20, 1, true); // totalCols
+    view.setFloat64(24, 7, true);
+    const frame = decodeMatrixFrame(buffer);
+    expect(frame.ok).toBe(true);
+    expect(frame.totalRows).toBe(1);
+    expect(frame.totalCols).toBe(1);
+    expect(Array.from(frame.data![0])).toEqual([7]);
+  });
+});
+
+describe('parseWorker — pending cleanup when postMessage throws (bug #17)', () => {
+  /** A Worker whose postMessage always throws, like a DataCloneError on an uncloneable File. */
+  class ThrowingWorker {
+    onmessage: ((event: MessageEvent) => void) | null = null;
+    onerror: ((event: { message?: string }) => void) | null = null;
+    postMessage(): void {
+      throw new DOMException('The object could not be cloned.', 'DataCloneError');
+    }
+    terminate(): void {}
+  }
+
+  afterEach(() => {
+    disposeParseWorker();
+    vi.unstubAllGlobals();
+  });
+
+  it('rejects the parse and removes the pending entry (no File leak)', async () => {
+    disposeParseWorker(); // start from a clean singleton
+    // ensure() takes the worker path only when both a Worker global and self.postMessage exist.
+    vi.stubGlobal('self', { postMessage: () => {} });
+    vi.stubGlobal('Worker', ThrowingWorker);
+
+    const pending = (parseClient as unknown as { pending: Map<number, unknown> }).pending;
+    const file = new File(['1 2\n3 4\n'], 'a.txt', { type: 'text/plain' });
+
+    await expect(parseClient.parse('a.txt', file)).rejects.toThrow('could not be cloned');
+    // Before the fix the executor threw (rejecting the promise) but the entry stayed forever.
+    expect(pending.size).toBe(0);
   });
 });
