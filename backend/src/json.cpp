@@ -1,5 +1,6 @@
 #include "json.h"
 
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
@@ -167,12 +168,31 @@ bool Parser::parseValue(Json* out, int depth) {
     if (s.compare(i, 4, "null") != 0) return fail("bad literal");
     i += 4; *out = Json(); return true;
   }
-  // Number: JSON grammar (no NaN/Infinity — see json.h comment).
+  // Number: JSON grammar (no NaN/Infinity — see json.h comment). Scan the grammar itself
+  // rather than a greedy [0-9.eE+-] run: std::stod would happily accept "+1", "1.", ".5"
+  // and "01", none of which are JSON numbers.
+  //   -? (0 | [1-9][0-9]*) ('.' [0-9]+)? ([eE] [+-]? [0-9]+)?
   size_t start = i;
-  if (i < s.size() && (s[i] == '-' || s[i] == '+')) ++i;
-  while (i < s.size() && (std::isdigit(static_cast<unsigned char>(s[i])) || s[i] == '.' ||
-                          s[i] == 'e' || s[i] == 'E' || s[i] == '-' || s[i] == '+')) ++i;
-  if (start == i) return fail("unexpected character");
+  if (i < s.size() && s[i] == '-') ++i;
+  if (i >= s.size()) return fail("bad number");
+  if (s[i] == '0') {
+    ++i;  // a leading zero stands alone; "01" is left for the trailing-content check
+  } else if (s[i] >= '1' && s[i] <= '9') {
+    while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) ++i;
+  } else {
+    return fail("bad number");
+  }
+  if (i < s.size() && s[i] == '.') {
+    ++i;
+    if (i >= s.size() || !std::isdigit(static_cast<unsigned char>(s[i]))) return fail("bad number");
+    while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) ++i;
+  }
+  if (i < s.size() && (s[i] == 'e' || s[i] == 'E')) {
+    ++i;
+    if (i < s.size() && (s[i] == '+' || s[i] == '-')) ++i;
+    if (i >= s.size() || !std::isdigit(static_cast<unsigned char>(s[i]))) return fail("bad number");
+    while (i < s.size() && std::isdigit(static_cast<unsigned char>(s[i]))) ++i;
+  }
   std::string num = s.substr(start, i - start);
   try {
     size_t used = 0;
@@ -239,7 +259,9 @@ void numberInto(std::string& o, double v) {
     o += "null";
     return;
   }
-  if (v == static_cast<int64_t>(v) && std::abs(v) < 9.2e15) {
+  // Magnitude FIRST: for |v| >= 2^63 the double->int64 cast is undefined behavior, so the
+  // bound must short-circuit before any cast is evaluated.
+  if (std::fabs(v) < 9.2e15 && v == static_cast<int64_t>(v)) {
     o += std::to_string(static_cast<int64_t>(v));
     return;
   }

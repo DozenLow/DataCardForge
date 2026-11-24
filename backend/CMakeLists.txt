@@ -126,6 +126,13 @@ add_executable(dc_nodes_test tests/nodes_test.cpp)
 target_link_libraries(dc_nodes_test PRIVATE dc_core)
 add_test(NAME node_registry COMMAND dc_nodes_test)
 
+# JSON number regressions: the integer fast path must bound the magnitude before the
+# double->int64 cast (UB for |v| >= 2^63), and the scanner must accept only the JSON number
+# grammar (no leading '+', trailing '.', leading '.', or leading zeros).
+add_executable(dc_json_test tests/json_test.cpp)
+target_link_libraries(dc_json_test PRIVATE dc_core)
+add_test(NAME json_parser COMMAND dc_json_test)
+
 # Script card (builtin:python): signature + params validation + process dispatch, end to end
 # through the vendored interpreter. The binary SKIPs (exit 0) when third_party/pyruntime is
 # not provisioned — see the header of tests/python_node_test.cpp. Threads because the /cancel
