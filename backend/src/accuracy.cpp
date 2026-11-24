@@ -269,14 +269,22 @@ AccuracyReport checkAccuracy(NodeRegistry* nodes, MatrixStore* store, int64_t no
   }
 
   // Output row i belongs to input row order[i], so undo the permutation before comparing.
-  // For an aggregation every row holds the same value and this is a no-op.
+  // The stride is each output column's ACTUAL length: an aggregation column holds one row
+  // per statistic, not per input row, and striding it by the input row count runs past the
+  // flat buffer. Aggregation values are order-invariant, so compare them at the same
+  // position instead of undoing a permutation that does not apply.
   double worst = 0.0;
-  for (size_t k = 0; k < baseFlat.size(); ++k) {
-    const size_t column = k / rows;
-    const double a = baseFlat[k];
-    const double b = shuffledFlat[column * rows + inverse[k % rows]];
-    if (!std::isfinite(a) || !std::isfinite(b) || a == 0.0) continue;
-    worst = std::max(worst, std::fabs(a - b) / std::fabs(a));
+  size_t offset = 0;
+  for (const auto& column : base) {
+    const size_t len = column.size();
+    const bool perInputRow = len == rows;
+    for (size_t i = 0; i < len; ++i) {
+      const double a = baseFlat[offset + i];
+      const double b = shuffledFlat[offset + (perInputRow ? inverse[i] : i)];
+      if (!std::isfinite(a) || !std::isfinite(b) || a == 0.0) continue;
+      worst = std::max(worst, std::fabs(a - b) / std::fabs(a));
+    }
+    offset += len;
   }
 
   report.relativeGap = worst;

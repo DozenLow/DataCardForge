@@ -119,6 +119,49 @@ int main() {
   CHECK(movReport.status == "unsupported");
   CHECK(movReport.reason == "orderDependent");
 
+  // 6) A COMPUTED summary node: each output column holds one row per statistic (the 12-row
+  //    catalog), NOT one per input row (5000). The row-order scan must stride by the output
+  //    column's actual length — the input row count indexes past the flat buffer (heap OOB)
+  //    — and compare order-invariant aggregates at the same position. Sane report, no OOB.
+  const auto summary = nodes.createV2(kSigSummary, {binding}, Json::object());
+  CHECK(summary.nodeId > 0);
+  // Summary is an explicitCompute signature: born "not requested", so recomputeSubtree prunes
+  // it. computeNow clears that marker and actually evaluates — which is what the audit needs.
+  nodes.computeNow(summary.nodeId);
+  const AccuracyReport summaryReport = checkAccuracy(&nodes, &store, summary.nodeId);
+  std::printf("summary 5000r status=%s digits=%.1f gap=%.2e reason=%s\n",
+              summaryReport.status.c_str(), summaryReport.digits, summaryReport.relativeGap,
+              summaryReport.reason.c_str());
+  CHECK(summaryReport.reason.empty());
+  CHECK(summaryReport.status == "ok");
+  CHECK(summaryReport.digits >= 8.0);
+  CHECK(std::isfinite(summaryReport.relativeGap));
+  CHECK(summaryReport.relativeGap < 1e-6);
+
+  // 7) The other direction: fewer input rows (2) than statistics (12). Two values sum
+  //    commutatively and quantiles sort, so the shuffled run is bit-identical: the scan
+  //    must compare same positions and report zero jitter, not undo a phantom permutation.
+  Column small;
+  small.posName = "Pos.1";
+  small.annotation = "A";
+  small.data = {1.0, 3.0};
+  const int64_t mSmall = store.insert(Matrix({small}));
+  PortBinding smallBinding;
+  smallBinding.portId = "src";
+  smallBinding.varName = "A";
+  smallBinding.mode = "matrix";
+  smallBinding.sourceMatrixId = mSmall;
+  const auto smallSummary = nodes.createV2(kSigSummary, {smallBinding}, Json::object());
+  CHECK(smallSummary.nodeId > 0);
+  nodes.computeNow(smallSummary.nodeId);
+  const AccuracyReport smallReport = checkAccuracy(&nodes, &store, smallSummary.nodeId);
+  std::printf("summary 2r    status=%s digits=%.1f gap=%.2e reason=%s\n",
+              smallReport.status.c_str(), smallReport.digits, smallReport.relativeGap,
+              smallReport.reason.c_str());
+  CHECK(smallReport.reason.empty());
+  CHECK(smallReport.status == "ok");
+  CHECK(smallReport.relativeGap == 0.0);
+
   std::printf("%s\n", failures == 0 ? "accuracy: ok" : "accuracy: FAILED");
   return failures == 0 ? 0 : 1;
 }
