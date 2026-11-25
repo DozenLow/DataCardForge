@@ -32,7 +32,11 @@ import {
   minimumColumns,
 } from '../../charts/chartTypes.ts';
 import { buildOption, ZOOM_COMPONENT_IDS, type BuildContext } from '../../charts/chartOptions.ts';
-import { nonPositiveAxisCounts } from '../../charts/chartModel.ts';
+import {
+  nonPositiveAxisCounts,
+  type ChartAnnotationAxis,
+  type ChartLimitRange,
+} from '../../charts/chartModel.ts';
 import { exportChart, type ExportType } from '../../charts/export.ts';
 import { CardShell } from './CardShell.tsx';
 import { ColumnDock } from './ColumnDock.tsx';
@@ -55,7 +59,14 @@ const SMOOTHING_MODES: SmoothingMode[] = [
   'savitzkyGolay',
 ];
 
-type PanelKind = 'type' | 'options' | 'export';
+let annotationSequence = 0;
+
+function annotationId(prefix: string): string {
+  annotationSequence += 1;
+  return `${prefix}-${Date.now().toString(36)}-${annotationSequence.toString(36)}`;
+}
+
+type PanelKind = 'type' | 'options' | 'annotations' | 'export';
 
 /** An open toolbar dropdown, pinned to the button that opened it in viewport coordinates. */
 interface OpenPanel {
@@ -96,6 +107,13 @@ export function ChartCard({
   const [echarts, setEcharts] = useState<typeof echartsNamespace | null>(null);
   const [panel, setPanel] = useState<OpenPanel | null>(null);
   const [pixelRatio, setPixelRatio] = useState(2);
+  const [referenceAxis, setReferenceAxis] = useState<ChartAnnotationAxis>('y');
+  const [referenceValue, setReferenceValue] = useState('');
+  const [referenceLabel, setReferenceLabel] = useState('');
+  const [acceptedAxis, setAcceptedAxis] = useState<ChartAnnotationAxis>('y');
+  const [acceptedLower, setAcceptedLower] = useState('');
+  const [acceptedUpper, setAcceptedUpper] = useState('');
+  const [acceptedLabel, setAcceptedLabel] = useState('');
 
   // A `single`-arity type plots only the first column, so counting every attached column in
   // the badge made a histogram claim "2 × 10000 points" while drawing one series.
@@ -269,6 +287,78 @@ export function ChartCard({
 
   const dismissPanel = useCallback(() => setPanel(null), []);
 
+  const addReferenceLine = useCallback(() => {
+    const value = Number(referenceValue);
+    if (referenceValue.trim() === '' || !Number.isFinite(value)) return;
+    setChartConfig(card.id, {
+      referenceLines: [
+        ...card.config.referenceLines,
+        { id: annotationId('line'), axis: referenceAxis, value, label: referenceLabel },
+      ],
+    });
+    setReferenceValue('');
+    setReferenceLabel('');
+  }, [
+    card.id,
+    card.config.referenceLines,
+    referenceAxis,
+    referenceLabel,
+    referenceValue,
+    setChartConfig,
+  ]);
+
+  const addAcceptedRange = useCallback(() => {
+    const lower = Number(acceptedLower);
+    const upper = Number(acceptedUpper);
+    if (
+      acceptedLower.trim() === '' ||
+      acceptedUpper.trim() === '' ||
+      !Number.isFinite(lower) ||
+      !Number.isFinite(upper) ||
+      lower >= upper
+    ) {
+      return;
+    }
+    setChartConfig(card.id, {
+      acceptedRanges: [
+        ...card.config.acceptedRanges,
+        {
+          id: annotationId('area'),
+          axis: acceptedAxis,
+          lower,
+          upper,
+          label: acceptedLabel,
+        },
+      ],
+    });
+    setAcceptedLower('');
+    setAcceptedUpper('');
+    setAcceptedLabel('');
+  }, [
+    acceptedAxis,
+    acceptedLabel,
+    acceptedLower,
+    acceptedUpper,
+    card.id,
+    card.config.acceptedRanges,
+    setChartConfig,
+  ]);
+
+  const patchLimitRange = useCallback(
+    (patch: Partial<ChartLimitRange>) => {
+      const current: ChartLimitRange = card.config.limitRange ?? {
+        axis: 'y',
+        lower: null,
+        upper: null,
+      };
+      const next = { ...current, ...patch };
+      setChartConfig(card.id, {
+        limitRange: next,
+      });
+    },
+    [card.config.limitRange, card.id, setChartConfig],
+  );
+
   /**
    * The dock's ports scroll with its body, so the layer re-measures after a scroll.
    *
@@ -433,6 +523,202 @@ export function ChartCard({
                     </button>
                   );
                 })}
+              </Popup>
+            ) : null}
+          </div>
+
+          <div className="chart-card__tp">
+            <button
+              type="button"
+              className={`chart-card__tbutton card__control${
+                panel?.kind === 'annotations' ? ' is-open' : ''
+              }`}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => togglePanel('annotations', event)}
+            >
+              {t('chart.annotations')} ▾
+            </button>
+            {panel?.kind === 'annotations' ? (
+              <Popup
+                x={panel.x}
+                y={panel.y}
+                className="chart-card__popup chart-card__popup--annotations"
+                onDismiss={dismissPanel}
+              >
+                <label className="chart-card__field">
+                  <span>{t('chart.pointLabels')}</span>
+                  <select
+                    className="card__control"
+                    value={card.config.pointLabels}
+                    onChange={(event) =>
+                      setChartConfig(card.id, {
+                        pointLabels: event.target.value as 'none' | 'value' | 'name',
+                      })
+                    }
+                  >
+                    <option value="none">{t('chart.pointLabels.none')}</option>
+                    <option value="value">{t('chart.pointLabels.value')}</option>
+                    <option value="name">{t('chart.pointLabels.name')}</option>
+                  </select>
+                </label>
+
+                <div className="chart-card__annotation-section">
+                  <strong>{t('chart.referenceLines')}</strong>
+                  <div className="chart-card__annotation-form">
+                    <select
+                      className="card__control"
+                      value={referenceAxis}
+                      onChange={(event) => setReferenceAxis(event.target.value as ChartAnnotationAxis)}
+                      aria-label={t('chart.annotationAxis')}
+                    >
+                      <option value="x">X</option>
+                      <option value="y">Y</option>
+                    </select>
+                    <input
+                      type="number"
+                      className="card__control chart-card__number"
+                      value={referenceValue}
+                      placeholder={t('chart.annotationValue')}
+                      onChange={(event) => setReferenceValue(event.target.value)}
+                    />
+                    <input
+                      className="card__control chart-card__annotation-label"
+                      value={referenceLabel}
+                      placeholder={t('chart.annotationLabel')}
+                      onChange={(event) => setReferenceLabel(event.target.value)}
+                    />
+                    <button type="button" className="card__control" onClick={addReferenceLine}>
+                      {t('chart.add')}
+                    </button>
+                  </div>
+                  {card.config.referenceLines.map((line) => (
+                    <div className="chart-card__annotation-row" key={line.id}>
+                      <span>
+                        {line.axis.toUpperCase()} = {line.value}
+                        {line.label ? ` · ${line.label}` : ''}
+                      </span>
+                      <button
+                        type="button"
+                        className="chart-card__annotation-remove"
+                        title={t('chart.remove')}
+                        onClick={() =>
+                          setChartConfig(card.id, {
+                            referenceLines: card.config.referenceLines.filter(
+                              (entry) => entry.id !== line.id,
+                            ),
+                          })
+                        }
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="chart-card__annotation-section">
+                  <strong>{t('chart.acceptedRanges')}</strong>
+                  <div className="chart-card__annotation-form">
+                    <select
+                      className="card__control"
+                      value={acceptedAxis}
+                      onChange={(event) => setAcceptedAxis(event.target.value as ChartAnnotationAxis)}
+                      aria-label={t('chart.annotationAxis')}
+                    >
+                      <option value="x">X</option>
+                      <option value="y">Y</option>
+                    </select>
+                    <input
+                      type="number"
+                      className="card__control chart-card__number"
+                      value={acceptedLower}
+                      placeholder={t('chart.lower')}
+                      onChange={(event) => setAcceptedLower(event.target.value)}
+                    />
+                    <input
+                      type="number"
+                      className="card__control chart-card__number"
+                      value={acceptedUpper}
+                      placeholder={t('chart.upper')}
+                      onChange={(event) => setAcceptedUpper(event.target.value)}
+                    />
+                    <input
+                      className="card__control chart-card__annotation-label"
+                      value={acceptedLabel}
+                      placeholder={t('chart.annotationLabel')}
+                      onChange={(event) => setAcceptedLabel(event.target.value)}
+                    />
+                    <button type="button" className="card__control" onClick={addAcceptedRange}>
+                      {t('chart.add')}
+                    </button>
+                  </div>
+                  {card.config.acceptedRanges.map((range) => (
+                    <div className="chart-card__annotation-row" key={range.id}>
+                      <span>
+                        {range.axis.toUpperCase()} {range.lower}…{range.upper}
+                        {range.label ? ` · ${range.label}` : ''}
+                      </span>
+                      <button
+                        type="button"
+                        className="chart-card__annotation-remove"
+                        title={t('chart.remove')}
+                        onClick={() =>
+                          setChartConfig(card.id, {
+                            acceptedRanges: card.config.acceptedRanges.filter(
+                              (entry) => entry.id !== range.id,
+                            ),
+                          })
+                        }
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="chart-card__annotation-section">
+                  <strong>{t('chart.limitRange')}</strong>
+                  <div className="chart-card__annotation-form">
+                    <select
+                      className="card__control"
+                      value={card.config.limitRange?.axis ?? 'y'}
+                      onChange={(event) =>
+                        patchLimitRange({
+                          axis: event.target.value as ChartLimitRange['axis'],
+                        })
+                      }
+                      aria-label={t('chart.annotationAxis')}
+                    >
+                      <option value="x">X</option>
+                      <option value="y">Y</option>
+                      <option value="value">{t('chart.colorValue')}</option>
+                    </select>
+                    <input
+                      type="number"
+                      className="card__control chart-card__number"
+                      value={card.config.limitRange?.lower ?? ''}
+                      placeholder={t('chart.lower')}
+                      onChange={(event) =>
+                        patchLimitRange({
+                          lower:
+                            event.target.value === '' ? null : Number(event.target.value),
+                        })
+                      }
+                    />
+                    <input
+                      type="number"
+                      className="card__control chart-card__number"
+                      value={card.config.limitRange?.upper ?? ''}
+                      placeholder={t('chart.upper')}
+                      onChange={(event) =>
+                        patchLimitRange({
+                          upper:
+                            event.target.value === '' ? null : Number(event.target.value),
+                        })
+                      }
+                    />
+                  </div>
+                  <p className="chart-card__note">{t('chart.limitRangeHint')}</p>
+                </div>
               </Popup>
             ) : null}
           </div>

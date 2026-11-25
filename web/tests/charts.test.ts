@@ -540,6 +540,76 @@ describe('buildOption axis selection', () => {
     expect(nonPositiveAxisCounts(config)).toEqual({ x: 2, y: 1 });
   });
 
+  it('adds vector reference lines and accepted-range areas', () => {
+    const series = buildSeries(
+      context('line', [source('A', [1, 3, 2])], {
+        referenceLines: [
+          { id: 'line-y', axis: 'y', value: 2.5, label: 'LOD' },
+          { id: 'line-x', axis: 'x', value: 2, label: 'Event' },
+        ],
+        acceptedRanges: [
+          { id: 'range-y', axis: 'y', lower: 1.5, upper: 2.5, label: 'Accepted' },
+        ],
+      }),
+    );
+    const annotated = series[0] as {
+      markLine: { data: Array<Record<string, number | string>> };
+      markArea: { data: Array<Array<Record<string, number | string>>> };
+    };
+
+    expect(annotated.markLine.data).toEqual([
+      { name: 'LOD', yAxis: 2.5, lineStyle: { color: '#a23b2a' } },
+      { name: 'Event', xAxis: 2, lineStyle: { color: '#a23b2a' } },
+    ]);
+    expect(annotated.markArea.data).toEqual([
+      [{ yAxis: 1.5, name: 'Accepted' }, { yAxis: 2.5 }],
+    ]);
+  });
+
+  it('overlays out-of-limit points for line, scatter, and bar charts', () => {
+    const cases: Array<{ type: ChartTypeId; sources: ChartSource[]; expected: [number, number] }> = [
+      { type: 'line', sources: [source('A', [1, 7, 3])], expected: [2, 7] },
+      {
+        type: 'scatter',
+        sources: [source('X', [1, 2, 3]), source('Y', [1, 7, 3], 1)],
+        expected: [2, 7],
+      },
+      { type: 'bar', sources: [source('A', [1, 7, 3])], expected: [2, 7] },
+    ];
+
+    for (const test of cases) {
+      const series = buildSeries(
+        context(test.type, test.sources, {
+          limitRange: { axis: 'y', lower: 0, upper: 5 },
+        }),
+      );
+      const overlay = series.find(
+        (entry) => entry.type === 'scatter' &&
+          (entry as { itemStyle?: { color?: unknown } }).itemStyle?.color === '#c83232',
+      ) as { data: Array<[number, number]> };
+      expect(overlay.data, test.type).toEqual([test.expected]);
+    }
+  });
+
+  it('shows point values or series names without a raster layer', () => {
+    const valueSeries = buildSeries(
+      context('scatter', [source('X', [1]), source('Y', [9], 1)], { pointLabels: 'value' }),
+    );
+    const nameSeries = buildSeries(
+      context('scatter', [source('X', [1]), source('Y', [9], 1)], { pointLabels: 'name' }),
+    );
+    const valueLabel = (valueSeries[0] as {
+      label: { formatter: (params: { value: unknown; seriesName: string }) => string };
+    }).label;
+    const nameLabel = (nameSeries[0] as {
+      label: { formatter: (params: { value: unknown; seriesName: string }) => string };
+    }).label;
+
+    expect(valueLabel.formatter({ value: [1, 9], seriesName: 'X → Y' })).toBe('9');
+    expect(nameLabel.formatter({ value: [1, 9], seriesName: 'X → Y' })).toBe('X → Y');
+    expect(valueSeries.map((entry) => String(entry.type))).not.toContain('image');
+  });
+
   it('produces a usable option for every declared chart type', () => {
     const ids = Object.keys(CHART_TYPES) as ChartTypeId[];
     for (const id of ids) {

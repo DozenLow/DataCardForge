@@ -134,28 +134,39 @@ export interface BuiltChart {
 export const ZOOM_COMPONENT_IDS = ['zoom-x', 'zoom-y'] as const;
 
 export function buildSeries(context: BuildContext): SeriesOption[] {
+  let series: SeriesOption[];
   switch (context.config.type) {
     case 'line':
-      return lineSeries(context);
+      series = lineSeries(context);
+      break;
     case 'bar':
-      return barSeries(context);
+      series = barSeries(context);
+      break;
     case 'scatter':
-      return scatterSeries(context);
+      series = scatterSeries(context);
+      break;
     case 'regression':
-      return regressionSeries(context);
+      series = regressionSeries(context);
+      break;
     case 'histogram':
-      return histogramSeries(context);
+      series = histogramSeries(context);
+      break;
     case 'boxplot':
-      return boxplotSeries(context);
+      series = boxplotSeries(context);
+      break;
     case 'violin':
-      return violinSeries(context);
+      series = violinSeries(context);
+      break;
     case 'errorBar':
-      return errorBarSeries(context);
+      series = errorBarSeries(context);
+      break;
     case 'heatmap':
-      return heatmapSeries(context);
+      series = heatmapSeries(context);
+      break;
     default:
-      return [];
+      series = [];
   }
+  return applyVectorAnnotations(series, context);
 }
 
 // ── line / bar ─────────────────────────────────────────────────────────────
@@ -625,6 +636,182 @@ function heatmapSeries(context: BuildContext): SeriesOption[] {
       animation: false,
     },
   ];
+}
+
+function applyVectorAnnotations(
+  base: SeriesOption[],
+  context: BuildContext,
+): SeriesOption[] {
+  const { config } = context;
+  const series = base.slice();
+
+  if (config.pointLabels !== 'none') {
+    for (const entry of series) {
+      const name = (entry as { name?: unknown }).name;
+      if (typeof name === 'string' && name.includes('fit y=')) continue;
+      (entry as SeriesOption & { label: Record<string, unknown> }).label = {
+        show: true,
+        position: 'top',
+        distance: 5,
+        fontSize: 9,
+        formatter: (params: { value?: unknown; seriesName?: unknown }) =>
+          pointLabel(config.type, config.pointLabels, params),
+      };
+    }
+  }
+
+  const carrier = series[0] as
+    | (SeriesOption & { markLine?: Record<string, unknown>; markArea?: Record<string, unknown> })
+    | undefined;
+  if (carrier && config.referenceLines.length > 0) {
+    carrier.markLine = {
+      silent: true,
+      symbol: 'none',
+      label: {
+        show: true,
+        position: 'insideEndTop',
+        formatter: (params: { name?: unknown }) => String(params.name ?? ''),
+        fontSize: 10,
+      },
+      lineStyle: { width: 1.4, type: 'dashed', color: '#a23b2a' },
+      data: config.referenceLines.map((line) => ({
+        name: line.label,
+        [line.axis === 'x' ? 'xAxis' : 'yAxis']: line.value,
+        lineStyle: { color: '#a23b2a' },
+      })),
+    };
+  }
+  if (carrier && config.acceptedRanges.length > 0) {
+    carrier.markArea = {
+      silent: true,
+      label: {
+        show: true,
+        position: 'insideTop',
+        formatter: (params: { name?: unknown }) => String(params.name ?? ''),
+        color: '#365c49',
+        fontSize: 10,
+      },
+      itemStyle: { color: 'rgba(78, 145, 105, 0.16)', borderColor: 'rgba(45, 105, 66, 0.45)' },
+      data: config.acceptedRanges.flatMap((range) => {
+        const key = range.axis === 'x' ? 'xAxis' : 'yAxis';
+        return [
+          [
+            { [key]: range.lower, name: range.label },
+            { [key]: range.upper },
+          ],
+        ];
+      }),
+    };
+  }
+
+  return [...series, ...limitOverlaySeries(context, series)];
+}
+
+function pointLabel(
+  type: ChartConfig['type'],
+  mode: ChartConfig['pointLabels'],
+  params: { value?: unknown; seriesName?: unknown },
+): string {
+  if (mode === 'name') return String(params.seriesName ?? '');
+
+  const value = params.value;
+  if (!Array.isArray(value)) return typeof value === 'number' ? formatTooltipNumber(value) : '';
+  const ordinate =
+    type === 'boxplot' ? 2 : type === 'heatmap' ? value.length - 1 : Math.min(1, value.length - 1);
+  const point = value[ordinate];
+  return typeof point === 'number' ? formatTooltipNumber(point) : String(point ?? '');
+}
+
+interface LimitPoint {
+  x: number;
+  y: number;
+  value: number;
+  yAxisIndex: number;
+}
+
+function limitOverlaySeries(context: BuildContext, series: SeriesOption[]): SeriesOption[] {
+  const limit = context.config.limitRange;
+  if (!limit || (limit.lower === null && limit.upper === null)) return [];
+
+  const points = limitPoints(context, series);
+  const outside = points.filter((point) => {
+    const value = limit.axis === 'x' ? point.x : limit.axis === 'y' ? point.y : point.value;
+    if (!Number.isFinite(value)) return false;
+    return (limit.lower !== null && value < limit.lower) ||
+      (limit.upper !== null && value > limit.upper);
+  });
+
+  const byAxis = new Map<number, LimitPoint[]>();
+  for (const point of outside) {
+    const group = byAxis.get(point.yAxisIndex) ?? [];
+    group.push(point);
+    byAxis.set(point.yAxisIndex, group);
+  }
+
+  return [...byAxis].map(([yAxisIndex, group]) => ({
+    type: 'scatter',
+    data: group.map((point) => [point.x, point.y] as [number, number]),
+    symbolSize: 7,
+    symbol: 'circle',
+    silent: true,
+    itemStyle: { color: '#c83232', opacity: 0.92, borderColor: '#ffffff', borderWidth: 1 },
+    label:
+      context.config.pointLabels === 'none'
+        ? { show: false }
+        : {
+            show: true,
+            position: 'top',
+            fontSize: 9,
+            formatter: (params: { value?: unknown }) =>
+              pointLabel(context.config.type, 'value', params),
+          },
+    yAxisIndex,
+    z: 20,
+    animation: false,
+  }));
+}
+
+function limitPoints(context: BuildContext, series: SeriesOption[]): LimitPoint[] {
+  const { config } = context;
+  if (
+    config.type === 'line' ||
+    config.type === 'scatter' ||
+    config.type === 'regression' ||
+    config.type === 'bar'
+  ) {
+    return resolveSeries(config).flatMap((entry, index) =>
+      entry.points
+        .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+        .map((point) => ({
+          x: point.x,
+          y: point.y,
+          value: point.y,
+          yAxisIndex: yAxisIndexFor(config, index),
+        })),
+    );
+  }
+
+  if (config.type === 'boxplot' || config.type === 'violin' || config.type === 'errorBar') {
+    return config.sources.flatMap((source, index) =>
+      finite(source.raw).map((value) => ({
+        x: index,
+        y: value,
+        value,
+        yAxisIndex: 0,
+      })),
+    );
+  }
+
+  const data = (series[0] as { data?: unknown } | undefined)?.data;
+  if (!Array.isArray(data)) return [];
+  return data.flatMap((item) => {
+    if (!Array.isArray(item) || item.length < 2) return [];
+    const x = Number(item[0]);
+    const y = Number(item[1]);
+    const value = Number(item[item.length - 1]);
+    if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(value)) return [];
+    return [{ x, y, value, yAxisIndex: 0 }];
+  });
 }
 
 /**

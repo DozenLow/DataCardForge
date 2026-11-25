@@ -22,6 +22,29 @@ export interface ChartSource {
   raw: number[];
 }
 
+export type ChartAnnotationAxis = 'x' | 'y';
+
+export interface ChartReferenceLine {
+  id: string;
+  axis: ChartAnnotationAxis;
+  value: number;
+  label: string;
+}
+
+export interface ChartAcceptedRange {
+  id: string;
+  axis: ChartAnnotationAxis;
+  lower: number;
+  upper: number;
+  label: string;
+}
+
+export interface ChartLimitRange {
+  axis: ChartAnnotationAxis | 'value';
+  lower: number | null;
+  upper: number | null;
+}
+
 export interface ChartConfig {
   type: ChartTypeId;
   sources: ChartSource[];
@@ -39,6 +62,14 @@ export interface ChartConfig {
   secondAxis: boolean;
   /** Overlay an OLS fit (scatter / regression types). */
   showFitLine: boolean;
+  /** User-defined horizontal/vertical reference lines. */
+  referenceLines: ChartReferenceLine[];
+  /** User-defined accepted intervals drawn as translucent bands. */
+  acceptedRanges: ChartAcceptedRange[];
+  /** Values outside this range are overlaid in red. `null` disables a bound. */
+  limitRange: ChartLimitRange | null;
+  /** Optional label on plotted points. */
+  pointLabels: 'none' | 'value' | 'name';
   /** Bin count for the histogram; `0` means "choose automatically". */
   binCount: number;
   /** Which spread the error bars show. */
@@ -58,6 +89,10 @@ export function defaultChartConfig(type: ChartTypeId, sources: ChartSource[]): C
     logScale: false,
     secondAxis: false,
     showFitLine: true,
+    referenceLines: [],
+    acceptedRanges: [],
+    limitRange: null,
+    pointLabels: 'none',
     binCount: 0,
     errorKind: 'sd',
     layout: 'grouped',
