@@ -1998,7 +1998,15 @@ function normalizeRestoredCards(cards: CardModel[]): CardModel[] {
       };
     }
     if (isChartCard(card)) {
-      return { ...card, columnPanelOpen: card.columnPanelOpen ?? false };
+      return {
+        ...card,
+        config: {
+          ...defaultChartConfig(card.config.type, card.config.sources),
+          ...card.config,
+          xLogScale: card.config.xLogScale ?? false,
+        },
+        columnPanelOpen: card.columnPanelOpen ?? false,
+      };
     }
     return card;
   });
@@ -4686,7 +4694,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         }
       }
 
-      commitChartConfig(cardId, (config) => ({ ...config, type, sources }));
+      commitChartConfig(cardId, (config) => ({
+        ...config,
+        type,
+        sources,
+        logScale: def.supportsLogScale ? config.logScale : false,
+        xLogScale: def.supportsLogX ? config.xLogScale : false,
+      }));
     },
 
     setChartConfig(cardId, patch) {

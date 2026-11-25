@@ -32,6 +32,7 @@ import {
   minimumColumns,
 } from '../../charts/chartTypes.ts';
 import { buildOption, ZOOM_COMPONENT_IDS, type BuildContext } from '../../charts/chartOptions.ts';
+import { nonPositiveAxisCounts } from '../../charts/chartModel.ts';
 import { exportChart, type ExportType } from '../../charts/export.ts';
 import { CardShell } from './CardShell.tsx';
 import { ColumnDock } from './ColumnDock.tsx';
@@ -117,14 +118,10 @@ export function ChartCard({
    *  - `yAxisIndexFor` puts every odd-indexed series on the right axis, and nothing in the
    *    chart shows which ones they are.
    */
-  const nonPositiveCount = useMemo(() => {
-    if (!card.config.logScale) return 0;
-    let count = 0;
-    for (const source of card.config.sources) {
-      for (const value of source.raw) if (Number.isFinite(value) && value <= 0) count += 1;
-    }
-    return count;
-  }, [card.config.logScale, card.config.sources]);
+  const nonPositiveCounts = useMemo(
+    () => nonPositiveAxisCounts(card.config),
+    [card.config],
+  );
 
   const secondAxisLabels = useMemo(
     () =>
@@ -181,6 +178,7 @@ export function ChartCard({
       mean: `${t('chart.mean')} ± ${t(errorKey(card))}`,
       outliers: t('chart.outliers'),
       secondAxis: t('chart.secondAxis'),
+      drawnOfTotal: (drawn, total) => t('chart.drawnOfTotal', { drawn, total }),
     }),
     // The legend name embeds the selected error kind, so it must rebuild with it.
     // `t` is stable per locale (see `translatorFor`), so this only rebuilds when it must.
@@ -507,6 +505,18 @@ export function ChartCard({
                     <span>{t('chart.logScale')}</span>
                   </label>
                 ) : null}
+                {typeDef.supportsLogX ? (
+                  <label className="chart-card__field">
+                    <input
+                      type="checkbox"
+                      checked={card.config.xLogScale ?? false}
+                      onChange={(event) =>
+                        setChartConfig(card.id, { xLogScale: event.target.checked })
+                      }
+                    />
+                    <span>{t('chart.logXScale')}</span>
+                  </label>
+                ) : null}
                 {typeDef.supportsSecondAxis ? (
                   <label className="chart-card__field">
                     <input
@@ -607,9 +617,14 @@ export function ChartCard({
                     </label>
                   </>
                 ) : null}
-                {card.config.logScale && nonPositiveCount > 0 ? (
+                {card.config.xLogScale && nonPositiveCounts.x > 0 ? (
                   <p className="chart-card__warn">
-                    {t('chart.logDropsNonPositive', { n: nonPositiveCount })}
+                    {t('chart.logXDropsNonPositive', { n: nonPositiveCounts.x })}
+                  </p>
+                ) : null}
+                {card.config.logScale && nonPositiveCounts.y > 0 ? (
+                  <p className="chart-card__warn">
+                    {t('chart.logYDropsNonPositive', { n: nonPositiveCounts.y })}
                   </p>
                 ) : null}
                 {secondAxisLabels.length > 0 ? (

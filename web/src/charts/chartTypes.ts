@@ -63,6 +63,8 @@ export interface ChartTypeDef {
   usesRowIndexAsX: boolean;
   /** True when the type can be switched to a logarithmic value axis. */
   supportsLogScale: boolean;
+  /** True when its X dimension is a value axis that can be logarithmic. */
+  supportsLogX: boolean;
   /** True when a second value axis (dual axis) is meaningful. */
   supportsSecondAxis: boolean;
   /**
@@ -83,6 +85,7 @@ export const CHART_TYPES: Record<ChartTypeId, ChartTypeDef> = {
     columnArity: 'onePerSeries',
     usesRowIndexAsX: true,
     supportsLogScale: true,
+    supportsLogX: true,
     supportsSecondAxis: true,
     vectorSafe: true,
     defaultColumnCount: 1,
@@ -94,6 +97,7 @@ export const CHART_TYPES: Record<ChartTypeId, ChartTypeDef> = {
     columnArity: 'pairs',
     usesRowIndexAsX: false,
     supportsLogScale: true,
+    supportsLogX: true,
     supportsSecondAxis: false,
     vectorSafe: true,
     defaultColumnCount: 2,
@@ -104,7 +108,8 @@ export const CHART_TYPES: Record<ChartTypeId, ChartTypeDef> = {
     hintKey: 'chart.hint.regression',
     columnArity: 'pairs',
     usesRowIndexAsX: false,
-    supportsLogScale: false,
+    supportsLogScale: true,
+    supportsLogX: true,
     supportsSecondAxis: false,
     vectorSafe: true,
     defaultColumnCount: 2,
@@ -115,7 +120,8 @@ export const CHART_TYPES: Record<ChartTypeId, ChartTypeDef> = {
     hintKey: 'chart.hint.bar',
     columnArity: 'onePerSeries',
     usesRowIndexAsX: true,
-    supportsLogScale: true,
+    supportsLogScale: false,
+    supportsLogX: false,
     supportsSecondAxis: true,
     vectorSafe: true,
     defaultColumnCount: 1,
@@ -127,6 +133,7 @@ export const CHART_TYPES: Record<ChartTypeId, ChartTypeDef> = {
     columnArity: 'single',
     usesRowIndexAsX: false,
     supportsLogScale: false,
+    supportsLogX: false,
     supportsSecondAxis: false,
     vectorSafe: true,
     defaultColumnCount: 1,
@@ -138,6 +145,7 @@ export const CHART_TYPES: Record<ChartTypeId, ChartTypeDef> = {
     columnArity: 'onePerSeries',
     usesRowIndexAsX: true,
     supportsLogScale: true,
+    supportsLogX: false,
     supportsSecondAxis: false,
     vectorSafe: true,
     defaultColumnCount: 1,
@@ -149,6 +157,7 @@ export const CHART_TYPES: Record<ChartTypeId, ChartTypeDef> = {
     columnArity: 'onePerSeries',
     usesRowIndexAsX: true,
     supportsLogScale: false,
+    supportsLogX: false,
     supportsSecondAxis: false,
     vectorSafe: true,
     defaultColumnCount: 1,
@@ -160,6 +169,7 @@ export const CHART_TYPES: Record<ChartTypeId, ChartTypeDef> = {
     columnArity: 'matrix',
     usesRowIndexAsX: false,
     supportsLogScale: false,
+    supportsLogX: false,
     supportsSecondAxis: false,
     vectorSafe: true,
     defaultColumnCount: 4,
@@ -171,6 +181,7 @@ export const CHART_TYPES: Record<ChartTypeId, ChartTypeDef> = {
     columnArity: 'onePerSeries',
     usesRowIndexAsX: true,
     supportsLogScale: true,
+    supportsLogX: false,
     supportsSecondAxis: false,
     vectorSafe: true,
     defaultColumnCount: 1,

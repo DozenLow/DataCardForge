@@ -12,10 +12,16 @@ import type { EChartsOption } from 'echarts';
 import {
   buildOption,
   buildSeries,
+  CHART_DISPLAY_POINT_LIMIT,
   computeBounds,
   type BuildContext,
 } from '../src/charts/chartOptions.ts';
-import { defaultChartConfig, resolveSeries, isDrawable } from '../src/charts/chartModel.ts';
+import {
+  defaultChartConfig,
+  resolveSeries,
+  isDrawable,
+  nonPositiveAxisCounts,
+} from '../src/charts/chartModel.ts';
 import type { ChartSource } from '../src/charts/chartModel.ts';
 import { pngToPdf } from '../src/charts/pdf.ts';
 import { CHART_TYPES, minimumColumns, type ChartTypeId } from '../src/charts/chartTypes.ts';
@@ -43,6 +49,7 @@ const strings: BuildContext['strings'] = {
   mean: 'Mean ± SD',
   outliers: 'outliers',
   secondAxis: '2nd',
+  drawnOfTotal: (drawn, total) => `Drawn ${drawn} / total ${total}`,
 };
 
 function context(type: ChartTypeId, sources: ChartSource[], patch: Partial<BuildContext['config']> = {}): BuildContext {
@@ -134,7 +141,7 @@ describe('line / bar series', () => {
     const series = buildSeries(context('line', [source('A', ramp)]));
     expect(series).toHaveLength(1);
     expect(series[0].type).toBe('line');
-    expect((series[0] as { sampling?: string }).sampling).toBe('lttb');
+    expect((series[0] as { sampling?: string }).sampling).toBeUndefined();
     const data = (series[0] as { data: Array<[number, number]> }).data;
     expect(data[0]).toEqual([1, 0]);
     expect(data[99]).toEqual([100, 99]);
@@ -466,10 +473,71 @@ describe('buildOption axis selection', () => {
     const scatter = series.find((entry) => entry.type === 'scatter') as {
       data: unknown[];
     };
-    expect(scatter.data.length).toBeLessThanOrEqual(40_000);
-    expect(scatter.data.length).toBeLessThan(40_000);
-    // The thin pass keeps the first and last samples so the cloud's extent is preserved.
+    expect(scatter.data.length).toBeLessThanOrEqual(CHART_DISPLAY_POINT_LIMIT);
+    // The thinning keeps the first and last samples and preserves the data envelope.
     expect(scatter.data.length).toBeGreaterThan(1_000);
+  });
+
+  it('keeps an isolated single-point spike when a large line is thinned', () => {
+    const values = Array.from({ length: 40_000 }, () => 0);
+    values[23_457] = 10_000;
+    const series = buildSeries(context('line', [source('A', values)]));
+    const data = (series[0] as { data: Array<[number, number]> }).data;
+
+    expect(data.length).toBeLessThanOrEqual(CHART_DISPLAY_POINT_LIMIT);
+    expect(data).toContainEqual([23_458, 10_000]);
+  });
+
+  it('fits a thinned regression over every source pair', () => {
+    const x = Array.from({ length: 40_000 }, (_, i) => i);
+    const y = x.map((value) => 2 * value + 3);
+    const series = buildSeries(context('regression', [source('X', x), source('Y', y, 1)]));
+    const fit = series.find((entry) => entry.type === 'line') as { name: string };
+
+    expect(fit.name).toContain('n=40000');
+    expect(fit.name).toContain('y=2.000x+3.000');
+  });
+
+  it('labels downsampled plots with drawn and total point counts', () => {
+    const values = Array.from({ length: 40_000 }, (_, i) => i);
+    const option = buildOption(context('line', [source('A', values)]));
+    const graphic = option.graphic as Array<{
+      elements: Array<{ style: { text: string } }>;
+    }>;
+
+    expect(graphic[0].elements[0].style.text).toBe(
+      `Drawn ${CHART_DISPLAY_POINT_LIMIT} / total 40000`,
+    );
+  });
+
+  it('supports log-log axes with 2..9 minor tick positions', () => {
+    const option = buildOption(
+      context(
+        'scatter',
+        [source('X', [1, 10, 100]), source('Y', [2, 20, 200], 1)],
+        { xLogScale: true, logScale: true },
+      ),
+    );
+    const xAxis = option.xAxis as { type?: string; minorTick?: { show?: boolean; splitNumber?: number } };
+    const yAxis = option.yAxis as { type?: string; minorTick?: { show?: boolean; splitNumber?: number } };
+
+    expect(xAxis.type).toBe('log');
+    expect(yAxis.type).toBe('log');
+    expect(xAxis.minorTick).toMatchObject({ show: true, splitNumber: 9 });
+    expect(yAxis.minorTick).toMatchObject({ show: true, splitNumber: 9 });
+  });
+
+  it('counts non-positive values per enabled log axis', () => {
+    const config = {
+      ...defaultChartConfig('scatter', [
+        source('X', [0, 1, -2]),
+        source('Y', [-1, 2, 3], 1),
+      ]),
+      xLogScale: true,
+      logScale: true,
+    };
+
+    expect(nonPositiveAxisCounts(config)).toEqual({ x: 2, y: 1 });
   });
 
   it('produces a usable option for every declared chart type', () => {

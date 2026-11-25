@@ -31,7 +31,9 @@ export interface ChartConfig {
    * `null` means "use row index" (the default for line/bar/histogram/boxplot/violin/errorBar).
    */
   xAxisSource: ChartSource | null;
-  /** Render series on a logarithmic value axis. */
+  /** Render the X values on a logarithmic value axis. */
+  xLogScale: boolean;
+  /** Render series on a logarithmic Y value axis. */
   logScale: boolean;
   /** Put every second series on a right-hand axis. */
   secondAxis: boolean;
@@ -52,6 +54,7 @@ export function defaultChartConfig(type: ChartTypeId, sources: ChartSource[]): C
     type,
     sources,
     xAxisSource: null,
+    xLogScale: false,
     logScale: false,
     secondAxis: false,
     showFitLine: true,
@@ -134,6 +137,20 @@ export function resolveSeries(config: ChartConfig): Array<{ label: string; point
         points: withRowIndex(source, xAxisSource),
       }));
   }
+}
+
+/** Counts of finite samples outside the domain of each enabled logarithmic axis. */
+export function nonPositiveAxisCounts(config: ChartConfig): { x: number; y: number } {
+  const counts = { x: 0, y: 0 };
+  if (!config.xLogScale && !config.logScale) return counts;
+
+  for (const entry of resolveSeries(config)) {
+    for (const point of entry.points) {
+      if (config.xLogScale && Number.isFinite(point.x) && point.x <= 0) counts.x += 1;
+      if (config.logScale && Number.isFinite(point.y) && point.y <= 0) counts.y += 1;
+    }
+  }
+  return counts;
 }
 
 /** True when the configuration has enough sources to draw the selected type. */

@@ -48,13 +48,13 @@ import { resolveSeries } from './chartModel.ts';
 import { lineColor } from './palette.ts';
 
 /**
- * Cap on plotted points for the scatter-based types.
+ * Cap on plotted points for line/scatter-based types.
  *
  * ECharts draws every scatter symbol as its own SVG path, so the cap bounds both the
  * render cost and the size of an exported vector file (10 000 points produced a ~1 MB
  * SVG; 5 000 keeps the cloud's shape while staying a practical figure to publish).
  */
-const SCATTER_LIMIT = 5_000;
+export const CHART_DISPLAY_POINT_LIMIT = 5_000;
 /** KDE curve resolution — smooth enough visually without bloating the SVG. */
 const KDE_SAMPLES = 96;
 
@@ -92,6 +92,7 @@ export interface BuildContext {
     mean: string;
     outliers: string;
     secondAxis: string;
+    drawnOfTotal: (drawn: number, total: number) => string;
   };
 }
 
@@ -168,16 +169,15 @@ function lineSeries(context: BuildContext): SeriesOption[] {
   const xData = config.xAxisSource?.raw;
   return config.sources.map((source, index) => {
     const values = smoothed(source, smoothing);
-    const data: Array<[number, number]> = new Array(values.length);
+    const points = new Array<{ x: number; y: number }>(values.length);
     for (let i = 0; i < values.length; i++) {
-      data[i] = [xData ? xData[i] ?? i + 1 : i + 1, values[i]];
+      points[i] = { x: xData ? xData[i] ?? i + 1 : i + 1, y: values[i] };
     }
     return {
       name: source.label,
       type: 'line',
-      data,
+      data: thin(points),
       showSymbol: values.length <= 2,
-      sampling: 'lttb',
       lineStyle: { width: 1.6, color: lineColor(index) },
       itemStyle: { color: lineColor(index) },
       emphasis: { focus: 'series' },
@@ -260,14 +260,35 @@ function regressionSeries(context: BuildContext): SeriesOption[] {
   return out;
 }
 
-/** Deterministic thinning plus NaN removal, to keep big scatters interactive. */
-function thin(points: Array<{ x: number; y: number }>): Array<[number, number]> {
+/** Deterministic min/max bucket thinning that never drops a finite y envelope point. */
+function thin(points: ReadonlyArray<{ x: number; y: number }>): Array<[number, number]> {
   const clean = points.filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
-  const kept =
-    clean.length > SCATTER_LIMIT
-      ? clean.filter((_, i) => i % Math.ceil(clean.length / SCATTER_LIMIT) === 0)
-      : clean;
-  return kept.map((point) => [point.x, point.y] as [number, number]);
+  if (clean.length <= CHART_DISPLAY_POINT_LIMIT) {
+    return clean.map((point) => [point.x, point.y] as [number, number]);
+  }
+
+  const selected = new Set<number>([0, clean.length - 1]);
+  const interior = clean.length - 2;
+  const bucketCount = Math.max(1, Math.floor((CHART_DISPLAY_POINT_LIMIT - 2) / 2));
+
+  for (let bucket = 0; bucket < bucketCount; ++bucket) {
+    const start = 1 + Math.floor((interior * bucket) / bucketCount);
+    const end = Math.min(clean.length - 1, 1 + Math.floor((interior * (bucket + 1)) / bucketCount));
+    if (start >= end) continue;
+
+    let minIndex = start;
+    let maxIndex = start;
+    for (let index = start + 1; index < end; ++index) {
+      if (clean[index].y < clean[minIndex].y) minIndex = index;
+      if (clean[index].y > clean[maxIndex].y) maxIndex = index;
+    }
+    selected.add(minIndex);
+    selected.add(maxIndex);
+  }
+
+  return [...selected]
+    .sort((a, b) => a - b)
+    .map((index) => [clean[index].x, clean[index].y] as [number, number]);
 }
 
 /**
@@ -386,7 +407,7 @@ function boxplotSeries(context: BuildContext): SeriesOption[] {
       outlierPoints.push([index, value]);
     }
   });
-  if (outlierPoints.length > 0 && outlierPoints.length <= SCATTER_LIMIT) {
+  if (outlierPoints.length > 0 && outlierPoints.length <= CHART_DISPLAY_POINT_LIMIT) {
     series.push({
       name: strings.outliers,
       type: 'scatter',
@@ -713,7 +734,7 @@ export function buildOption(context: BuildContext): EChartsOption {
           splitLine: { show: isHeatmap, lineStyle: { color: 'rgba(128,128,128,0.15)' } },
         }
       : {
-          type: 'value' as const,
+          type: config.xLogScale ? ('log' as const) : ('value' as const),
           scale: true,
           // The x axis is only "the row index" for the types that really plot against it.
           // A histogram plots bin *centres* and a scatter/regression plots the first column
@@ -727,6 +748,12 @@ export function buildOption(context: BuildContext): EChartsOption {
                 : strings.rowIndex,
           nameLocation: 'end' as const,
           axisLabel: { fontSize: 10 },
+          minorTick: config.xLogScale
+            ? { show: true, splitNumber: 9, length: 4 }
+            : { show: false },
+          minorSplitLine: config.xLogScale
+            ? { show: true, lineStyle: { color: 'rgba(128,128,128,0.08)' } }
+            : { show: false },
           splitLine: { show: true, lineStyle: { color: 'rgba(128,128,128,0.18)' } },
         };
 
@@ -766,6 +793,12 @@ export function buildOption(context: BuildContext): EChartsOption {
       fontSize: 10,
       formatter: (value: number) => formatAxisNumber(value),
     },
+    minorTick: config.logScale
+      ? { show: true, splitNumber: 9, length: 4 }
+      : { show: false },
+    minorSplitLine: config.logScale
+      ? { show: true, lineStyle: { color: 'rgba(128,128,128,0.08)' } }
+      : { show: false },
     splitLine: { show: true, lineStyle: { color: 'rgba(128,128,128,0.18)' } },
   };
 
@@ -826,8 +859,35 @@ export function buildOption(context: BuildContext): EChartsOption {
         name: strings.secondAxis,
         nameLocation: 'end',
         axisLabel: { fontSize: 10, formatter: (value: number) => formatAxisNumber(value) },
+        minorTick: config.logScale
+          ? { show: true, splitNumber: 9, length: 4 }
+          : { show: false },
+        minorSplitLine: config.logScale
+          ? { show: true, lineStyle: { color: 'rgba(128,128,128,0.08)' } }
+          : { show: false },
         splitLine: { show: false },
       } as never,
+    ];
+  }
+
+  const pointCounts = displayedPointCounts(context, series);
+  if (pointCounts && pointCounts.drawn < pointCounts.total) {
+    option.graphic = [
+      {
+        elements: [
+          {
+            type: 'text',
+            right: 8,
+            top: 6,
+            style: {
+              text: strings.drawnOfTotal(pointCounts.drawn, pointCounts.total),
+              fill: 'rgba(80,80,80,0.88)',
+              font: '10px sans-serif',
+            },
+            z: 100,
+          },
+        ],
+      },
     ];
   }
 
@@ -851,6 +911,24 @@ export function buildOption(context: BuildContext): EChartsOption {
   }
 
   return option;
+}
+
+function displayedPointCounts(
+  context: BuildContext,
+  series: SeriesOption[],
+): { drawn: number; total: number } | null {
+  const { type } = context.config;
+  if (type !== 'line' && type !== 'scatter' && type !== 'regression') return null;
+
+  const primary = series.filter((entry) => entry.type === (type === 'line' ? 'line' : 'scatter'));
+  const resolved = resolveSeries(context.config);
+  let drawn = 0;
+  for (const entry of primary) {
+    const data = (entry as { data?: unknown }).data;
+    if (Array.isArray(data)) drawn += data.length;
+  }
+  const total = resolved.reduce((sum, entry) => sum + entry.points.length, 0);
+  return { drawn, total };
 }
 
 /** Legend entries, excluding the fit lines whose names carry the regression statistics. */
