@@ -139,6 +139,18 @@ NaN 原样传输（IEEE 754），前端渲染为 `—` 的既有约定不变。
   语义与口径见[决策记录](../decisions/2026-10-27-summary-builtin.md)。
   **它是第一个惰性签名**（`compute: "explicit"`）：创建不算，`POST /api/nodes/{id}/compute`
   是唯一触发；上游变化 ⇒ `dirty` + `reason:"upstreamChanged"` 且结果矩阵被清空。
+- `builtin:chart-analysis`（2026-11-25）：隐藏在绘图卡后的显式 K=2 签名。`y` 必选、
+  `x` 可选；输出 `summary` 与逐点 `series`。有限 `params.model` 支持 `linear`、`4pl`、
+  `exponential`、`power`；线性支持过原点与 `none` / `inverseX` / `inverseX2` 权重。
+  非线性初值、下界和上界只接受有限数字数组；失败返回结构化 `fitFailed`。`series`
+  包含拟合值、残差、均值置信带、个体预测带和 QQ 坐标；绘图抽稀只作用于显示副本。
+- `builtin:chart-filter`（2026-11-25）：另一组隐藏的显式 K=2 签名，端口仍为可选 `x` +
+  必选 `y`。`params.mode` 为 `lowpass` / `detrend`；低通参数为 `cutoffHz`、`order` 和
+  可选 `sampleRateHz`。存在 X 时采样间隔必须单调、近似均匀，否则返回
+  `{code:"filterFailed", reason:"nonUniformX"}`。输出 `summary` 与 `series`
+  (`x/raw/filtered/trend`)；滤波结果只供图面显示。
+- 分类文本是浏览器工作区元数据，不是稠密矩阵的新值类型：矩阵帧仍只携带 `double`
+  代码，标签词典随解析 worker / 工作区快照保存，DCM2 的 24 字节头不变。
 - `GET /api/signatures` → `{signatures:[{id, version, displayName, compute, inputs:[{portId,
   displayName, required}], outputs:[{outputId}]}]}`：后端能求值的全部函数签名。
   `compute` 取 `"auto"`（建完即算）或 `"explicit"`（须显式触发）。
@@ -158,7 +170,7 @@ HTTP 4xx/5xx + { "code": "...", "params": {...}, "position"?: number }
 `unexpectedChar unknownFunction expectedCloseAfterArgs badArgCount unknownColumn
 expectedClose unexpectedToken trailingToken shapeMismatch singular matrixRequired
 notImplemented backendUnavailable hasDependents cycle badFrame payloadTooLarge
-internalError upstreamError`
+internalError upstreamError fitFailed filterFailed`
 
 **服务端永不发送面向用户的句子**；前端用 i18n key `formula.error.<code>` /
 `backend.error.<code>` 渲染。未知 code ⇒ 前端显示通用兜底句 + 原始 code（可见，不静默）。

@@ -11,7 +11,7 @@ were considered and dropped. Three entrances, each answering one question:
 | **Where the project is now, what to verify next** | repository root `STATE.md` — the only authority; when docs and code disagree, it wins |
 | **Why is it like this, what did we give up** | this directory |
 
-- **Last reviewed**: 2026-11-04 (the HEAD at review time is in `STATE.md`)
+- **Last reviewed**: 2026-11-25 (the HEAD at review time is in `STATE.md`)
 - Ownership, data provenance and the AI-usage statement: [`PROVENANCE.md`](../PROVENANCE.md) (Chinese only)
 
 > Optional: in Obsidian, "Open folder as vault" → pick this `docs/` directory.
@@ -30,6 +30,7 @@ were considered and dropped. Three entrances, each answering one question:
   causal history: four eras, four spirals, a lesson list and the current state
   - [Project history (DataCardForge)](history.en.md) ← **read this one before the individual volumes**
 - 📌 **Decision records** (`decisions/`) — settled, direction-setting conclusions
+  - [Chart stage 1: hidden backend analysis nodes + categorical metadata](decisions/2026-11-25-chart-stage1-analysis.md) ← **latest:** eight layers across the nine chart families; new numeric work stays in the backend and DCM2 is unchanged
   - [Parallel wave scheduler: ready queue + script process lane](decisions/2026-11-22-parallel-wave-scheduler.md) ← **latest: a node starts the instant its producers finish, never waiting for unrelated slow cards; script children capped at four with cancel-aware queueing; client contract unchanged**
   - [Blocking gate: freeze propagation, alert once, outline the offending card (compute errors do not block)](decisions/2026-11-17-blocking-gate.md) ← stop but keep every state; release when the cause is gone
   - [Script-card auto-run: formula-like after the first successful clean run](decisions/2026-11-17-script-autorun.md) ← **latest: one manual first run, automatic afterwards**
@@ -76,7 +77,9 @@ were considered and dropped. Three entrances, each answering one question:
 - 🗃 **Sample data** (`sampleData/`) — synthetic data for demos and manual checks; the generator reproduces it
   - [`1.txt`](sampleData/1.txt) · [`2.txt`](sampleData/2.txt) · [`generate_matrix.py`](sampleData/generate_matrix.py)
 - 🖼 **Diagrams** (`diagrams/`) — every diagram as SVG plus the interactive page, see [Diagrams](#diagrams)
-- 📅 **Development log** (`log/`) — progress by date (**latest 2026-11-22**)
+- 📅 **Development log** (`log/`) — progress by date (**latest 2026-11-25**)
+  - [2026-11-25 chart stage 1](log/2026-11-25-chart-stage1.md) (eight chart layers plus backend fitting/filtering, vectors, fields, factors, panels and diagnostics)
+  - [2026-11-24](log/2026-11-24.md) (19 verified fixes across compute, protocol, units, frontend state and export)
   - [2026-11-22](log/2026-11-22.md) (wave recompute topological-order fix: BFS distance is not evaluation order · uneven diamond read stale numbers · waveOrder Kahn + regression test)
   - [2026-11-04](log/2026-11-04.md) (docs rework: ASCII diagrams replaced with SVG + interactive page · navigation and facts · docs-check in CI)
   - [2026-10-31](log/2026-10-31.md) (data cards can replace files: replace follows · the 409 ordering problem · closeAllCards releases backend resources)

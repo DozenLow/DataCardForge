@@ -10,7 +10,7 @@
 | **现在在哪、下次开工先验什么** | 仓库根 `STATE.md`——唯一权威；文档与代码不同步时以它为准 |
 | **为什么这样、放弃了什么** | 本目录 |
 
-- **本目录最后校对**：2026-11-04（校对时的 HEAD 见 `STATE.md`）
+- **本目录最后校对**：2026-11-25（校对时的 HEAD 见 `STATE.md`）
 - 权属、数据来源与 AI 使用说明：[`PROVENANCE.md`](../PROVENANCE.md)
 
 > 打开方式（可选）：Obsidian → "Open folder as vault" → 选择本 `docs/` 目录。
@@ -27,6 +27,7 @@
 - 🧭 **项目演进史**（`history.md`）— 把决策/日志/踩坑/审计按因果链串成一条历史：四个时代、四条螺旋线、教训清单与现状
   - [项目演进史（DataCardForge）](history.md) · [EN](history.en.md) ← **先读这篇再进各分册**
 - 📌 **决策记录**（`decisions/`）— 已经拍板、影响后续的方向性结论
+  - [绘图卡阶段 1：隐藏后端分析节点 + 分类元数据](decisions/2026-11-25-chart-stage1-analysis.md) ← 🔒 **最新**：9 类图型内补齐 8 层；新数值计算留后端，文本 group 只作元数据，DCM2 不变
   - [并行波调度器：就绪队列 + 脚本进程泳道](decisions/2026-11-22-parallel-wave-scheduler.md) ← 🔒 **最新**：上游一完成即开算、不等无关慢卡；脚本子进程并发封顶四、排队可取消；客户端契约零改动
   - [高等数学与统计函数（advanced-math.v1）](decisions/2026-11-23-advanced-math-statistics.md) ← 🧪 实验态、默认关闭：自适应 Simpson/DERIV 级联+折点闸/Excel 统计口径/预算与 oracle 清单；2026-11-23 review 修复轮后口径冻结修订
   - [UI 端口术语规范：row/col 严格留给矩阵，卡上列表项一律称端口](decisions/2026-11-20-ui-port-terminology.md) ← 🔒 输出端口=一整张矩阵；类名 `__row*`→`__port*` 重构落地
@@ -77,7 +78,9 @@
 - 🗃 **样本数据**（`sampleData/`）— 合成数据，供演示与手工验证；生成脚本可复现
   - [`1.txt`](sampleData/1.txt) · [`2.txt`](sampleData/2.txt) · [`generate_matrix.py`](sampleData/generate_matrix.py)
 - 🖼 **图**（`diagrams/`）— 所有示意图的 SVG 与交互页，见下节[图](#图diagrams)
-- 📅 **开发日志**（`log/`）— 按日期记录进展（**最新 2026-11-22**）
+- 📅 **开发日志**（`log/`）— 按日期记录进展（**最新 2026-11-25**）
+  - [2026-11-25 绘图卡阶段 1](log/2026-11-25-chart-stage1.md)（8 层 + 后端拟合/滤波：矢量注释、拼版、场图、因子、小 n、诊断与测试闸门）
+  - [2026-11-24](log/2026-11-24.md)（排查确认 19 条修复：计算/协议/单位/前端状态与导出链）
   - [2026-11-22](log/2026-11-22.md)（一波重算拓扑序修复：BFS 距离≠求值序 · 不等长菱形读旧数 · waveOrder Kahn + 回归用例）
   - [2026-11-04](log/2026-11-04.md)（docs 重整：字符画改 SVG + 交互页 · 导航与事实回填 · docs-check 进 CI）
   - [2026-10-31](log/2026-10-31.md)（数据卡换文件落地：换数据自动跟随 · 409 顺序问题 · closeAllCards 释放后端）

@@ -3,7 +3,7 @@
 [![CI](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml/badge.svg)](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml)
 [![Pages 演示](https://img.shields.io/badge/%E6%BC%94%E7%A4%BA-%E5%89%8D%E7%AB%AF%E5%9C%A8%E7%BA%BF-2ea44f)](https://dozenlow.github.io/DataCardForge/)
 [![许可证](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
-[![测试](https://img.shields.io/badge/tests-594%20unit%20%C2%B7%2014%20ctest-brightgreen)](web/tests)
+[![测试](https://img.shields.io/badge/tests-1401%20unit%20%C2%B7%2032%20ctest-brightgreen)](web/tests)
 
 **[English](README.md) | [中文](README.zh-CN.md)**
 
@@ -16,7 +16,7 @@
 </p>
 
 - **作者与权属**：`DozenLow` · GPL-3.0 · 身份、时间线与提交锚点见 [`PROVENANCE.md`](PROVENANCE.md)
-- **实测状态**（2026-11-03）：前端 594 个单元测试（14 个 opt-in 跳过）· 后端 14 个 ctest（4 个 opt-in）· 端到端 102 项检查，全绿
+- **实测状态**（2026-11-25）：前端 1401 个单元/DOM 测试（20 个跳过）· 后端 32 个 ctest（4 个 opt-in）· 端到端 102 项检查，全绿
 - **尚未完成**：函数卡接口稳定、交互未收口；连线 hover 与断线编辑未做。见[状态与已知缺口](#状态与已知缺口)
 
 ## 试一下
@@ -24,6 +24,7 @@
 **浏览器里直接用（无需安装）**——<https://dozenlow.github.io/DataCardForge/> 是前端的静态部署。把
 [`docs/sampleData/1.txt`](docs/sampleData/1.txt) 拖进画布，右键列头 →「画图」。文件加载与 9 种图表可用；
 C++ 计算服务不在静态托管上，函数卡会显示「后端不可达」横幅——这是设计内的可见降级，不是故障。
+后端绘图拟合/滤波在此不可用；矢量绘制、标注、拼版和场图仍留在浏览器端。
 演示地址需先开启一次 **Settings → Pages → Source: GitHub Actions**，否则打开是 404。
 
 **用发行包跑（无需工具链）**——解压 `datacardforge-<os>-standard.zip`，直接运行二进制：它用同源的
@@ -98,13 +99,23 @@ Eigen 3.4 头文件（`sudo apt install build-essential cmake ninja-build libeig
   箱线图（中位数/四分位/须线 + Tukey 离群点）、小提琴图（KDE 密度轮廓 + 四分位线）、
   均值±误差棒（SD / SE / 95% CI，帽宽可调）、相关性热力图（两两 Pearson，发散配色）
 - 图型可在卡片内随时切换；一个图表可挂多列（散点/回归按 (X,Y) 配对）
+- X 轴可绑定任意已选列；大数据折线/散点按桶保留最大最小包络并显示「绘制 / 总数」。
+  X/Y 对数轴可分别开关，带次刻度与 ≤0 数据计数
+- 水平/垂直参考线、接受区间阴影、超限点标红、点标签均为 SVG primitive；单卡可做 2×2
+  拼版，共享 X 刻度与范围彼此独立，一次导出完整矢量图
+- 箱线/小提琴/误差棒在小 n 时叠原始点；heatmap 的 field 子模式支持数值 X/Y/Z、colorbar、
+  锁定 clim 与等值线；纯文本 `group` 列可映射到颜色、形状、分面或热图注释条
+- **后端图面拟合**：OLS / 过原点 / 1/X 与 1/X² WLS、均值置信带、个体预测带、有边界的
+  4PL / 指数 / 幂律、残差与 QQ 诊断、LOD/LOQ；拟不上时显式失败，不出虚假结果
+- **仅用于显示的处理**：按 Hz 和阶数配置零相位低通，或线性去趋势；采样率可由均匀 X
+  推导或显式输入。原始曲线可叠加，滤波值绝不参与拟合和统计
 - 对数 Y 轴 / 次坐标轴 / 拟合线 / X 轴来源 / 重置缩放等选项按图型自动提供
 - 平滑：滑动平均 / 指数 / 中值 / Savitzky–Golay，改动实时重绘，切换数据源时设置保留
 - 导出：SVG（活 DOM 序列化、无内嵌位图）/ PNG（1×/2×/4×）/ PDF（位图封装，UI 明确标注非矢量）
 - 两轴缩放/平移（滚轮或拖拽）；文件切换时依赖图表自动更新，列不存在时保留旧数据
 
-> 统计量实现在 `core/stats.ts`：纯函数、40 个单元测试，数值约定与 NumPy/R 一致
-> （线性插值分位数、Bessel 校正方差、Silverman 带宽、t 分布置信区间、Tukey 离群点）。
+> 新增拟合和滤波经隐藏的显式绘图节点由 C++ 后端完成；`core/stats.ts` 继续作为分位数、
+> 方差、KDE 与 Tukey 离群点等既有显示统计的已测参考实现。
 
 </details>
 
@@ -242,7 +253,7 @@ Eigen 3.4 头文件（`sudo apt install build-essential cmake ninja-build libeig
 | 自研虚拟滚动 | 大表渲染 | 无第三方依赖 |
 | Web Worker（`src/loaders/parse.worker.ts`） | 解析离开主线程 | 大文件加载时界面不冻结 |
 | Node.js 22 | 前端运行时、开发服务器、CI | CI 固定 `node-version: 22`；按需 fuzz 门控需 `--experimental-transform-types` |
-| Vitest 5 + jsdom | 单元 / DOM 测试 | 594 个用例，14 个按需跳过 |
+| Vitest 5 + jsdom | 单元 / DOM 测试 | 1401 passed，20 skipped |
 | Playwright（Chromium） | 端到端冒烟 | 102 项检查，跑在 `vite preview` 上 |
 | **C++17**（实测 g++ 15） | 计算后端语言 | `CMAKE_CXX_STANDARD 17`，CMake 3.24+ + Ninja |
 | **Eigen 3.4** | 线性代数/矩阵运算 | Header-only，`find_package(Eigen3 REQUIRED NO_MODULE)` |
@@ -295,10 +306,10 @@ npm test                  # 单元测试（vitest，含跨层夹具）
 ### 测试
 
 ```bash
-# 前端：typecheck + 594 个单元测试（含 81 个跨层差分夹具、14 个 opt-in 跳过）
+# 前端：typecheck + 1401 个单元/DOM 测试（20 个 skipped）
 cd web && npm run typecheck && npm test
 
-# 后端：14 个 ctest 用例（跨层夹具、矩阵算子、节点注册表、卡片夹具、静态路径规则；另有 4 个按需门控，默认 Skipped）
+# 后端：32 个 ctest 用例（默认 28 个通过，4 个按需压力/fuzz/性能门控 skipped）
 cd backend && ctest --test-dir build --output-on-failure
 
 # 按需门控：差分 fuzz（随机表达式 TS↔C++ 对拍）与 HTTP 畸形报文压测

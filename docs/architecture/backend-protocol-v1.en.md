@@ -159,6 +159,22 @@ Every field below is **purely additive**: a v1 client that only sends `varName` 
   **It is the first lazy signature** (`compute: "explicit"`): creating it does not compute;
   `POST /api/nodes/{id}/compute` is the only trigger; an upstream change ⇒ `dirty` +
   `reason:"upstreamChanged"` and the result matrix is cleared.
+- `builtin:chart-analysis` (2026-11-25): an explicit K=2 signature hidden behind a chart.
+  `y` is required and `x` is optional; outputs are `summary` and pointwise `series`.
+  The finite `params.model` set is `linear`, `4pl`, `exponential` and `power`. Linear fits
+  support through-origin and `none` / `inverseX` / `inverseX2` weighting. Nonlinear initial
+  values and bounds are finite-number arrays; failure is structured as `fitFailed`. `series`
+  carries fitted values, residuals, mean-confidence and individual-prediction bands, and QQ
+  coordinates. Display thinning never changes the fitted samples.
+- `builtin:chart-filter` (2026-11-25): a separate explicit K=2 signature for display filters,
+  again with optional `x` and required `y`. `params.mode` is `lowpass` or `detrend`; low-pass
+  accepts `cutoffHz`, `order` and optional `sampleRateHz`. With an X column, samples must be
+  monotonic and nearly uniform or the node returns
+  `{code:"filterFailed", reason:"nonUniformX"}`. Outputs are `summary` and
+  `series` (`x/raw/filtered/trend`), and filtered values are display-only.
+- Categorical text is browser workspace metadata, not another dense-matrix value type. DCM2
+  still carries `double` codes and its 24-byte header is unchanged; the label dictionary
+  travels through the parse worker and workspace snapshot.
 - `GET /api/signatures` → `{signatures:[{id, version, displayName, compute, inputs:[{portId,
   displayName, required}], outputs:[{outputId}]}]}`: every function signature the backend can
   evaluate. `compute` is `"auto"` (compute on creation) or `"explicit"` (must be triggered).
@@ -181,7 +197,7 @@ Reusing the existing `expression.ts` code table, extended:
 `unexpectedChar unknownFunction expectedCloseAfterArgs badArgCount unknownColumn
 expectedClose unexpectedToken trailingToken shapeMismatch singular matrixRequired
 notImplemented backendUnavailable hasDependents cycle badFrame payloadTooLarge
-internalError upstreamError`
+internalError upstreamError fitFailed filterFailed`
 
 **The server never sends user-facing sentences**; the frontend renders them with the i18n keys
 `formula.error.<code>` / `backend.error.<code>`. An unknown code ⇒ the frontend shows a generic

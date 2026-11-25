@@ -3,7 +3,7 @@
 [![CI](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml/badge.svg)](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml)
 [![Pages demo](https://img.shields.io/badge/demo-live%20(front%20end)-2ea44f)](https://dozenlow.github.io/DataCardForge/)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-594%20unit%20%C2%B7%2014%20ctest-brightgreen)](web/tests)
+[![Tests](https://img.shields.io/badge/tests-1401%20unit%20%C2%B7%2032%20ctest-brightgreen)](web/tests)
 
 **[English](README.md) | [中文](README.zh-CN.md)**
 
@@ -18,7 +18,7 @@ drop a measurement file, get a card you can plot, transform and chain.
 </p>
 
 - **Author & provenance**: `DozenLow` · GPL-3.0 · identity, timeline and commit anchors in [`PROVENANCE.md`](PROVENANCE.md)
-- **Verified state** (2026-11-03): 594 frontend unit tests (14 opt-in skipped) · 14 backend ctest cases
+- **Verified state** (2026-11-25): 1401 frontend unit/DOM tests (20 skipped) · 32 backend ctest cases
   (4 opt-in) · 102 end-to-end smoke checks — all green
 - **Not finished yet**: function cards are API-stable but UX-incomplete; connection hover and
   disconnect-editing are not done. See [Known gaps](#known-gaps)
@@ -29,7 +29,8 @@ drop a measurement file, get a card you can plot, transform and chain.
 as a static site. Drag [`docs/sampleData/1.txt`](docs/sampleData/1.txt) onto the canvas, then
 right-click a column header → *Draw chart*. File loading and all nine chart types work there; the C++
 compute service does not, so function cards show the "backend unreachable" banner — the designed
-visible degradation, not a bug.
+visible degradation, not a bug. Backend chart fitting/filters are shown as unavailable there;
+vector drawing, annotation, panel and field rendering remain local.
 The demo URL only serves after Pages is enabled once: **Settings → Pages → Source: GitHub Actions**.
 
 **From a release archive, no toolchain** — unzip `datacardforge-<os>-standard.zip` and run the binary:
@@ -122,6 +123,21 @@ stream pushes node state changes (dirty → computing → done | error) to drive
   **violin** (KDE density outline + quartile rules), **mean ± error bars** (SD / SE / 95 % CI,
   adjustable cap width), **correlation heatmap** (pairwise Pearson, diverging palette)
 - Chart types switch in place; one chart can carry multiple columns (scatter/regression pair as (X,Y))
+- X can bind to any attached column; line/scatter display thinning preserves each bucket's
+  min/max envelope and reports “drawn / total”. X and Y can use independent log axes with minor
+  ticks, while non-positive log values are counted visibly
+- Reference/limit lines, accepted-range shading, red out-of-limit points and point labels are
+  native SVG primitives. One chart can compose aligned multi-panel figures, share X ticks/ranges
+  independently, and export the whole 2×2 figure as one SVG
+- Box/violin/error-bar plots can overlay deterministic raw points for small samples. Field mode
+  draws X/Y/Z values as a numeric heatmap with a unit-aware colourbar, fixed `clim` and contours;
+  a text `group` column can map to colour, shape, facets or heatmap annotation strips
+- **Backend chart analysis**: OLS / through-origin / 1/X and 1/X² WLS, mean-confidence and
+  individual-prediction bands, bounded 4PL / exponential / power fits, residual panels, QQ,
+  LOD and LOQ. Fits fail visibly instead of returning plausible-looking defaults
+- **Display-only processing**: zero-phase low-pass (cutoff Hz + order) and linear detrend;
+  sample rate can come from a uniform X or be explicit. The raw curve can remain overlaid, and
+  filtered values never enter fit/statistical calculations
 - Log Y axis / second axis / fit line / X-axis source / reset-zoom appear only where the type supports them
 - **Smoothing**: moving average / exponential / median / Savitzky–Golay, redrawn live; settings survive
   data-source switches
@@ -130,9 +146,9 @@ stream pushes node state changes (dirty → computing → done | error) to drive
 - Zoom and pan on both axes (wheel or drag); dependent charts follow file switches, keeping old data
   when a column disappears
 
-> Statistics live in `core/stats.ts`: pure functions, 40 unit tests, numeric conventions matching
-> NumPy/R (linear-interpolation quantiles, Bessel-corrected variance, Silverman bandwidth,
-> t-distribution confidence intervals, Tukey outliers).
+> New numeric chart analysis and filtering run in the C++ backend through hidden, explicit
+> chart nodes. `core/stats.ts` remains the tested reference for legacy display statistics such
+> as quantiles, variance, KDE and Tukey outliers.
 
 </details>
 
@@ -313,7 +329,7 @@ The current state, the next task and the open questions live in `STATE.md` at th
 | Hand-rolled virtual scrolling | Large-table rendering | No third-party dependency |
 | Web Worker (`src/loaders/parse.worker.ts`) | Off-thread file parsing | Keeps the UI responsive |
 | Node.js 22 | Frontend runtime, dev server, CI | CI pins `node-version: 22`; the opt-in fuzz gate needs `--experimental-transform-types` |
-| Vitest 5 + jsdom | Unit / DOM tests | 594 tests, 14 opt-in skipped |
+| Vitest 5 + jsdom | Unit / DOM tests | 1401 passed, 20 skipped |
 | Playwright (Chromium) | End-to-end smoke | 102 checks against `vite preview` |
 | **C++17** (verified with g++ 15) | Compute backend language | `CMAKE_CXX_STANDARD 17`, CMake 3.24+ + Ninja |
 | **Eigen 3.4** | Linear algebra / matrix operations | Header-only, `find_package(Eigen3 REQUIRED NO_MODULE)` |
@@ -366,11 +382,10 @@ npm test                  # unit tests (vitest, includes cross-tier fixtures)
 ### Tests
 
 ```bash
-# Frontend: typecheck + 594 unit tests (includes 81 cross-tier differential fixtures, 14 opt-in skipped)
+# Frontend: typecheck + 1401 unit/DOM tests (20 skipped)
 cd web && npm run typecheck && npm test
 
-# Backend: 14 ctest cases (cross-tier fixtures, matrix operators, node registry, card fixtures,
-# static path rules); 4 further gates are opt-in and skipped by default
+# Backend: 32 ctest cases (28 pass by default, 4 opt-in stress/fuzz/perf gates skipped)
 cd backend && ctest --test-dir build --output-on-failure
 
 # Opt-in gates: differential fuzz (random TS↔C++ cross-check) and HTTP stress
