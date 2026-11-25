@@ -70,6 +70,7 @@ extern const char* const kSigSummary;
 extern const char* const kSigPython;
 extern const char* const kSigUnitConvert;
 extern const char* const kSigChartAnalysis;
+extern const char* const kSigChartFilter;
 
 // The summary statistic catalog. Its ORDER is the output row order of `builtin:summary`,
 // and its ids are stable identities — never renamed, never reused, the same rule as

@@ -10,6 +10,7 @@ const char* const kSigSummary = "builtin:summary";
 const char* const kSigPython = "builtin:python";
 const char* const kSigUnitConvert = "builtin:unit-convert";
 const char* const kSigChartAnalysis = "builtin:chart-analysis";
+const char* const kSigChartFilter = "builtin:chart-filter";
 
 // The statistic catalog. Order == output row order. Ids are stable identities: renaming
 // one would silently re-label every stored summary card, so they are frozen here exactly
@@ -100,6 +101,20 @@ const FunctionSignature& chartAnalysis() {
   return kSig;
 }
 
+const FunctionSignature& chartFilter() {
+  static const FunctionSignature kSig = [] {
+    FunctionSignature s;
+    s.id = kSigChartFilter;
+    s.version = 1;
+    s.displayName = "chart filter";
+    s.inputs = {{"x", "x values", false}, {"y", "y values", true}};
+    s.outputs = {{"summary"}, {"series"}};
+    s.explicitCompute = true;
+    return s;
+  }();
+  return kSig;
+}
+
 }  // namespace
 
 // `builtin:summary` — the statistic table. One matrix port in, one table out whose rows
@@ -156,12 +171,13 @@ const FunctionSignature* findSignature(const std::string& id) {
   if (id == kSigPython) return &pythonScript();
   if (id == kSigUnitConvert) return &unitConvert();
   if (id == kSigChartAnalysis) return &chartAnalysis();
+  if (id == kSigChartFilter) return &chartFilter();
   return nullptr;
 }
 
 std::vector<const FunctionSignature*> allSignatures() {
   return {&expressionColumns(), &linearRegression(), &summary(), &pythonScript(),
-          &unitConvert(), &chartAnalysis()};
+          &unitConvert(), &chartAnalysis(), &chartFilter()};
 }
 
 }  // namespace dc

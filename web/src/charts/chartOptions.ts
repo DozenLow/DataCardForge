@@ -45,6 +45,7 @@ import {
 import { applySmoothing, type SmoothingOptions } from '../core/Smoothing.ts';
 import type {
   ChartAnalysisOutput,
+  ChartFilterOutput,
   ChartConfig,
   ChartSource,
 } from './chartModel.ts';
@@ -87,6 +88,8 @@ export interface BuildContext {
   colorAxisUnit?: string;
   /** Server-produced fit/interval/diagnostic result; absent before an explicit run. */
   analysis?: ChartAnalysisOutput;
+  /** Server-produced display-only low-pass/detrend curve. */
+  displayFilter?: ChartFilterOutput;
   /** Localised axis/tooltip labels, resolved by the caller (keeps this module i18n-free). */
   strings: {
     rowIndex: string;
@@ -164,7 +167,8 @@ export function buildSeries(context: BuildContext): SeriesOption[] {
   const rawPoints = seriesContexts.flatMap((entry) => smallSamplePointSeries(entry.context));
   const strip = factorAnnotationSeries(context);
   const analysis = analysisOverlaySeries(context);
-  return [...annotated, ...rawPoints, ...strip, ...analysis];
+  const filteredRawOverlay = rawCurveOverlay(context);
+  return [...annotated, ...rawPoints, ...strip, ...analysis, ...filteredRawOverlay];
 }
 
 function buildBaseSeries(context: BuildContext): SeriesOption[] {
@@ -410,9 +414,13 @@ function yAxisIndexFor(config: ChartConfig, index: number): number {
 
 function lineSeries(context: BuildContext): SeriesOption[] {
   const { config, smoothing } = context;
-  const xData = config.xAxisSource?.raw;
+  const filtered = config.displayFilter ? context.displayFilter : undefined;
+  const xData = filtered?.x ?? config.xAxisSource?.raw;
   return config.sources.map((source, index) => {
-    const values = smoothed(source, smoothing);
+    const values =
+      index === 0 && filtered
+        ? filtered.filtered
+        : smoothed(source, smoothing);
     const points = new Array<{ x: number; y: number }>(values.length);
     for (let i = 0; i < values.length; i++) {
       points[i] = { x: xData ? xData[i] ?? i + 1 : i + 1, y: values[i] };
@@ -429,6 +437,37 @@ function lineSeries(context: BuildContext): SeriesOption[] {
       yAxisIndex: yAxisIndexFor(config, index),
     };
   });
+}
+
+function rawCurveOverlay(context: BuildContext): SeriesOption[] {
+  const { config, displayFilter } = context;
+  if (
+    config.type !== 'line' ||
+    !config.displayFilter?.overlayRaw ||
+    !displayFilter
+  ) {
+    return [];
+  }
+  return [
+    {
+      name: 'Raw',
+      type: 'line',
+      data: displayFilter.x.map(
+        (x, index) => [x, displayFilter.raw[index]] as [number, number],
+      ),
+      showSymbol: false,
+      lineStyle: {
+        width: 1,
+        color: '#777777',
+        type: 'dashed',
+        opacity: 0.62,
+      },
+      itemStyle: { color: '#777777' },
+      silent: true,
+      z: 1,
+      animation: false,
+    },
+  ];
 }
 
 function barSeries(context: BuildContext): SeriesOption[] {
@@ -665,11 +704,11 @@ function analysisOverlaySeries(context: BuildContext): SeriesOption[] {
 // ── histogram ──────────────────────────────────────────────────────────────
 
 function histogramSeries(context: BuildContext): SeriesOption[] {
-  const { config, smoothing } = context;
+  const { config } = context;
   const source = config.sources[0];
   if (!source) return [];
 
-  const values = smoothed(source, smoothing);
+  const values = source.raw;
   const result = histogram(values, config.binCount > 0 ? config.binCount : undefined);
   const data = result.bins.map((bin) => [bin.centre, bin.count] as [number, number]);
 
@@ -695,9 +734,9 @@ function histogramSeries(context: BuildContext): SeriesOption[] {
 // ── boxplot ────────────────────────────────────────────────────────────────
 
 function boxplotSeries(context: BuildContext): SeriesOption[] {
-  const { config, smoothing, strings } = context;
+  const { config, strings } = context;
 
-  const summaries = config.sources.map((source) => fiveNumberSummary(smoothed(source, smoothing)));
+  const summaries = config.sources.map((source) => fiveNumberSummary(source.raw));
   const factorColors = config.factorSource && config.factorMapping.color;
   const boxData = summaries.map((summary, index) => {
     const values = [
@@ -736,7 +775,7 @@ function boxplotSeries(context: BuildContext): SeriesOption[] {
 
   const outlierPoints: Array<[number, number]> = [];
   config.sources.forEach((source, index) => {
-    for (const value of outliers(smoothed(source, smoothing))) {
+    for (const value of outliers(source.raw)) {
       outlierPoints.push([index, value]);
     }
   });
@@ -779,12 +818,12 @@ interface ViolinShape {
 const VIOLIN_HALF_WIDTH_PX = 42;
 
 function violinSeries(context: BuildContext): SeriesOption[] {
-  const { config, smoothing, strings } = context;
+  const { config, strings } = context;
 
   // Pre-compute every curve: `renderItem` is called per item on each render, so it must
   // stay cheap and must not recompute the KDE.
   const shapes: ViolinShape[] = config.sources.map((source) => {
-    const values = finite(smoothed(source, smoothing));
+    const values = finite(source.raw);
     return { curve: kernelDensity(values, KDE_SAMPLES), summary: fiveNumberSummary(values) };
   });
 
@@ -865,10 +904,10 @@ interface ErrorStat {
 }
 
 function errorBarSeries(context: BuildContext): SeriesOption[] {
-  const { config, smoothing, strings } = context;
+  const { config, strings } = context;
 
   const stats: ErrorStat[] = config.sources.map((source) => {
-    const values = finite(smoothed(source, smoothing));
+    const values = finite(source.raw);
     return {
       centre: values.length > 0 ? mean(values) : NaN,
       spread: values.length > 0 ? errorBarValues(values, config.errorKind) : NaN,
@@ -940,8 +979,8 @@ function errorBarSeries(context: BuildContext): SeriesOption[] {
 
 function heatmapSeries(context: BuildContext): SeriesOption[] {
   if (context.config.heatmapMode === 'field') return fieldHeatmapSeries(context);
-  const { config, smoothing, strings } = context;
-  const series = config.sources.map((source) => smoothed(source, smoothing));
+  const { config, strings } = context;
+  const series = config.sources.map((source) => source.raw);
   const matrix = correlationMatrix(series);
 
   const data: Array<[number, number, number]> = [];
@@ -1381,7 +1420,7 @@ function smallSamplePointSeries(context: BuildContext): SeriesOption[] {
  * otherwise the curve is drawn against the wrong scale.
  */
 export function computeBounds(context: BuildContext): AxisBounds {
-  const { config, smoothing } = context;
+  const { config } = context;
 
   if (config.type === 'heatmap' && config.heatmapMode === 'field') {
     const [xSource, ySource, zSource] = config.sources;
@@ -1425,7 +1464,7 @@ export function computeBounds(context: BuildContext): AxisBounds {
     let lo = Infinity;
     let hi = -Infinity;
     for (const source of config.sources) {
-      const values = finite(smoothed(source, smoothing));
+      const values = finite(source.raw);
       if (values.length === 0) continue;
       lo = Math.min(lo, Math.min(...values));
       hi = Math.max(hi, Math.max(...values));
@@ -1440,7 +1479,7 @@ export function computeBounds(context: BuildContext): AxisBounds {
     let lo = Infinity;
     let hi = -Infinity;
     for (const source of config.sources) {
-      const values = finite(smoothed(source, smoothing));
+      const values = finite(source.raw);
       if (values.length === 0) continue;
       const centre = mean(values);
       const spread = errorBarValues(values, config.errorKind);
@@ -1458,7 +1497,7 @@ export function computeBounds(context: BuildContext): AxisBounds {
     let lo = Infinity;
     let hi = -Infinity;
     for (const source of config.sources) {
-      const values = finite(smoothed(source, smoothing));
+      const values = finite(source.raw);
       if (values.length === 0) continue;
       lo = Math.min(lo, Math.min(...values));
       hi = Math.max(hi, Math.max(...values));

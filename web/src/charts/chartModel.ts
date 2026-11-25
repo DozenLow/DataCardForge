@@ -91,6 +91,23 @@ export interface ChartAnalysisOutput {
   qqResidual: number[];
 }
 
+export interface ChartFilterOptions {
+  mode: 'lowpass' | 'detrend';
+  cutoffHz: number;
+  order: number;
+  /** Null means infer the rate from an explicit, uniform X axis. */
+  sampleRateHz: number | null;
+  overlayRaw: boolean;
+}
+
+export interface ChartFilterOutput {
+  summary: Record<string, number>;
+  x: number[];
+  raw: number[];
+  filtered: number[];
+  trend: number[];
+}
+
 export interface ChartConfig {
   type: ChartTypeId;
   sources: ChartSource[];
@@ -139,6 +156,8 @@ export interface ChartConfig {
   analysis: ChartAnalysisOptions | null;
   /** Replace the main plot with a 2x2 curve + residual diagnostic figure. */
   showAnalysisDiagnostics: boolean;
+  /** Optional display-only low-pass or detrend transform. */
+  displayFilter: ChartFilterOptions | null;
   /** Bin count for the histogram; `0` means "choose automatically". */
   binCount: number;
   /** Which spread the error bars show. */
@@ -171,6 +190,7 @@ export function defaultChartConfig(type: ChartTypeId, sources: ChartSource[]): C
     factorMapping: { color: false, shape: false, facet: false, heatmapStrip: false },
     analysis: null,
     showAnalysisDiagnostics: false,
+    displayFilter: null,
     binCount: 0,
     errorKind: 'sd',
     layout: 'grouped',

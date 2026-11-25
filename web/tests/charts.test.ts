@@ -327,6 +327,112 @@ describe('backend chart analysis', () => {
   });
 });
 
+describe('display-only filters', () => {
+  it('uses the backend filtered curve and overlays the raw source', () => {
+    const config = defaultChartConfig('line', [
+      source('Signal', [1, 2, 3, 4, 5]),
+    ]);
+    config.displayFilter = {
+      mode: 'lowpass',
+      cutoffHz: 2,
+      order: 4,
+      sampleRateHz: 10,
+      overlayRaw: true,
+    };
+    const series = buildSeries({
+      ...context('line', config.sources, config),
+      smoothing: { mode: 'movingAverage', window: 5, alpha: 0.3, degree: 2 },
+      displayFilter: {
+        summary: { n: 5, sampleRateHz: 10, cutoffHz: 2, order: 4 },
+        x: [0.1, 0.2, 0.3, 0.4, 0.5],
+        raw: [1, 2, 3, 4, 5],
+        filtered: [2, 2.5, 3, 3.5, 4],
+        trend: [0, 0, 0, 0, 0],
+      },
+    });
+    const plotted = series.find((entry) => entry.name === 'Signal') as {
+      data: Array<[number, number]>;
+    };
+    const raw = series.find((entry) => entry.name === 'Raw') as {
+      data: Array<[number, number]>;
+    };
+
+    expect(plotted.data.map((point) => point[1])).toEqual([2, 2.5, 3, 3.5, 4]);
+    expect(raw.data.map((point) => point[1])).toEqual([1, 2, 3, 4, 5]);
+    expect(plotted.data.map((point) => point[0])).toEqual([0.1, 0.2, 0.3, 0.4, 0.5]);
+  });
+
+  it('keeps smoothing out of box summaries and correlation statistics', () => {
+    const smoothing = { mode: 'movingAverage' as const, window: 3, alpha: 0.3, degree: 2 };
+    const box = buildSeries({
+      ...context('boxplot', [source('A', [0, 100, 0])]),
+      smoothing,
+    }).find((entry) => entry.type === 'boxplot') as { data: number[][] };
+    const heatmap = buildSeries({
+      ...context('heatmap', [
+        source('A', [0, 100, 0]),
+        source('B', [100, 0, 100], 1),
+      ]),
+      smoothing,
+    })[0] as { data: Array<[number, number, number]> };
+
+    expect(box.data[0][2]).toBe(0);
+    expect(heatmap.data.find(([x, y]) => x === 1 && y === 0)?.[2]).toBeCloseTo(-1);
+  });
+
+  it('does not mix filtered display rows into backend fit inputs', () => {
+    const config = defaultChartConfig('line', [
+      source('Signal', [1, 5, 2, 8, 3]),
+    ]);
+    config.displayFilter = {
+      mode: 'detrend',
+      cutoffHz: 10,
+      order: 4,
+      sampleRateHz: null,
+      overlayRaw: false,
+    };
+    config.analysis = {
+      model: 'linear',
+      throughOrigin: false,
+      weighting: 'none',
+      initial: null,
+      lower: null,
+      upper: null,
+      confidence: 0.95,
+      bands: 'none',
+    };
+    const analysis = {
+      summary: { n: 5, residualStandardError: 1 },
+      x: [1, 2, 3, 4, 5],
+      y: [1, 5, 2, 8, 3],
+      fitted: [2, 3, 4, 5, 6],
+      residual: [-1, 2, -2, 3, -3],
+      standardizedResidual: [-1, 2, -2, 3, -3],
+      confidenceLower: [1, 2, 3, 4, 5],
+      confidenceUpper: [3, 4, 5, 6, 7],
+      predictionLower: [0, 1, 2, 3, 4],
+      predictionUpper: [4, 5, 6, 7, 8],
+      qqTheoretical: [-1, -0.5, 0, 0.5, 1],
+      qqResidual: [-3, -2, -1, 2, 3],
+    };
+    const series = buildSeries({
+      ...context('line', config.sources, config),
+      analysis,
+      displayFilter: {
+        summary: { n: 5, trendSlope: 0.7 },
+        x: [1, 2, 3, 4, 5],
+        raw: [1, 5, 2, 8, 3],
+        filtered: [0.3, 3.6, -0.1, 5.2, -0.5],
+        trend: [0.7, 1.4, 2.1, 2.8, 3.5],
+      },
+    });
+    const fit = series.find((entry) => entry.name === 'backend fit') as {
+      data: Array<[number, number]>;
+    };
+    expect(fit.data.map((point) => point[1])).toEqual(analysis.fitted);
+  });
+});
+
 describe('isDrawable', () => {
   it('is false without enough columns for the type', () => {
     expect(isDrawable(defaultChartConfig('line', []))).toBe(false);

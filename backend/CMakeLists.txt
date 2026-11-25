@@ -85,6 +85,7 @@ add_library(dc_core
   src/nodes.cpp
   src/accuracy.cpp
   src/chart_analysis.cpp
+  src/chart_filter.cpp
 )
 target_include_directories(dc_core PUBLIC src)
 target_link_libraries(dc_core PUBLIC Eigen3::Eigen)
@@ -137,6 +138,10 @@ add_test(NAME json_parser COMMAND dc_json_test)
 add_executable(dc_chart_analysis_test tests/chart_analysis_test.cpp)
 target_link_libraries(dc_chart_analysis_test PRIVATE dc_core)
 add_test(NAME chart_analysis COMMAND dc_chart_analysis_test)
+
+add_executable(dc_chart_filter_test tests/chart_filter_test.cpp)
+target_link_libraries(dc_chart_filter_test PRIVATE dc_core)
+add_test(NAME chart_filter COMMAND dc_chart_filter_test)
 
 # Script card (builtin:python): signature + params validation + process dispatch, end to end
 # through the vendored interpreter. The binary SKIPs (exit 0) when third_party/pyruntime is

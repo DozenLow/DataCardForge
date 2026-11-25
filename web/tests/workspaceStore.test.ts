@@ -290,6 +290,124 @@ describe('addChartCard', () => {
       window.mockRestore();
     }
   });
+
+  it('keeps a display-filter node separate from the fit node', async () => {
+    const registrations = vi.spyOn(BackendClient.prototype, 'registerMatrix').mockResolvedValue({
+      ok: true,
+      matrixId: 51,
+      revision: 1,
+    });
+    const create = vi.spyOn(BackendClient.prototype, 'createNode').mockResolvedValue({
+      ok: true,
+      nodeId: 88,
+      resultMatrixId: 201,
+      resultMatrixIds: [201, 202],
+      signatureId: 'builtin:chart-filter',
+      state: 'dirty',
+    });
+    const patch = vi.spyOn(BackendClient.prototype, 'patchNode').mockResolvedValue({
+      ok: true,
+      nodeId: 88,
+      state: 'dirty',
+    });
+    vi.spyOn(BackendClient.prototype, 'computeNode').mockResolvedValue({
+      ok: true,
+      state: 'done',
+      resultMatrixIds: [201, 202],
+    });
+    const deleteNode = vi.spyOn(BackendClient.prototype, 'deleteNode').mockResolvedValue({
+      ok: true,
+    });
+    const window = vi.spyOn(BackendClient.prototype, 'window').mockImplementation(
+      async (id: number) => {
+        if (id === 201) {
+          return {
+            ok: true,
+            rows: 1,
+            columns: 7,
+            totalRows: 1,
+            totalCols: 7,
+            names: [
+              'Pos.1 n', 'Pos.2 dropped', 'Pos.3 sampleRateHz',
+              'Pos.4 cutoffHz', 'Pos.5 order', 'Pos.6 trendSlope',
+              'Pos.7 trendIntercept',
+            ],
+            data: [
+              new Float64Array([4]), new Float64Array([0]),
+              new Float64Array([10]), new Float64Array([2]),
+              new Float64Array([4]), new Float64Array([NaN]),
+              new Float64Array([NaN]),
+            ],
+          };
+        }
+        return {
+          ok: true,
+          rows: 4,
+          columns: 4,
+          totalRows: 4,
+          totalCols: 4,
+          names: ['Pos.1 x', 'Pos.2 raw', 'Pos.3 filtered', 'Pos.4 trend'],
+          data: [
+            new Float64Array([0.1, 0.2, 0.3, 0.4]),
+            new Float64Array([1, 5, 2, 8]),
+            new Float64Array([2, 3, 4, 5]),
+            new Float64Array([0, 0, 0, 0]),
+          ],
+        };
+      },
+    );
+    try {
+      const matrixId = store().addMatrixCard([
+        { name: 'signal.csv', matrix: matrix([[1], [5], [2], [8]]) },
+      ]);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      const chartId = store().addChartCard(matrixId, 0, 'line')!;
+      store().setChartConfig(chartId, {
+        displayFilter: {
+          mode: 'lowpass',
+          cutoffHz: 2,
+          order: 4,
+          sampleRateHz: 10,
+          overlayRaw: true,
+        },
+      });
+
+      await store().runChartFilter(chartId);
+      expect(registrations).toHaveBeenCalled();
+      expect(create).toHaveBeenCalledWith(
+        [{ portId: 'y', varName: 'y', mode: 'cell', sourceMatrixId: 51, columnIndex: 0 }],
+        {
+          signatureId: 'builtin:chart-filter',
+          params: { mode: 'lowpass', cutoffHz: 2, order: 4, sampleRateHz: 10 },
+        },
+      );
+      expect(store().chartFilters[chartId]).toMatchObject({
+        nodeId: 88,
+        state: 'done',
+        resultMatrixIds: [201, 202],
+      });
+      expect(window).toHaveBeenCalledTimes(2);
+      expect(store().chartFilters[chartId].output?.filtered).toEqual([2, 3, 4, 5]);
+
+      store().setChartConfig(chartId, {
+        displayFilter: {
+          ...(store().cards.find((card) => card.id === chartId) as ChartCardModel)
+            .config.displayFilter!,
+          overlayRaw: false,
+        },
+      });
+      expect(store().chartFilters[chartId].state).toBe('done');
+      expect(store().chartFilters[chartId].output?.filtered).toEqual([2, 3, 4, 5]);
+
+      await store().runChartFilter(chartId);
+      expect(patch).toHaveBeenCalledTimes(1);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(store().removeCard(chartId)).toBe(true);
+      expect(deleteNode).toHaveBeenCalledWith(88);
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
 });
 
 describe('setActiveSource refreshes dependent charts', () => {

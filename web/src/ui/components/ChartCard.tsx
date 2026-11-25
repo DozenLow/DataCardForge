@@ -94,7 +94,9 @@ export function ChartCard({
   const setChartConfig = useWorkspace((s) => s.setChartConfig);
   const setChartColumnPanel = useWorkspace((s) => s.setChartColumnPanel);
   const runChartAnalysis = useWorkspace((s) => s.runChartAnalysis);
+  const runChartFilter = useWorkspace((s) => s.runChartFilter);
   const analysisRun = useWorkspace((s) => s.chartAnalyses[card.id]);
+  const filterRun = useWorkspace((s) => s.chartFilters[card.id]);
   const matrices = useWorkspace((s) => s.matrices);
   const cards = useWorkspace((s) => s.cards);
   const showToast = useWorkspace((s) => s.showToast);
@@ -134,6 +136,12 @@ export function ChartCard({
   );
   const [analysisUpper, setAnalysisUpper] = useState(
     card.config.analysis?.upper?.join(', ') ?? '',
+  );
+  const [filterCutoff, setFilterCutoff] = useState(
+    String(card.config.displayFilter?.cutoffHz ?? 10),
+  );
+  const [filterSampleRate, setFilterSampleRate] = useState(
+    card.config.displayFilter?.sampleRateHz?.toString() ?? '',
   );
 
   // A `single`-arity type plots only the first column, so counting every attached column in
@@ -287,6 +295,7 @@ export function ChartCard({
             yAxisUnit,
             colorAxisUnit,
             analysis: analysisRun?.output,
+            displayFilter: filterRun?.output,
           })
         : null,
     [
@@ -297,6 +306,7 @@ export function ChartCard({
       yAxisUnit,
       colorAxisUnit,
       analysisRun?.output,
+      filterRun?.output,
     ],
   );
 
@@ -626,6 +636,16 @@ export function ChartCard({
     analysisLower,
     analysisUpper,
   ].some((text) => parseAnalysisArray(text) === undefined);
+  const filterInputInvalid =
+    card.config.displayFilter !== null &&
+    ((card.config.displayFilter.mode === 'lowpass' &&
+      (!filterCutoff.trim() ||
+        !Number.isFinite(Number(filterCutoff)) ||
+        Number(filterCutoff) <= 0)) ||
+      (card.config.displayFilter.mode === 'lowpass' &&
+        filterSampleRate.trim() !== '' &&
+        (!Number.isFinite(Number(filterSampleRate)) ||
+          Number(filterSampleRate) <= 0)));
 
   return (
     <CardShell
@@ -1466,6 +1486,168 @@ export function ChartCard({
                             />
                             <span>{t('chart.analysisThroughOrigin')}</span>
                           </label>
+                        ) : null}
+                        {card.config.type === 'line' ? (
+                          <div className="chart-card__analysis-section">
+                            <label className="chart-card__field">
+                              <span>{t('chart.displayFilter')}</span>
+                              <select
+                                className="card__control"
+                                value={card.config.displayFilter?.mode ?? 'none'}
+                                onChange={(event) => {
+                                  if (event.target.value === 'none') {
+                                    setChartConfig(card.id, { displayFilter: null });
+                                    return;
+                                  }
+                                  const mode = event.target.value as 'lowpass' | 'detrend';
+                                  setFilterCutoff('10');
+                                  setFilterSampleRate('');
+                                  setChartConfig(card.id, {
+                                    displayFilter: {
+                                      mode,
+                                      cutoffHz: 10,
+                                      order: 4,
+                                      sampleRateHz: null,
+                                      overlayRaw: true,
+                                    },
+                                  });
+                                }}
+                              >
+                                <option value="none">{t('chart.displayFilter.none')}</option>
+                                <option value="lowpass">{t('chart.displayFilter.lowpass')}</option>
+                                <option value="detrend">{t('chart.displayFilter.detrend')}</option>
+                              </select>
+                            </label>
+                            {card.config.displayFilter ? (
+                              <>
+                                {card.config.displayFilter.mode === 'lowpass' ? (
+                                  <>
+                                    <label className="chart-card__field">
+                                      <span>{t('chart.filterCutoff')}</span>
+                                      <input
+                                        type="number"
+                                        min={Number.EPSILON}
+                                        className="card__control chart-card__number"
+                                        value={filterCutoff}
+                                        onChange={(event) => {
+                                          setFilterCutoff(event.target.value);
+                                          const value = Number(event.target.value);
+                                          if (Number.isFinite(value) && value > 0) {
+                                            setChartConfig(card.id, {
+                                              displayFilter: {
+                                                ...card.config.displayFilter!,
+                                                cutoffHz: value,
+                                              },
+                                            });
+                                          }
+                                        }}
+                                      />
+                                      <span>Hz</span>
+                                    </label>
+                                    <label className="chart-card__field">
+                                      <span>{t('chart.filterOrder')}</span>
+                                      <select
+                                        className="card__control"
+                                        value={card.config.displayFilter.order}
+                                        onChange={(event) =>
+                                          setChartConfig(card.id, {
+                                            displayFilter: {
+                                              ...card.config.displayFilter!,
+                                              order: Number(event.target.value),
+                                            },
+                                          })
+                                        }
+                                      >
+                                        {[1, 2, 3, 4, 6, 8, 10].map((order) => (
+                                          <option key={order} value={order}>{order}</option>
+                                        ))}
+                                      </select>
+                                    </label>
+                                  </>
+                                ) : null}
+                                <label className="chart-card__field">
+                                  <span>{t('chart.filterSampleRate')}</span>
+                                  <input
+                                    type="number"
+                                    min={Number.EPSILON}
+                                    className="card__control chart-card__number"
+                                    value={filterSampleRate}
+                                    placeholder={t('chart.filterSampleRateAuto')}
+                                    onChange={(event) => {
+                                      setFilterSampleRate(event.target.value);
+                                      const value =
+                                        event.target.value.trim() === ''
+                                          ? null
+                                          : Number(event.target.value);
+                                      if (value === null || (Number.isFinite(value) && value > 0)) {
+                                        setChartConfig(card.id, {
+                                          displayFilter: {
+                                            ...card.config.displayFilter!,
+                                            sampleRateHz: value,
+                                          },
+                                        });
+                                      }
+                                    }}
+                                  />
+                                  <span>Hz</span>
+                                </label>
+                                <label className="chart-card__field">
+                                  <input
+                                    type="checkbox"
+                                    checked={card.config.displayFilter.overlayRaw}
+                                    onChange={(event) =>
+                                      setChartConfig(card.id, {
+                                        displayFilter: {
+                                          ...card.config.displayFilter!,
+                                          overlayRaw: event.target.checked,
+                                        },
+                                      })
+                                    }
+                                  />
+                                  <span>{t('chart.filterOverlayRaw')}</span>
+                                </label>
+                                <button
+                                  type="button"
+                                  className="chart-card__popup-item"
+                                  disabled={filterRun?.state === 'running' || filterInputInvalid}
+                                  onClick={() => void runChartFilter(card.id)}
+                                >
+                                  {filterRun?.state === 'running'
+                                    ? t('chart.filterRunning')
+                                    : t('chart.filterRun')}
+                                </button>
+                                {filterInputInvalid ? (
+                                  <p className="chart-card__warn">
+                                    {t('chart.filterInputInvalid')}
+                                  </p>
+                                ) : null}
+                                {filterRun?.state === 'error' ? (
+                                  <p className="chart-card__warn">
+                                    {t('chart.filterError', {
+                                      code: filterRun.code ?? 'internalError',
+                                      reason: String(filterRun.params?.reason ?? ''),
+                                    })}
+                                  </p>
+                                ) : null}
+                                {filterRun?.state === 'done' && filterRun.output ? (
+                                  <p className="chart-card__note">
+                                    {card.config.displayFilter.mode === 'lowpass'
+                                      ? t('chart.filterSummary', {
+                                          rate: Number(
+                                            filterRun.output.summary.sampleRateHz,
+                                          ).toFixed(4),
+                                          cutoff: filterCutoff,
+                                        })
+                                      : t('chart.detrendSummary', {
+                                          slope: Number(
+                                            filterRun.output.summary.trendSlope,
+                                          ).toPrecision(5),
+                                        })}
+                                  </p>
+                                ) : null}
+                              </>
+                            ) : null}
+                          </div>
                         ) : null}
                         <label className="chart-card__field">
                           <span>{t('chart.analysisWeighting')}</span>

@@ -34,6 +34,7 @@
 
 #include "expression.h"
 #include "chart_analysis.h"
+#include "chart_filter.h"
 #include "matrix_value.h"  // ShapeError (matrix-mode failures)
 #include "signature.h"
 #include "summary.h"
@@ -1578,6 +1579,7 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
   // from `code` + these fields, so they must not be lost in the error path.
   Json unitConvertDetail = Json::object();
   Json chartAnalysisDetail = Json::object();
+  Json chartFilterDetail = Json::object();
   std::vector<std::pair<std::string, std::vector<Column>>> scriptExtras;
   bool cancelled = false;
   // Unit warnings (builtin:expression-columns only): additive advice, collected in the same
@@ -1747,6 +1749,36 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
           } else {
             outputs.push_back(std::move(analysis.summary));
             outputs.push_back(std::move(analysis.series));
+          }
+        }
+      } else if (signatureId == kSigChartFilter) {
+        const std::vector<double>* xs = nullptr;
+        const std::vector<double>* ys = nullptr;
+        bool shapesOk = true;
+        for (size_t binding = 0; binding < bindings.size() && binding < slices.size(); ++binding) {
+          const std::string port =
+              bindings[binding].portId.empty() ? bindings[binding].varName
+                                               : bindings[binding].portId;
+          if (slices[binding].columnCount != 1) {
+            shapesOk = false;
+            errorName = port;
+            break;
+          }
+          const std::vector<double>* values = &data[slices[binding].firstColumn];
+          if (port == "x") xs = values;
+          else if (port == "y") ys = values;
+        }
+        if (!shapesOk || !ys) {
+          errorCode = "shapeMismatch";
+          if (errorName.empty()) errorName = "x/y";
+        } else {
+          ChartFilterResult filtered = evaluateChartFilter(xs, *ys, params);
+          if (!filtered.errorCode.empty()) {
+            errorCode = filtered.errorCode;
+            chartFilterDetail = std::move(filtered.errorParams);
+          } else {
+            outputs.push_back(std::move(filtered.summary));
+            outputs.push_back(std::move(filtered.series));
           }
         }
       } else if (signatureId == kSigExpressionColumns) {
@@ -1994,6 +2026,10 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
     }
     if (chartAnalysisDetail.isObject()) {
       for (const auto& member : chartAnalysisDetail.members())
+        params_out.set(member.first, member.second);
+    }
+    if (chartFilterDetail.isObject()) {
+      for (const auto& member : chartFilterDetail.members())
         params_out.set(member.first, member.second);
     }
     failNodeLocked(nodeId, errorCode, std::move(params_out));

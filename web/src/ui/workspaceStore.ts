@@ -47,6 +47,7 @@ import {
   defaultChartConfig,
   minimumColumnsForConfig,
   type ChartAnalysisOutput,
+  type ChartFilterOutput,
   type ChartConfig,
   type ChartSource,
 } from '../charts/chartModel.ts';
@@ -69,6 +70,7 @@ import {
   workspaceEnvPackageVersion,
   type CardModel,
   type ChartAnalysisRun,
+  type ChartFilterRun,
   type ChartCardModel,
   type FunctionCardModel,
   type MatrixCardModel,
@@ -1389,6 +1391,10 @@ interface WorkspaceState {
   chartAnalyses: Record<number, ChartAnalysisRun>;
   /** Create/patch/compute the chart's finite backend analysis and fetch K=2 outputs. */
   runChartAnalysis: (cardId: number) => Promise<void>;
+  /** Hidden display-filter node state; never persisted. */
+  chartFilters: Record<number, ChartFilterRun>;
+  /** Compute a zero-phase low-pass or linear detrend for display only. */
+  runChartFilter: (cardId: number) => Promise<void>;
   /**
    * Expand/collapse one declaration column of a function card.
    *
@@ -2850,6 +2856,7 @@ const WINDOW_ROWS = 5000;
  */
 const MAX_CACHE_ROWS = 200_000;
 const CHART_ANALYSIS_SIGNATURE = 'builtin:chart-analysis';
+const CHART_FILTER_SIGNATURE = 'builtin:chart-filter';
 /**
  * Rows a function card shows by default.
  *
@@ -3052,6 +3059,38 @@ function chartAnalysisOutput(
   return { summary, ...series };
 }
 
+function chartFilterParams(card: ChartCardModel): Record<string, unknown> | null {
+  const filter = card.config.displayFilter;
+  if (!filter) return null;
+  const params: Record<string, unknown> = {
+    mode: filter.mode,
+    cutoffHz: filter.cutoffHz,
+    order: filter.order,
+  };
+  if (filter.sampleRateHz !== null) params.sampleRateHz = filter.sampleRateHz;
+  return params;
+}
+
+function chartFilterOutput(
+  summaryTable: MatrixData,
+  seriesTable: MatrixData,
+): ChartFilterOutput | null {
+  const summary: Record<string, number> = {};
+  for (const column of summaryTable.columns()) {
+    if (column.annotation && column.data.length > 0) summary[column.annotation] = column.data[0];
+  }
+  const read = (name: string): number[] | null => {
+    const column = seriesTable.columns().find((entry) => entry.annotation === name);
+    return column ? column.data.slice() : null;
+  };
+  const x = read('x');
+  const raw = read('raw');
+  const filtered = read('filtered');
+  const trend = read('trend');
+  if (!x || !raw || !filtered || !trend) return null;
+  return { summary, x, raw, filtered, trend };
+}
+
 function patchChartAnalysisRun(
   cardId: number,
   patch: Partial<ChartAnalysisRun>,
@@ -3080,6 +3119,36 @@ function releaseChartAnalysis(cardId: number): void {
   useWorkspace.setState((state) => ({
     chartAnalyses: Object.fromEntries(
       Object.entries(state.chartAnalyses).filter(([id]) => Number(id) !== cardId),
+    ),
+  }));
+}
+
+function patchChartFilterRun(
+  cardId: number,
+  patch: Partial<ChartFilterRun>,
+): void {
+  useWorkspace.setState((state) => {
+    if (!state.cards.some((card) => card.id === cardId && isChartCard(card))) return state;
+    const existing: ChartFilterRun = state.chartFilters[cardId] ?? {
+      nodeId: null,
+      resultMatrixIds: null,
+      state: 'dirty',
+    };
+    return {
+      chartFilters: {
+        ...state.chartFilters,
+        [cardId]: { ...existing, ...patch },
+      },
+    };
+  });
+}
+
+function releaseChartFilter(cardId: number): void {
+  const run = useWorkspace.getState().chartFilters[cardId];
+  if (run?.nodeId && run.nodeId > 0) void backendClient.deleteNode(run.nodeId);
+  useWorkspace.setState((state) => ({
+    chartFilters: Object.fromEntries(
+      Object.entries(state.chartFilters).filter(([id]) => Number(id) !== cardId),
     ),
   }));
 }
@@ -3929,6 +3998,15 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       ) {
         void get().runChartAnalysis(dependentId);
       }
+      const filterRun = get().chartFilters[dependentId];
+      if (
+        dependent &&
+        isChartCard(dependent) &&
+        dependent.config.displayFilter &&
+        filterRun?.nodeId
+      ) {
+        void get().runChartFilter(dependentId);
+      }
     }
   };
 
@@ -4157,6 +4235,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     cards: [],
     matrices: new Map(),
     chartAnalyses: {},
+    chartFilters: {},
     matrixIdByIdentity: new Map(),
     selectedId: null,
     dependencies: new DependencyGraph(),
@@ -4525,7 +4604,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       const state = get();
       const card = state.cards.find((c) => c.id === id);
       if (!card) return true;
-      if (isChartCard(card)) releaseChartAnalysis(id);
+      if (isChartCard(card)) {
+        releaseChartAnalysis(id);
+        releaseChartFilter(id);
+      }
 
       // A card that still feeds another card must not disappear under it. That used to be
       // a matrix-card-only rule; a function card's output can feed charts too, so the rule
@@ -4653,9 +4735,12 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
             }
           }
         }
-        for (const run of Object.values(state.chartAnalyses)) {
-          if (run.nodeId && run.nodeId > 0) nodeIds.push(run.nodeId);
-        }
+      }
+      for (const run of Object.values(state.chartAnalyses)) {
+        if (run.nodeId && run.nodeId > 0) nodeIds.push(run.nodeId);
+      }
+      for (const run of Object.values(state.chartFilters)) {
+        if (run.nodeId && run.nodeId > 0) nodeIds.push(run.nodeId);
       }
       matrixUploads.clear();
       void (async () => {
@@ -4684,6 +4769,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // …and for a unit-conversion card's last conversion.
         unitRuns: {},
         chartAnalyses: {},
+        chartFilters: {},
         // The sentence counted the scripts of the workspace that was just emptied; leaving
         // it up would state a fact about cards that no longer exist.
         scriptNotice: null,
@@ -4878,12 +4964,35 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     },
 
     setChartConfig(cardId, patch) {
+      const before = get().cards.find((entry) => entry.id === cardId);
+      const previousAnalysis =
+        before && isChartCard(before) ? before.config.analysis : null;
+      const previousFilter =
+        before && isChartCard(before) ? before.config.displayFilter : null;
       const committed = commitChartConfig(cardId, (config) => ({ ...config, ...patch }));
       if (!committed) return;
       if (patch.analysis === null) {
         releaseChartAnalysis(cardId);
-      } else if (patch.analysis !== undefined) {
+      } else if (
+        patch.analysis !== undefined &&
+        JSON.stringify({ ...patch.analysis, bands: undefined }) !==
+          JSON.stringify({ ...previousAnalysis, bands: undefined })
+      ) {
         patchChartAnalysisRun(cardId, {
+          state: 'dirty',
+          code: undefined,
+          params: undefined,
+          output: undefined,
+        });
+      }
+      if (patch.displayFilter === null) {
+        releaseChartFilter(cardId);
+      } else if (
+        patch.displayFilter !== undefined &&
+        JSON.stringify({ ...patch.displayFilter, overlayRaw: undefined }) !==
+          JSON.stringify({ ...previousFilter, overlayRaw: undefined })
+      ) {
+        patchChartFilterRun(cardId, {
           state: 'dirty',
           code: undefined,
           params: undefined,
@@ -5089,6 +5198,105 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         code: undefined,
         params: undefined,
         output,
+      });
+    },
+
+    async runChartFilter(cardId) {
+      const current = get();
+      const card = current.cards.find((entry) => entry.id === cardId);
+      if (!card || !isChartCard(card) || !card.config.displayFilter) return;
+      const inputs = chartAnalysisInputs(card);
+      const params = chartFilterParams(card);
+      if (!inputs || !params) {
+        patchChartFilterRun(cardId, {
+          state: 'error',
+          code: 'backendUnavailable',
+          params: { reason: 'unboundInput' },
+          output: undefined,
+        });
+        return;
+      }
+      const previous = current.chartFilters[cardId];
+      patchChartFilterRun(cardId, {
+        state: 'running',
+        code: undefined,
+        params: undefined,
+        output: undefined,
+      });
+      const request = previous?.nodeId && previous.nodeId > 0
+        ? await backendClient.patchNode(previous.nodeId, { inputs, params })
+        : await backendClient.createNode(inputs, {
+            signatureId: CHART_FILTER_SIGNATURE,
+            params,
+          });
+      if (!request.ok || request.nodeId === undefined) {
+        patchChartFilterRun(cardId, {
+          state: 'error',
+          code: request.code ?? 'internalError',
+          output: undefined,
+        });
+        return;
+      }
+      const nodeId = request.nodeId;
+      const stillCurrent = () =>
+        get().cards.some(
+          (entry) => entry.id === cardId && isChartCard(entry) &&
+            entry.config.displayFilter !== null,
+        );
+      if (!stillCurrent()) {
+        void backendClient.deleteNode(nodeId);
+        return;
+      }
+      patchChartFilterRun(cardId, {
+        nodeId,
+        resultMatrixIds: request.resultMatrixIds ?? previous?.resultMatrixIds ?? null,
+      });
+      const computed = await backendClient.computeNode(nodeId);
+      if (!computed.ok) {
+        const status = await backendClient.getNode(nodeId);
+        patchChartFilterRun(cardId, {
+          state: 'error',
+          code: computed.code ?? status?.code ?? 'internalError',
+          params: status?.params,
+          output: undefined,
+        });
+        return;
+      }
+      const resultMatrixIds =
+        computed.resultMatrixIds ??
+        request.resultMatrixIds ??
+        previous?.resultMatrixIds;
+      if (!resultMatrixIds || resultMatrixIds.length !== 2) {
+        patchChartFilterRun(cardId, {
+          state: 'error',
+          code: 'internalError',
+          params: { reason: 'outputCount' },
+          output: undefined,
+        });
+        return;
+      }
+      const [summary, series] = await Promise.all(
+        resultMatrixIds.map((matrixId) => fetchResultRows(matrixId, MAX_CACHE_ROWS)),
+      );
+      if (!stillCurrent()) return;
+      if (!summary || !series || summary.truncated || series.truncated) {
+        patchChartFilterRun(cardId, {
+          nodeId,
+          resultMatrixIds,
+          state: 'error',
+          code: summary?.truncated || series?.truncated ? 'resultTruncated' : 'backendUnavailable',
+          output: undefined,
+        });
+        return;
+      }
+      const output = chartFilterOutput(summary.matrix, series.matrix);
+      patchChartFilterRun(cardId, {
+        nodeId,
+        resultMatrixIds,
+        state: output ? 'done' : 'error',
+        code: output ? undefined : 'internalError',
+        params: output ? undefined : { reason: 'outputSchema' },
+        output: output ?? undefined,
       });
     },
 
@@ -6922,6 +7130,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         // with 未请求 like every other card.
         summaries: {},
         chartAnalyses: {},
+        chartFilters: {},
         // Unit confirmations travel with the file (sanitised): the same headers must not be
         // re-asked after a restore. A legacy file without the block starts empty.
         //
@@ -7057,6 +7266,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         scriptRuns: {},
         unitRuns: {},
         chartAnalyses: {},
+        chartFilters: {},
         // Confirmations belonged to the matrices that were just dropped.
         unitConfirmations: {},
         // Inherited units are derived from those same tables, so they go with them — and a

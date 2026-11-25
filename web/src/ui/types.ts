@@ -25,6 +25,7 @@ import type { SmoothingOptions } from '../core/Smoothing.ts';
 import type { MatrixData } from '../core/MatrixData.ts';
 import type {
   ChartAnalysisOutput,
+  ChartFilterOutput,
   ChartConfig,
   ChartSource,
 } from '../charts/chartModel.ts';
@@ -142,6 +143,15 @@ export interface ChartAnalysisRun {
   code?: string;
   params?: Record<string, unknown>;
   output?: ChartAnalysisOutput;
+}
+
+export interface ChartFilterRun {
+  nodeId: number | null;
+  resultMatrixIds: number[] | null;
+  state: 'dirty' | 'running' | 'done' | 'error';
+  code?: string;
+  params?: Record<string, unknown>;
+  output?: ChartFilterOutput;
 }
 
 /**
@@ -548,4 +558,10 @@ export interface WorkspaceSnapshot {
   nextMatrixId: number;
 }
 
-export type { ChartAnalysisOutput, ChartConfig, ChartSource, ChartTypeId };
+export type {
+  ChartAnalysisOutput,
+  ChartFilterOutput,
+  ChartConfig,
+  ChartSource,
+  ChartTypeId,
+};
