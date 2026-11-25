@@ -7,7 +7,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import type { EChartsOption } from 'echarts';
+import type { EChartsOption, SeriesOption } from 'echarts';
 
 import {
   buildOption,
@@ -151,7 +151,8 @@ describe('line / bar series', () => {
     const series = buildSeries(
       context('bar', [source('A', [1, 2]), source('B', [3, 4])], { layout: 'stacked' }),
     );
-    expect(series.every((entry) => (entry as { stack?: string }).stack === 'total')).toBe(true);
+    const bars = series.filter((entry) => entry.type === 'bar');
+    expect(bars.every((entry) => (entry as { stack?: string }).stack === 'total')).toBe(true);
   });
 
   it('leaves bars unstacked by default', () => {
@@ -288,9 +289,10 @@ describe('violin', () => {
 });
 
 describe('errorBar', () => {
-  it('draws a custom series plus a scatter for the tooltip', () => {
+  it('draws the custom error bars, a mean scatter, and small-n raw points', () => {
     const series = buildSeries(context('errorBar', [source('A', noisy), source('B', ramp)]));
-    expect(series.map((entry) => entry.type)).toEqual(['scatter', 'custom']);
+    expect(series.slice(0, 2).map((entry) => entry.type)).toEqual(['scatter', 'custom']);
+    expect(series.slice(2).every((entry) => entry.type === 'scatter')).toBe(true);
   });
 
   it('renderItem emits a stem and two caps', () => {
@@ -710,6 +712,56 @@ describe('buildOption axis selection', () => {
     expect(ticksOnly.every((axis) => axis.alignTicks)).toBe(true);
     expect(rangeOnly.map((axis) => [axis.min, axis.max])).toEqual([[0, 20], [0, 20]]);
     expect(rangeOnly.every((axis) => axis.alignTicks === false)).toBe(true);
+  });
+
+  it.each(['boxplot', 'violin', 'errorBar'] as const)(
+    'overlays all six raw observations on a small %s chart',
+    (type) => {
+      const values = [1, 2, 3, 4, 5, 100];
+      const series = buildSeries(context(type, [source('A', values)]));
+      const raw = series.find(
+        (entry) =>
+          entry.type === 'scatter' &&
+          (entry as { itemStyle?: { opacity?: number } }).itemStyle?.opacity === 0.68,
+      ) as { data: Array<[number, number]> };
+
+      expect(raw.data).toHaveLength(6);
+      expect(raw.data.map((point) => point[1]).sort((a, b) => a - b)).toEqual(values);
+      expect(new Set(raw.data.map((point) => point[0])).size).toBe(6);
+    },
+  );
+
+  it('only overlays raw samples automatically below fifteen', () => {
+    const fifteen = Array.from({ length: 15 }, (_, index) => index);
+    const automatic = buildSeries(context('boxplot', [source('A', fifteen)]));
+    const forced = buildSeries(
+      context('boxplot', [source('A', fifteen)], { rawPointMode: 'always' }),
+    );
+    const off = buildSeries(
+      context('boxplot', [source('A', fifteen.slice(0, 6))], { rawPointMode: 'never' }),
+    );
+    const isRaw = (entry: SeriesOption) =>
+      entry.type === 'scatter' &&
+      (entry as { itemStyle?: { opacity?: number } }).itemStyle?.opacity === 0.68;
+
+    expect(automatic.some(isRaw)).toBe(false);
+    expect(forced.some(isRaw)).toBe(true);
+    expect(off.some(isRaw)).toBe(false);
+  });
+
+  it('keeps raw-point ordinates unsmoothed', () => {
+    const values = [1, 10, 2, 20, 3, 30];
+    const series = buildSeries({
+      ...context('boxplot', [source('A', values)]),
+      smoothing: { mode: 'movingAverage', window: 5, alpha: 0.5, degree: 2 },
+    });
+    const raw = series.find(
+      (entry) =>
+        entry.type === 'scatter' &&
+        (entry as { itemStyle?: { opacity?: number } }).itemStyle?.opacity === 0.68,
+    ) as { data: Array<[number, number]> };
+
+    expect(raw.data.map((point) => point[1])).toEqual(values);
   });
 
   it('produces a usable option for every declared chart type', () => {

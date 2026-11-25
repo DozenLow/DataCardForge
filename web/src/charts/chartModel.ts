@@ -84,6 +84,8 @@ export interface ChartConfig {
   limitRange: ChartLimitRange | null;
   /** Optional label on plotted points. */
   pointLabels: 'none' | 'value' | 'name';
+  /** Raw-sample overlay for small-sample aggregate plots. */
+  rawPointMode: 'auto' | 'always' | 'never';
   /** Optional single-card multi-panel composition. */
   composition: ChartComposition | null;
   /** Bin count for the histogram; `0` means "choose automatically". */
@@ -109,6 +111,7 @@ export function defaultChartConfig(type: ChartTypeId, sources: ChartSource[]): C
     acceptedRanges: [],
     limitRange: null,
     pointLabels: 'none',
+    rawPointMode: 'auto',
     composition: null,
     binCount: 0,
     errorKind: 'sd',

@@ -167,7 +167,10 @@ export function buildSeries(context: BuildContext): SeriesOption[] {
     default:
       series = [];
   }
-  return applyVectorAnnotations(series, context);
+  return [
+    ...applyVectorAnnotations(series, context),
+    ...smallSamplePointSeries(context),
+  ];
 }
 
 // ── line / bar ─────────────────────────────────────────────────────────────
@@ -812,6 +815,77 @@ function limitPoints(context: BuildContext, series: SeriesOption[]): LimitPoint[
     const value = Number(item[item.length - 1]);
     if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(value)) return [];
     return [{ x, y, value, yAxisIndex: 0 }];
+  });
+}
+
+const SMALL_SAMPLE_THRESHOLD = 15;
+const RAW_POINT_JITTER = 0.34;
+
+function smallSamplePointSeries(context: BuildContext): SeriesOption[] {
+  const { config } = context;
+  if (config.rawPointMode === 'never') return [];
+  if (
+    config.type !== 'bar' &&
+    config.type !== 'boxplot' &&
+    config.type !== 'violin' &&
+    config.type !== 'errorBar'
+  ) {
+    return [];
+  }
+
+  return config.sources.flatMap((source, sourceIndex) => {
+    const values =
+      config.type === 'bar'
+        ? source.raw
+            .map((value, row) => ({
+              x: config.xAxisSource?.raw[row] ?? row + 1,
+              y: value,
+            }))
+            .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+        : finite(source.raw).map((value) => ({ x: sourceIndex, y: value }));
+    if (
+      values.length === 0 ||
+      (config.rawPointMode === 'auto' && values.length >= SMALL_SAMPLE_THRESHOLD)
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        name: source.label,
+        type: 'scatter' as const,
+        data: values.map((point, index) => {
+          const jitter =
+            (((index * 0.61803398875 + sourceIndex * 0.17320508076) % 1) - 0.5) *
+            RAW_POINT_JITTER;
+          return [point.x + jitter, point.y] as [number, number];
+        }),
+        symbolSize: 5,
+        symbol: 'circle',
+        itemStyle: {
+          color: lineColor(sourceIndex),
+          opacity: 0.68,
+          borderColor: '#ffffff',
+          borderWidth: 0.7,
+        },
+        label:
+          config.pointLabels === 'none'
+            ? { show: false }
+            : {
+                show: true,
+                position: 'right',
+                distance: 3,
+                fontSize: 9,
+                formatter: (params: { value?: unknown }) =>
+                  pointLabel(config.type, config.pointLabels, {
+                    ...params,
+                    seriesName: source.label,
+                  }),
+              },
+        z: 12,
+        animation: false,
+      },
+    ];
   });
 }
 

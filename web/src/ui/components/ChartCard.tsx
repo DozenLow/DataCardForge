@@ -1061,6 +1061,24 @@ export function ChartCard({
                     <span>{t('chart.secondAxis')}</span>
                   </label>
                 ) : null}
+                {['bar', 'boxplot', 'violin', 'errorBar'].includes(card.config.type) ? (
+                  <label className="chart-card__field">
+                    <span>{t('chart.rawPoints')}</span>
+                    <select
+                      className="card__control"
+                      value={card.config.rawPointMode}
+                      onChange={(event) =>
+                        setChartConfig(card.id, {
+                          rawPointMode: event.target.value as 'auto' | 'always' | 'never',
+                        })
+                      }
+                    >
+                      <option value="auto">{t('chart.rawPoints.auto')}</option>
+                      <option value="always">{t('chart.rawPoints.always')}</option>
+                      <option value="never">{t('chart.rawPoints.never')}</option>
+                    </select>
+                  </label>
+                ) : null}
                 {card.config.type === 'scatter' || card.config.type === 'regression' ? (
                   <label className="chart-card__field">
                     <input
