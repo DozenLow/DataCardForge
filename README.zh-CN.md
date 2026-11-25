@@ -3,7 +3,7 @@
 [![CI](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml/badge.svg)](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml)
 [![Pages 演示](https://img.shields.io/badge/%E6%BC%94%E7%A4%BA-%E5%89%8D%E7%AB%AF%E5%9C%A8%E7%BA%BF-2ea44f)](https://dozenlow.github.io/DataCardForge/)
 [![许可证](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
-[![测试](https://img.shields.io/badge/tests-1443%20unit%20%C2%B7%2032%20ctest-brightgreen)](web/tests)
+[![测试](https://img.shields.io/badge/tests-1453%20unit%20%C2%B7%2032%20ctest-brightgreen)](web/tests)
 
 **[English](README.md) | [中文](README.zh-CN.md)**
 
@@ -16,7 +16,7 @@
 </p>
 
 - **作者与权属**：`DozenLow` · GPL-3.0 · 身份、时间线与提交锚点见 [`PROVENANCE.md`](PROVENANCE.md)
-- **实测状态**（2026-11-25）：前端 1443 个单元/DOM 测试（20 个跳过）· 后端 32 个 ctest（4 个 opt-in）· 端到端 102 项检查，全绿
+- **实测状态**（2026-11-25）：前端 1453 个单元/DOM 测试（20 个跳过）· 后端 32 个 ctest（4 个 opt-in）· 端到端 102 项检查，全绿
 - **尚未完成**：函数卡接口稳定、交互未收口；连线 hover 与断线编辑未做。见[状态与已知缺口](#状态与已知缺口)
 
 ## 试一下
@@ -80,6 +80,9 @@ Eigen 3.4 头文件（`sudo apt install build-essential cmake ninja-build libeig
 - 支持 TXT / CSV / TSV / DAT / XLSX；CSV 支持引号转义与分隔符自动嗅探
 - 首行非纯数字时识别为列标题（annotation）而非数据
 - 文件来源的表格默认只读，卡片文件行的锁按钮可切换编辑；无法解析的单元格显示 `—`（不静默变 0），非数值输入被拒绝并提示
+- **缺测记号按缺失读**：空单元格，以及 `nan`、`NA`、`N/A`、`ND`、`<LOD`、`<LOQ`、`-`、`—`，都读成 `—`，
+  所以「一列数字里几个空」仍是数值列；`<LOD` 不填成「限值的一半」，数字列里混进真文本仍整份拒绝
+  （[口径](docs/decisions/2026-11-25-missing-value-markers.md)）
 - 解析在 Web Worker 中进行，万行文件不冻结界面（无 Worker 环境回退主线程）
 - 重新打开同一文件仅在字节一致（`size` + `lastModified`）时复用解析结果；同名不同内容会重新解析
 - 数值按**最短往返精度**显示，`1e6` 量级的测量列不会整列渲染成同一个 `1e+6`
@@ -253,7 +256,7 @@ Eigen 3.4 头文件（`sudo apt install build-essential cmake ninja-build libeig
 | 自研虚拟滚动 | 大表渲染 | 无第三方依赖 |
 | Web Worker（`src/loaders/parse.worker.ts`） | 解析离开主线程 | 大文件加载时界面不冻结 |
 | Node.js 22 | 前端运行时、开发服务器、CI | CI 固定 `node-version: 22`；按需 fuzz 门控需 `--experimental-transform-types` |
-| Vitest 5 + jsdom | 单元 / DOM 测试 | 1443 passed，20 skipped |
+| Vitest 5 + jsdom | 单元 / DOM 测试 | 1453 passed，20 skipped |
 | Playwright（Chromium） | 端到端冒烟 | 102 项检查，跑在 `vite preview` 上 |
 | **C++17**（实测 g++ 15） | 计算后端语言 | `CMAKE_CXX_STANDARD 17`，CMake 3.24+ + Ninja |
 | **Eigen 3.4** | 线性代数/矩阵运算 | Header-only，`find_package(Eigen3 REQUIRED NO_MODULE)` |
@@ -306,7 +309,7 @@ npm test                  # 单元测试（vitest，含跨层夹具）
 ### 测试
 
 ```bash
-# 前端：typecheck + 1443 个单元/DOM 测试（20 个 skipped）
+# 前端：typecheck + 1453 个单元/DOM 测试（20 个 skipped）
 cd web && npm run typecheck && npm test
 
 # 后端：32 个 ctest 用例（默认 28 个通过，4 个按需压力/fuzz/性能门控 skipped）

@@ -3,7 +3,7 @@
 [![CI](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml/badge.svg)](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml)
 [![Pages demo](https://img.shields.io/badge/demo-live%20(front%20end)-2ea44f)](https://dozenlow.github.io/DataCardForge/)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1443%20unit%20%C2%B7%2032%20ctest-brightgreen)](web/tests)
+[![Tests](https://img.shields.io/badge/tests-1453%20unit%20%C2%B7%2032%20ctest-brightgreen)](web/tests)
 
 **[English](README.md) | [中文](README.zh-CN.md)**
 
@@ -18,7 +18,7 @@ drop a measurement file, get a card you can plot, transform and chain.
 </p>
 
 - **Author & provenance**: `DozenLow` · GPL-3.0 · identity, timeline and commit anchors in [`PROVENANCE.md`](PROVENANCE.md)
-- **Verified state** (2026-11-25): 1443 frontend unit/DOM tests (20 skipped) · 32 backend ctest cases
+- **Verified state** (2026-11-25): 1453 frontend unit/DOM tests (20 skipped) · 32 backend ctest cases
   (4 opt-in) · 102 end-to-end smoke checks — all green
 - **Not finished yet**: function cards are API-stable but UX-incomplete; connection hover and
   disconnect-editing are not done. See [Known gaps](#known-gaps)
@@ -98,6 +98,10 @@ stream pushes node state changes (dirty → computing → done | error) to drive
 - **Automatic header detection**: a non-numeric first row becomes column titles (annotations)
 - File-backed tables start **read-only**; a lock button unlocks editing. Unparseable cells show `—`
   instead of silently becoming 0; non-numeric input is rejected with a message
+- **Missing values are read as gaps, not as text**: an empty cell, or one of `nan`, `NA`, `N/A`,
+  `ND`, `<LOD`, `<LOQ`, `-`, `—` becomes `—`, so a column of numbers with a few gaps stays numeric.
+  `<LOD` stays a gap rather than a filled-in half limit, and a genuine label mixed into a numeric
+  column is still refused ([why](docs/decisions/2026-11-25-missing-value-markers.md))
 - Parsing runs in a **Web Worker**, so a 10 000-row file does not freeze the interface (falls back to
   the main thread where Workers are unavailable)
 - Re-opening the same file reuses the parse only when the bytes match (`size` + `lastModified`);
@@ -329,7 +333,7 @@ The current state, the next task and the open questions live in `STATE.md` at th
 | Hand-rolled virtual scrolling | Large-table rendering | No third-party dependency |
 | Web Worker (`src/loaders/parse.worker.ts`) | Off-thread file parsing | Keeps the UI responsive |
 | Node.js 22 | Frontend runtime, dev server, CI | CI pins `node-version: 22`; the opt-in fuzz gate needs `--experimental-transform-types` |
-| Vitest 5 + jsdom | Unit / DOM tests | 1443 passed, 20 skipped |
+| Vitest 5 + jsdom | Unit / DOM tests | 1453 passed, 20 skipped |
 | Playwright (Chromium) | End-to-end smoke | 102 checks against `vite preview` |
 | **C++17** (verified with g++ 15) | Compute backend language | `CMAKE_CXX_STANDARD 17`, CMake 3.24+ + Ninja |
 | **Eigen 3.4** | Linear algebra / matrix operations | Header-only, `find_package(Eigen3 REQUIRED NO_MODULE)` |
@@ -382,7 +386,7 @@ npm test                  # unit tests (vitest, includes cross-tier fixtures)
 ### Tests
 
 ```bash
-# Frontend: typecheck + 1443 unit/DOM tests (20 skipped)
+# Frontend: typecheck + 1453 unit/DOM tests (20 skipped)
 cd web && npm run typecheck && npm test
 
 # Backend: 32 ctest cases (28 pass by default, 4 opt-in stress/fuzz/perf gates skipped)
