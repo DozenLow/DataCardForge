@@ -494,6 +494,15 @@ only and refuses path traversal (an out-of-root probe returns 404 rather than fa
   out-of-order completion
 - WebSocket upgrade: replace long polling with a persistent connection to cut state-push latency
 
+## Direction-simulation personas (dev aid)
+
+Twelve simulated user personas (6 non-experts + 6 experts) live outside the repo at `../work/personas/`
+(usage in that directory's README). When weighing a direction or feature-detail choice, you may spin up
+subagents to role-play them and gather needs/reactions as input. **Personas must not be used directly for
+decisions** — the author anchors direction; simulations read only the product description, and non-experts
+keep their knowledge boundary (say "I don't know" rather than borrowing the model's expertise). This is a
+dev aid, not a product feature.
+
 ## Acknowledgements
 
 This project was developed with the assistance of **AI coding agents** (DeepSeek Harness / Claude and
