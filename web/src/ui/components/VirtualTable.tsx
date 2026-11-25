@@ -132,7 +132,7 @@ export function VirtualTable({
     for (let c = 0; c < columnCount; ++c) {
       let widest = matrix.columnLabel(c).length;
       for (let r = 0; r < sampleRows; ++r) {
-        const text = formatCell(matrix.cell(r, c));
+        const text = matrix.categoricalLabel(r, c) ?? formatCell(matrix.cell(r, c));
         if (text.length > widest) widest = text.length;
       }
       widths.push(Math.min(MAX_COLUMN_WIDTH, Math.max(COLUMN_WIDTH, 24 + widest * 7.4)));
@@ -350,7 +350,7 @@ export function VirtualTable({
               {Array.from({ length: columnCount }, (_, c) => {
                 const value = matrix.cell(row, c);
                 const isEditing = editing?.row === row && editing?.col === c;
-                if (isEditing && !readOnly) {
+                if (isEditing && !readOnly && !matrix.isCategoricalColumn(c)) {
                   return (
                     <input
                       key={c}
@@ -381,14 +381,16 @@ export function VirtualTable({
                 // Cells clip rather than ellipsize (`white-space: nowrap` + `overflow:
                 // hidden`), and shortest-round-trip text is often wider than the 118px
                 // default column — so the full value has to stay reachable on hover.
-                const text = formatCell(value);
+                const text = matrix.categoricalLabel(row, c) ?? formatCell(value);
                 return (
                   <div
                     key={c}
                     className="vtable__cell"
                     title={text}
                     onDoubleClick={() => {
-                      if (!readOnly) setEditing({ row, col: c });
+                      if (!readOnly && !matrix.isCategoricalColumn(c)) {
+                        setEditing({ row, col: c });
+                      }
                     }}
                   >
                     {text}

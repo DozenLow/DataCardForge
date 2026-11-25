@@ -301,6 +301,27 @@ describe('tile and cascade', () => {
 });
 
 describe('snapshot round-trip', () => {
+  it('persists categorical label dictionaries alongside numeric codes', () => {
+    const source = new MatrixData();
+    source.appendColumn('Pos.1', [0, 1, 0]);
+    source.setColumnAnnotation(0, 'group');
+    source.setColumnCategories(0, ['control', 'treated']);
+    const cardId = store().addMatrixCard([{ name: 'groups.csv', matrix: source }]);
+
+    const snapshot = store().toSnapshot();
+    store().reset();
+    store().loadSnapshot(snapshot);
+
+    const restoredCard = store().cards.find((card) => card.id === cardId);
+    expect(restoredCard && isMatrixCard(restoredCard)).toBe(true);
+    const matrixId = isMatrixCard(restoredCard!)
+      ? restoredCard.sources[0].matrixId
+      : -1;
+    const restored = store().matrices.get(matrixId)!;
+    expect(restored.column(0).data).toEqual([0, 1, 0]);
+    expect(restored.column(0).categories).toEqual(['control', 'treated']);
+  });
+
   it('restores cards, matrices and the dependency graph', () => {
     const cardId = store().addMatrixCard([
       { name: '1.txt', matrix: matrix([[1, 2], [3, 4]], ['a', 'b']) },

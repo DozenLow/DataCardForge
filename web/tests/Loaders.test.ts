@@ -80,6 +80,23 @@ describe('TxtLoader', () => {
     expect(mat.cell(1, 1)).toBe(4);
   });
 
+  it('keeps text group columns as stable categorical codes and labels', async () => {
+    const mat = await new TxtLoader().load(
+      makeFile('a.txt', 'x group\n1 control\n2 treated\n3 control\n'),
+    );
+
+    expect(mat.column(1).categories).toEqual(['control', 'treated']);
+    expect(mat.column(1).data).toEqual([0, 1, 0]);
+    expect(mat.categoricalLabel(0, 1)).toBe('control');
+    expect(mat.categoricalLabel(1, 1)).toBe('treated');
+  });
+
+  it('rejects a mixed numeric and text column instead of silently coercing it', async () => {
+    await expect(
+      new CsvLoader().load(makeFile('a.csv', 'x,group\n1,0\n2,treatment\n')),
+    ).rejects.toThrow(/mixes numeric and text/);
+  });
+
   it('rejects an empty file', async () => {
     await expect(new TxtLoader().load(makeFile('a.txt', '\n\n'))).rejects.toThrow(/Empty file/);
   });
@@ -182,6 +199,18 @@ describe('matrixToCsv', () => {
     mat.appendColumn('Pos.1', [1, NaN]);
     expect(matrixToCsv(mat).split('\n')[2]).toBe('');
   });
+
+  it('exports categorical labels instead of their internal numeric codes', () => {
+    const mat = new MatrixData();
+    mat.appendColumn('Pos.1', [0, 1, 0]);
+    mat.setColumnCategories(0, ['control, A', 'treated']);
+    expect(matrixToCsv(mat).slice(1).split('\n')).toEqual([
+      'Pos.1',
+      '"control, A"',
+      'treated',
+      '"control, A"',
+    ]);
+  });
 });
 
 describe('loadMatrixFile worker dispatch (fix F)', () => {
@@ -203,11 +232,13 @@ describe('loadMatrixFile worker dispatch (fix F)', () => {
     matrix.appendColumn('Pos.1', [1.5, NaN, 3]);
     matrix.setColumnAnnotation(0, 'temp °C');
     matrix.appendColumn('Pos.2', [4, 5, 6]);
+    matrix.setColumnCategories(1, ['a', 'b', 'c']);
 
     const columns = matrix.columns().map((col) => ({
       posName: col.posName,
       annotation: col.annotation,
       data: col.data,
+      categories: col.categories,
     }));
     const restored = payloadToMatrix(columns);
 
@@ -215,6 +246,7 @@ describe('loadMatrixFile worker dispatch (fix F)', () => {
     expect(restored.columnLabel(0)).toBe('temp °C');
     expect(restored.cell(0, 0)).toBe(1.5);
     expect(restored.cell(1, 0)).toBeNaN();
+    expect(restored.column(1).categories).toEqual(['a', 'b', 'c']);
     // A copy, not an alias — the worker's arrays must never be mutated in place.
     columns[0].data[0] = 99;
     expect(restored.cell(0, 0)).toBe(1.5);

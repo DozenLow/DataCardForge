@@ -17,6 +17,8 @@ export interface MatrixColumn {
   annotation: string;
   /** Column values, top to bottom. */
   data: number[];
+  /** Labels for a categorical column; numeric data stores the zero-based codes. */
+  categories?: string[];
 }
 
 export class MatrixData {
@@ -47,6 +49,24 @@ export class MatrixData {
 
   appendColumn(posName: string, data: number[]): void {
     this.m_columns.push({ posName, annotation: '', data });
+  }
+
+  setColumnCategories(index: number, categories: readonly string[]): void {
+    if (index >= 0 && index < this.m_columns.length) {
+      this.m_columns[index].categories = categories.slice();
+    }
+  }
+
+  isCategoricalColumn(index: number): boolean {
+    return (this.m_columns[index]?.categories?.length ?? 0) > 0;
+  }
+
+  categoricalLabel(row: number, column: number): string | undefined {
+    const source = this.m_columns[column];
+    if (!source?.categories) return undefined;
+    const code = source.data[row];
+    if (!Number.isInteger(code) || code < 0 || code >= source.categories.length) return undefined;
+    return source.categories[code];
   }
 
   setColumnAnnotation(index: number, anno: string): void {
@@ -95,6 +115,7 @@ export class MatrixData {
     for (const col of this.m_columns) {
       copy.appendColumn(col.posName, col.data.slice());
       copy.setColumnAnnotation(copy.columnCount() - 1, col.annotation);
+      if (col.categories) copy.setColumnCategories(copy.columnCount() - 1, col.categories);
     }
     return copy;
   }

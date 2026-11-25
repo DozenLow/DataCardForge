@@ -37,10 +37,9 @@ export function extensionOf(name: string): string {
  * value — otherwise a tolerant fallback like `0` would make `temp` look numeric and
  * silently swallow the header row into the data.
  *
- * Deliberate difference from the C++ original: a cell that is present but not a
- * number becomes `NaN` and reaches the grid as `—`, instead of being coerced to `0`.
- * Inventing zeros for unparseable or ragged cells corrupts measurement data, so the
- * web port surfaces the gap.
+ * A column that is entirely text is categorical: the numeric array carries stable codes
+ * and the matrix keeps the label dictionary as display metadata. Mixing text and numbers
+ * in one column is refused instead of silently inventing zeroes or changing its meaning.
  */
 export function gridToMatrix(grid: string[][]): MatrixData {
   let rows = grid.filter((r) => r.length > 0);
@@ -59,20 +58,42 @@ export function gridToMatrix(grid: string[][]): MatrixData {
   const colCount = rows.reduce((max, r) => Math.max(max, r.length), 0);
   if (colCount === 0) throw new Error('Empty file: no columns found.');
 
-  const columns: number[][] = Array.from({ length: colCount }, () => []);
-  for (const row of rows) {
-    for (let c = 0; c < colCount; ++c) {
-      const token = c < row.length ? row[c].trim() : '';
-      columns[c].push(token === '' ? NaN : parseNumeric(token));
-    }
-  }
-
   const mat = new MatrixData();
   for (let c = 0; c < colCount; ++c) {
-    mat.appendColumn(`Pos.${c + 1}`, columns[c]);
-    if (c < headerNames.length && headerNames[c] !== '') {
-      mat.setColumnAnnotation(c, headerNames[c]);
+    const tokens = rows.map((row) => (c < row.length ? row[c].trim() : ''));
+    let hasNumeric = false;
+    let hasText = false;
+    for (const token of tokens) {
+      if (token === '') continue;
+      if (isNumeric(token)) hasNumeric = true;
+      else hasText = true;
     }
+    if (hasNumeric && hasText) {
+      const label = headerNames[c] || `Pos.${c + 1}`;
+      throw new Error(
+        `Column "${label}" mixes numeric and text values; use blanks for missing values.`,
+      );
+    }
+
+    const categories: string[] = [];
+    const categoryCodes = new Map<string, number>();
+    const data = tokens.map((token) => {
+      if (token === '') return NaN;
+      if (!hasText) return parseNumeric(token);
+      let code = categoryCodes.get(token);
+      if (code === undefined) {
+        code = categories.length;
+        categories.push(token);
+        categoryCodes.set(token, code);
+      }
+      return code;
+    });
+    mat.appendColumn(`Pos.${c + 1}`, data);
+    const index = mat.columnCount() - 1;
+    if (c < headerNames.length && headerNames[c] !== '') {
+      mat.setColumnAnnotation(index, headerNames[c]);
+    }
+    if (hasText) mat.setColumnCategories(index, categories);
   }
   return mat;
 }

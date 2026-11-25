@@ -25,6 +25,7 @@ export function matrixToPayload(matrix: MatrixData): ColumnPayload[] {
     posName: col.posName,
     annotation: col.annotation,
     data: col.data,
+    categories: col.categories,
   }));
 }
 

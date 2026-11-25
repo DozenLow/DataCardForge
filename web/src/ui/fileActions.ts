@@ -131,7 +131,8 @@ export function matrixToCsv(matrix: MatrixData): string {
     const cells: string[] = [];
     for (let c = 0; c < cols; ++c) {
       const value = matrix.cell(r, c);
-      cells.push(Number.isNaN(value) ? '' : String(value));
+      const category = matrix.categoricalLabel(r, c);
+      cells.push(category !== undefined ? csvField(category) : Number.isNaN(value) ? '' : String(value));
     }
     lines.push(cells.join(','));
   }

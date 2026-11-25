@@ -10,6 +10,7 @@ export interface ColumnPayload {
   posName: string;
   annotation: string;
   data: number[];
+  categories?: string[];
 }
 
 export type ParseResponse =

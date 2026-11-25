@@ -399,7 +399,12 @@ export type CardSnapshot = CardModel;
 export interface MatrixSnapshot {
   id: number;
   name: string;
-  columns: Array<{ posName: string; annotation: string; data: number[] }>;
+  columns: Array<{
+    posName: string;
+    annotation: string;
+    data: number[];
+    categories?: string[];
+  }>;
 }
 
 // ── workspace environment lock ───────────────────────────────────────────────────────

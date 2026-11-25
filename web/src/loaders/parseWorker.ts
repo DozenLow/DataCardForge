@@ -20,7 +20,9 @@ export function payloadToMatrix(columns: ColumnPayload[]): MatrixData {
   const matrix = new MatrixData();
   for (const col of columns) {
     matrix.appendColumn(col.posName, col.data.slice());
-    matrix.setColumnAnnotation(matrix.columnCount() - 1, col.annotation);
+    const index = matrix.columnCount() - 1;
+    matrix.setColumnAnnotation(index, col.annotation);
+    if (col.categories) matrix.setColumnCategories(index, col.categories);
   }
   return matrix;
 }

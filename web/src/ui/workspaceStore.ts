@@ -6530,6 +6530,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
             posName: col.posName,
             annotation: col.annotation,
             data: col.data,
+            categories: col.categories,
           })),
         });
       }
@@ -6582,7 +6583,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         const matrix = new MatrixData();
         for (const col of entry.columns) {
           matrix.appendColumn(col.posName, col.data.slice());
-          matrix.setColumnAnnotation(matrix.columnCount() - 1, col.annotation);
+          const index = matrix.columnCount() - 1;
+          matrix.setColumnAnnotation(index, col.annotation);
+          if (col.categories) matrix.setColumnCategories(index, col.categories);
         }
         matrices.set(entry.id, matrix);
       }
