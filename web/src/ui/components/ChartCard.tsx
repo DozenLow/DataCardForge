@@ -33,9 +33,11 @@ import {
 } from '../../charts/chartTypes.ts';
 import { buildOption, ZOOM_COMPONENT_IDS, type BuildContext } from '../../charts/chartOptions.ts';
 import {
+  isDrawable,
   nonPositiveAxisCounts,
   type ChartAnnotationAxis,
   type ChartLimitRange,
+  type ChartPanel,
 } from '../../charts/chartModel.ts';
 import { exportChart, type ExportType } from '../../charts/export.ts';
 import { CardShell } from './CardShell.tsx';
@@ -66,7 +68,7 @@ function annotationId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${annotationSequence.toString(36)}`;
 }
 
-type PanelKind = 'type' | 'options' | 'annotations' | 'export';
+type PanelKind = 'type' | 'options' | 'annotations' | 'panels' | 'export';
 
 /** An open toolbar dropdown, pinned to the button that opened it in viewport coordinates. */
 interface OpenPanel {
@@ -128,7 +130,7 @@ export function ChartCard({
       ? Math.floor(card.config.sources.length / 2) + (card.config.sources.length % 2)
       : drawnSources.length;
   const needed = minimumColumns(card.config.type);
-  const drawable = card.config.sources.length >= needed;
+  const drawable = isDrawable(card.config);
 
   /**
    * Data facts the axes panel has to state, because the chart cannot:
@@ -372,10 +374,62 @@ export function ChartCard({
     if (!chart) return;
     // `dataZoom` is always installed for the value-axis types, and a wheel over the plot
     // zooms instead of scrolling. Without this the user has no way back to the full range.
-    for (const [dataZoomIndex] of ZOOM_COMPONENT_IDS.entries()) {
+    const option = chart.getOption() as { dataZoom?: unknown[] };
+    const zoomCount = option.dataZoom?.length ?? ZOOM_COMPONENT_IDS.length;
+    for (let dataZoomIndex = 0; dataZoomIndex < zoomCount; ++dataZoomIndex) {
       chart.dispatchAction({ type: 'dataZoom', dataZoomIndex, start: 0, end: 100 });
     }
   }, [chart]);
+
+  const enablePanels = useCallback(() => {
+    const refs = card.config.sources.map((source) => ({
+      matrixId: source.matrixId,
+      columnIndex: source.columnIndex,
+    }));
+    const makePanel = (label: string): ChartPanel => ({
+      id: annotationId('panel'),
+      label,
+      type: card.config.type,
+      sources: refs,
+    });
+    setChartConfig(card.id, {
+      composition: {
+        columns: 2,
+        shareXTicks: true,
+        shareXRange: false,
+        panels: [makePanel('A'), makePanel('B')],
+      },
+    });
+  }, [card.config.sources, card.config.type, card.id, setChartConfig]);
+
+  const updatePanel = useCallback(
+    (panelId: string, patch: Partial<ChartPanel>) => {
+      const composition = card.config.composition;
+      if (!composition) return;
+      setChartConfig(card.id, {
+        composition: {
+          ...composition,
+          panels: composition.panels.map((panel) =>
+            panel.id === panelId ? { ...panel, ...patch } : panel,
+          ),
+        },
+      });
+    },
+    [card.config.composition, card.id, setChartConfig],
+  );
+
+  const removePanel = useCallback(
+    (panelId: string) => {
+      const composition = card.config.composition;
+      if (!composition) return;
+      const panels = composition.panels.filter((panel) => panel.id !== panelId);
+      setChartConfig(card.id, {
+        composition:
+          panels.length >= 2 ? { ...composition, panels } : null,
+      });
+    },
+    [card.config.composition, card.id, setChartConfig],
+  );
 
   // ── export ─────────────────────────────────────────────────────────────
 
@@ -523,6 +577,198 @@ export function ChartCard({
                     </button>
                   );
                 })}
+              </Popup>
+            ) : null}
+          </div>
+
+          <div className="chart-card__tp">
+            <button
+              type="button"
+              className={`chart-card__tbutton card__control${
+                panel?.kind === 'panels' ? ' is-open' : ''
+              }`}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => togglePanel('panels', event)}
+            >
+              {t('chart.panels')} ▾
+            </button>
+            {panel?.kind === 'panels' ? (
+              <Popup
+                x={panel.x}
+                y={panel.y}
+                className="chart-card__popup chart-card__popup--panels"
+                onDismiss={dismissPanel}
+              >
+                {!card.config.composition ? (
+                  <button
+                    type="button"
+                    className="chart-card__popup-item"
+                    onClick={enablePanels}
+                  >
+                    {t('chart.enablePanels')}
+                  </button>
+                ) : (
+                  <>
+                    <label className="chart-card__field">
+                      <span>{t('chart.panelColumns')}</span>
+                      <select
+                        className="card__control"
+                        value={card.config.composition.columns}
+                        onChange={(event) => {
+                          const composition = card.config.composition!;
+                          setChartConfig(card.id, {
+                            composition: {
+                              ...composition,
+                              columns: Number(event.target.value) as 1 | 2,
+                            },
+                          });
+                        }}
+                      >
+                        <option value={1}>1</option>
+                        <option value={2}>2</option>
+                      </select>
+                    </label>
+                    <label className="chart-card__field">
+                      <input
+                        type="checkbox"
+                        checked={card.config.composition.shareXTicks}
+                        onChange={(event) => {
+                          const composition = card.config.composition!;
+                          setChartConfig(card.id, {
+                            composition: {
+                              ...composition,
+                              shareXTicks: event.target.checked,
+                            },
+                          });
+                        }}
+                      />
+                      <span>{t('chart.shareXTicks')}</span>
+                    </label>
+                    <label className="chart-card__field">
+                      <input
+                        type="checkbox"
+                        checked={card.config.composition.shareXRange}
+                        onChange={(event) => {
+                          const composition = card.config.composition!;
+                          setChartConfig(card.id, {
+                            composition: {
+                              ...composition,
+                              shareXRange: event.target.checked,
+                            },
+                          });
+                        }}
+                      />
+                      <span>{t('chart.shareXRange')}</span>
+                    </label>
+
+                    {card.config.composition.panels.map((chartPanel) => (
+                      <div className="chart-card__panel-editor" key={chartPanel.id}>
+                        <div className="chart-card__panel-heading">
+                          <input
+                            className="card__control chart-card__panel-label"
+                            value={chartPanel.label}
+                            aria-label={t('chart.panelLabel')}
+                            onChange={(event) =>
+                              updatePanel(chartPanel.id, { label: event.target.value })
+                            }
+                          />
+                          <select
+                            className="card__control"
+                            value={chartPanel.type}
+                            onChange={(event) =>
+                              updatePanel(chartPanel.id, {
+                                type: event.target.value as ChartPanel['type'],
+                              })
+                            }
+                          >
+                            {CHART_TYPE_ORDER.map((id) => (
+                              <option key={id} value={id}>
+                                {t(chartTypeDef(id).labelKey)}
+                              </option>
+                            ))}
+                          </select>
+                          <button
+                            type="button"
+                            className="chart-card__annotation-remove"
+                            title={t('chart.removePanel')}
+                            onClick={() => removePanel(chartPanel.id)}
+                          >
+                            ×
+                          </button>
+                        </div>
+                        <div className="chart-card__panel-sources">
+                          {card.config.sources.map((source) => {
+                            const selected = chartPanel.sources.some(
+                              (ref) =>
+                                ref.matrixId === source.matrixId &&
+                                ref.columnIndex === source.columnIndex,
+                            );
+                            return (
+                              <label key={`${source.matrixId}:${source.columnIndex}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={selected}
+                                  onChange={() => {
+                                    const refs = selected
+                                      ? chartPanel.sources.filter(
+                                          (ref) =>
+                                            ref.matrixId !== source.matrixId ||
+                                            ref.columnIndex !== source.columnIndex,
+                                        )
+                                      : [
+                                          ...chartPanel.sources,
+                                          {
+                                            matrixId: source.matrixId,
+                                            columnIndex: source.columnIndex,
+                                          },
+                                        ];
+                                    updatePanel(chartPanel.id, { sources: refs });
+                                  }}
+                                />
+                                <span>{source.label}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ))}
+
+                    {card.config.composition.panels.length < 4 ? (
+                      <button
+                        type="button"
+                        className="chart-card__popup-item"
+                        onClick={() => {
+                          const composition = card.config.composition!;
+                          const refs = card.config.sources.map((source) => ({
+                            matrixId: source.matrixId,
+                            columnIndex: source.columnIndex,
+                          }));
+                          const panels = [
+                            ...composition.panels,
+                            {
+                              id: annotationId('panel'),
+                              label: String.fromCharCode(65 + composition.panels.length),
+                              type: card.config.type,
+                              sources: refs,
+                            },
+                          ];
+                          setChartConfig(card.id, {
+                            composition: { ...composition, panels },
+                          });
+                        }}
+                      >
+                        {t('chart.addPanel')}
+                      </button>
+                    ) : null}
+                    <button
+                      type="button"
+                      className="chart-card__popup-item"
+                      onClick={() => setChartConfig(card.id, { composition: null })}
+                    >
+                      {t('chart.disablePanels')}
+                    </button>
+                  </>
+                )}
               </Popup>
             ) : null}
           </div>
@@ -1136,7 +1382,7 @@ function exportBaseName(card: ChartCardModel): string {
 
 /** Re-exported so tests and the matrix card can share one definition of "drawable". */
 export function chartIsDrawable(card: ChartCardModel): boolean {
-  return isChartCard(card) && card.config.sources.length >= minimumColumns(card.config.type);
+  return isChartCard(card) && isDrawable(card.config);
 }
 
 /** Unused import guard: `applySmoothing` is re-exported for tests that exercise it here. */

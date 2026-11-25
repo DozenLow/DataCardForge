@@ -4748,7 +4748,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // A chart with no columns has nothing to draw; keep at least one. Also refuse to
       // drop below what the *current type* needs: silently degrading a scatter to
       // "needs at least 2 columns" destroys work the user cannot undo.
-      const floor = Math.max(1, minimumColumns(card.config.type));
+      const compositionFloors =
+        card.config.composition?.panels.map((panel) => minimumColumns(panel.type)) ?? [];
+      const floor = Math.max(1, minimumColumns(card.config.type), ...compositionFloors);
       if (sources.length < floor) return;
       // The X axis may have pointed at the column just removed.
       const xAxisSource =
@@ -4760,7 +4762,23 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
 
       // The card-level edge disappears on its own when the recomputed inputs no longer
       // mention that owner — commitChartConfig diffs the owner set.
-      commitChartConfig(cardId, (config) => ({ ...config, sources, xAxisSource }));
+      commitChartConfig(cardId, (config) => ({
+        ...config,
+        sources,
+        xAxisSource,
+        composition: config.composition
+          ? {
+              ...config.composition,
+              panels: config.composition.panels.map((panel) => ({
+                ...panel,
+                sources: panel.sources.filter(
+                  (source) =>
+                    source.matrixId !== matrixId || source.columnIndex !== columnIndex,
+                ),
+              })),
+            }
+          : null,
+      }));
     },
 
     setChartColumnPanel(cardId, open) {

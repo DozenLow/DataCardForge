@@ -44,8 +44,9 @@ import {
 } from '../core/stats.ts';
 import { applySmoothing, type SmoothingOptions } from '../core/Smoothing.ts';
 import type { ChartConfig, ChartSource } from './chartModel.ts';
-import { resolveSeries } from './chartModel.ts';
+import { chartConfigForPanel, resolveSeries } from './chartModel.ts';
 import { lineColor } from './palette.ts';
+import { chartTypeDef } from './chartTypes.ts';
 
 /**
  * Cap on plotted points for line/scatter-based types.
@@ -897,6 +898,14 @@ function xAxisKind(config: ChartConfig): AxisKind {
 }
 
 export function buildOption(context: BuildContext): EChartsOption {
+  const composition = context.config.composition;
+  if (composition && composition.panels.length > 1) {
+    return buildComposedOption(context);
+  }
+  return buildSingleOption(context);
+}
+
+function buildSingleOption(context: BuildContext): EChartsOption {
   const { config, strings } = context;
   const series = buildSeries(context);
   const categories = config.sources.map((source) => source.label);
@@ -1098,6 +1107,213 @@ export function buildOption(context: BuildContext): EChartsOption {
   }
 
   return option;
+}
+
+interface PanelRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+function panelRects(panelCount: number, columns: 1 | 2): PanelRect[] {
+  const columnCount = Math.min(columns, panelCount);
+  const rowCount = Math.ceil(panelCount / columnCount);
+  const leftMargin = 10;
+  const rightMargin = 3;
+  const topMargin = 9;
+  const bottomMargin = 13;
+  const gapX = 4;
+  const gapY = 6;
+  const width =
+    (100 - leftMargin - rightMargin - gapX * (columnCount - 1)) / columnCount;
+  const height =
+    (100 - topMargin - bottomMargin - gapY * (rowCount - 1)) / rowCount;
+
+  return Array.from({ length: panelCount }, (_, index) => {
+    const column = index % columnCount;
+    const row = Math.floor(index / columnCount);
+    return {
+      left: leftMargin + column * (width + gapX),
+      top: topMargin + row * (height + gapY),
+      width,
+      height,
+    };
+  });
+}
+
+function xExtent(config: ChartConfig): [number, number] | null {
+  const def = chartTypeDef(config.type);
+  if (config.type === 'boxplot' || config.type === 'violin' || config.type === 'errorBar' ||
+      config.type === 'heatmap') {
+    return null;
+  }
+  const values =
+    config.type === 'histogram'
+      ? config.sources[0]?.raw ?? []
+      : resolveSeries(config).flatMap((entry) => entry.points.map((point) => point.x));
+  const finiteValues = values.filter(
+    (value) => Number.isFinite(value) && (!config.xLogScale || value > 0),
+  );
+  if (finiteValues.length === 0 || def.columnArity === 'matrix') return null;
+  let min = Infinity;
+  let max = -Infinity;
+  for (const value of finiteValues) {
+    if (value < min) min = value;
+    if (value > max) max = value;
+  }
+  return [min, max];
+}
+
+function buildComposedOption(context: BuildContext): EChartsOption {
+  const { composition } = context.config;
+  if (!composition) return buildSingleOption(context);
+
+  const rects = panelRects(composition.panels.length, composition.columns);
+  const grid: Array<Record<string, unknown>> = [];
+  const xAxes: Array<Record<string, unknown>> = [];
+  const yAxes: Array<Record<string, unknown>> = [];
+  const series: SeriesOption[] = [];
+  const titles: Array<Record<string, unknown>> = [];
+  const visualMaps: Array<Record<string, unknown>> = [];
+  const dataZoom: Array<Record<string, unknown>> = [];
+  const graphics: Array<Record<string, unknown>> = [];
+  const extents = composition.panels.map((panel) =>
+    xExtent(chartConfigForPanel(context.config, panel)),
+  );
+  const sharedExtent = composition.shareXRange
+    ? extents.reduce<[number, number] | null>((combined, extent) => {
+        if (!extent) return combined;
+        return combined
+          ? [Math.min(combined[0], extent[0]), Math.max(combined[1], extent[1])]
+          : extent;
+      }, null)
+    : null;
+  const legendNames: string[] = [];
+
+  composition.panels.forEach((panel, panelIndex) => {
+    const rect = rects[panelIndex];
+    const config = chartConfigForPanel(context.config, panel);
+    const panelContext = { ...context, config };
+    const panelOption = buildSingleOption(panelContext);
+    const panelSeries = Array.isArray(panelOption.series) ? panelOption.series : [];
+    const panelX = (Array.isArray(panelOption.xAxis) ? panelOption.xAxis[0] : panelOption.xAxis) as
+      | Record<string, unknown>
+      | undefined;
+    const panelY = (
+      Array.isArray(panelOption.yAxis) ? panelOption.yAxis : [panelOption.yAxis]
+    ).filter(Boolean) as Array<Record<string, unknown>>;
+    const xAxisIndex = panelIndex;
+    const yStart = yAxes.length;
+
+    grid.push({
+      left: `${rect.left}%`,
+      top: `${rect.top}%`,
+      width: `${rect.width}%`,
+      height: `${rect.height}%`,
+      containLabel: false,
+    });
+    titles.push({
+      text: panel.label,
+      left: `${rect.left}%`,
+      top: `${Math.max(0, rect.top - 4)}%`,
+      textStyle: { fontSize: 11, fontWeight: 600 },
+    });
+
+    if (panelX) {
+      const rowCount = Math.ceil(composition.panels.length / Math.min(composition.columns, composition.panels.length));
+      const row = Math.floor(panelIndex / Math.min(composition.columns, composition.panels.length));
+      xAxes.push({
+        ...panelX,
+        gridIndex: panelIndex,
+        min: sharedExtent?.[0] ?? panelX.min,
+        max: sharedExtent?.[1] ?? panelX.max,
+        splitNumber: composition.shareXTicks ? 6 : panelX.splitNumber,
+        alignTicks: composition.shareXTicks,
+        axisLabel: {
+          ...(panelX.axisLabel as Record<string, unknown> | undefined),
+          show: !composition.shareXTicks || row === rowCount - 1,
+        },
+      });
+    }
+    panelY.forEach((axis, yIndex) => {
+      yAxes.push({ ...axis, gridIndex: panelIndex, id: `panel-${panelIndex}-y-${yIndex}` });
+    });
+
+    const panelSeriesStart = series.length;
+    panelSeries.forEach((entry) => {
+      const yAxisIndex = Number((entry as { yAxisIndex?: unknown }).yAxisIndex ?? 0);
+      series.push({
+        ...entry,
+        xAxisIndex,
+        yAxisIndex: yStart + Math.min(yAxisIndex, Math.max(0, panelY.length - 1)),
+      });
+    });
+
+    const panelVisualMaps = Array.isArray(panelOption.visualMap)
+      ? panelOption.visualMap
+      : panelOption.visualMap
+        ? [panelOption.visualMap]
+        : [];
+    panelVisualMaps.forEach((visualMap) => {
+      visualMaps.push({
+        ...(visualMap as Record<string, unknown>),
+        seriesIndex: panelSeriesStart,
+        left: `${rect.left + rect.width / 2}%`,
+        top: `${rect.top + rect.height + 1}%`,
+        bottom: undefined,
+        itemHeight: Math.max(40, Math.round(rect.width * 2)),
+      });
+    });
+
+    dataZoom.push(
+      { id: `zoom-x-${panelIndex}`, type: 'inside', xAxisIndex, filterMode: 'none' },
+      { id: `zoom-y-${panelIndex}`, type: 'inside', yAxisIndex: yStart, filterMode: 'none' },
+    );
+    legendNames.push(...((panelOption.legend as { data?: string[] } | undefined)?.data ?? []));
+
+    const counts = displayedPointCounts(panelContext, buildSeries(panelContext));
+    if (counts && counts.drawn < counts.total) {
+      graphics.push({
+        type: 'text',
+        left: `${rect.left + rect.width - 1}%`,
+        top: `${rect.top + 2}%`,
+        style: {
+          text: context.strings.drawnOfTotal(counts.drawn, counts.total),
+          textAlign: 'right',
+          fill: 'rgba(80,80,80,0.88)',
+          font: '10px sans-serif',
+        },
+        z: 100,
+      });
+    }
+  });
+
+  return {
+    animation: false,
+    title: titles,
+    grid,
+    xAxis: xAxes as EChartsOption['xAxis'],
+    yAxis: yAxes as EChartsOption['yAxis'],
+    series: series as EChartsOption['series'],
+    visualMap: visualMaps as EChartsOption['visualMap'],
+    dataZoom,
+    tooltip: {
+      trigger: 'axis',
+      confine: true,
+      axisPointer: { type: 'cross' },
+      valueFormatter: (value: unknown) =>
+        typeof value === 'number' ? formatTooltipNumber(value) : String(value),
+    },
+    legend: {
+      data: [...new Set(legendNames)],
+      show: legendNames.length > 0,
+      type: 'scroll',
+      bottom: 6,
+      textStyle: { fontSize: 11 },
+    },
+    graphic: graphics.length > 0 ? [{ elements: graphics }] : undefined,
+  };
 }
 
 function displayedPointCounts(

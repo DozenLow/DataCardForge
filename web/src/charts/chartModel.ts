@@ -45,6 +45,20 @@ export interface ChartLimitRange {
   upper: number | null;
 }
 
+export interface ChartPanel {
+  id: string;
+  label: string;
+  type: ChartTypeId;
+  sources: Array<Pick<ChartSource, 'matrixId' | 'columnIndex'>>;
+}
+
+export interface ChartComposition {
+  columns: 1 | 2;
+  shareXTicks: boolean;
+  shareXRange: boolean;
+  panels: ChartPanel[];
+}
+
 export interface ChartConfig {
   type: ChartTypeId;
   sources: ChartSource[];
@@ -70,6 +84,8 @@ export interface ChartConfig {
   limitRange: ChartLimitRange | null;
   /** Optional label on plotted points. */
   pointLabels: 'none' | 'value' | 'name';
+  /** Optional single-card multi-panel composition. */
+  composition: ChartComposition | null;
   /** Bin count for the histogram; `0` means "choose automatically". */
   binCount: number;
   /** Which spread the error bars show. */
@@ -93,6 +109,7 @@ export function defaultChartConfig(type: ChartTypeId, sources: ChartSource[]): C
     acceptedRanges: [],
     limitRange: null,
     pointLabels: 'none',
+    composition: null,
     binCount: 0,
     errorKind: 'sd',
     layout: 'grouped',
@@ -188,8 +205,34 @@ export function nonPositiveAxisCounts(config: ChartConfig): { x: number; y: numb
   return counts;
 }
 
+/** Resolve one panel back onto the chart's authoritative source list. */
+export function chartConfigForPanel(config: ChartConfig, panel: ChartPanel): ChartConfig {
+  const selected = panel.sources.flatMap((ref) => {
+    const source = config.sources.find(
+      (candidate) =>
+        candidate.matrixId === ref.matrixId && candidate.columnIndex === ref.columnIndex,
+    );
+    return source ? [source] : [];
+  });
+  return {
+    ...config,
+    type: panel.type,
+    sources: selected,
+    composition: null,
+  };
+}
+
 /** True when the configuration has enough sources to draw the selected type. */
 export function isDrawable(config: ChartConfig): boolean {
+  if (config.composition) {
+    return config.composition.panels.some((panel) => {
+      const resolved = chartConfigForPanel(config, panel);
+      const needed = chartTypeDef(panel.type).columnArity;
+      return needed === 'pairs' || needed === 'matrix'
+        ? resolved.sources.length >= 2
+        : resolved.sources.length >= 1;
+    });
+  }
   const def = chartTypeDef(config.type);
   if (config.sources.length === 0) return false;
   switch (def.columnArity) {

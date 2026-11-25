@@ -610,6 +610,108 @@ describe('buildOption axis selection', () => {
     expect(valueSeries.map((entry) => String(entry.type))).not.toContain('image');
   });
 
+  it('composes a 2x2 panel layout with aligned grids and one series per panel', () => {
+    const sources = [
+      source('X A', [0, 1, 2]),
+      source('Y A', [3, 4, 5], 1),
+      source('X B', [100, 150, 200], 2),
+      source('Y B', [6, 7, 8], 3),
+    ];
+    const refs = (indices: number[]) =>
+      indices.map((index) => ({
+        matrixId: sources[index].matrixId,
+        columnIndex: sources[index].columnIndex,
+      }));
+    const option = buildOption(
+      context('scatter', sources, {
+        showFitLine: false,
+        composition: {
+          columns: 2,
+          shareXTicks: true,
+          shareXRange: true,
+          panels: [
+            { id: 'a', label: 'A', type: 'scatter', sources: refs([0, 1]) },
+            { id: 'b', label: 'B', type: 'scatter', sources: refs([2, 3]) },
+            { id: 'c', label: 'C', type: 'scatter', sources: refs([0, 1]) },
+            { id: 'd', label: 'D', type: 'scatter', sources: refs([2, 3]) },
+          ],
+        },
+      }),
+    );
+    const grids = option.grid as Array<{ left: string; top: string; width: string }>;
+    const axes = option.xAxis as Array<{
+      min?: number;
+      max?: number;
+      splitNumber?: number;
+      alignTicks?: boolean;
+      axisLabel?: { show?: boolean };
+    }>;
+
+    expect(grids).toHaveLength(4);
+    expect(grids[0].left).toBe(grids[2].left);
+    expect(grids[1].left).toBe(grids[3].left);
+    expect(grids[0].width).toBe(grids[1].width);
+    expect((option.series as unknown[])).toHaveLength(4);
+    expect(axes.map((axis) => [axis.min, axis.max])).toEqual([
+      [0, 200],
+      [0, 200],
+      [0, 200],
+      [0, 200],
+    ]);
+    expect(axes.every((axis) => axis.alignTicks && axis.splitNumber === 6)).toBe(true);
+    expect(axes.map((axis) => axis.axisLabel?.show)).toEqual([false, false, true, true]);
+    expect((option.title as Array<{ text: string }>).map((title) => title.text)).toEqual([
+      'A',
+      'B',
+      'C',
+      'D',
+    ]);
+  });
+
+  it('keeps shared X ticks and shared X range independent', () => {
+    const sources = [
+      source('X A', [0, 1]),
+      source('Y A', [2, 3], 1),
+      source('X B', [10, 20], 2),
+      source('Y B', [4, 5], 3),
+    ];
+    const panels = [
+      {
+        id: 'a',
+        label: 'A',
+        type: 'scatter' as const,
+        sources: [
+          { matrixId: 1, columnIndex: 0 },
+          { matrixId: 1, columnIndex: 1 },
+        ],
+      },
+      {
+        id: 'b',
+        label: 'B',
+        type: 'scatter' as const,
+        sources: [
+          { matrixId: 1, columnIndex: 2 },
+          { matrixId: 1, columnIndex: 3 },
+        ],
+      },
+    ];
+    const ticksOnly = buildOption(
+      context('scatter', sources, {
+        composition: { columns: 1, shareXTicks: true, shareXRange: false, panels },
+      }),
+    ).xAxis as Array<{ min?: number; max?: number; alignTicks?: boolean }>;
+    const rangeOnly = buildOption(
+      context('scatter', sources, {
+        composition: { columns: 1, shareXTicks: false, shareXRange: true, panels },
+      }),
+    ).xAxis as Array<{ min?: number; max?: number; alignTicks?: boolean }>;
+
+    expect(ticksOnly.every((axis) => axis.min === undefined && axis.max === undefined)).toBe(true);
+    expect(ticksOnly.every((axis) => axis.alignTicks)).toBe(true);
+    expect(rangeOnly.map((axis) => [axis.min, axis.max])).toEqual([[0, 20], [0, 20]]);
+    expect(rangeOnly.every((axis) => axis.alignTicks === false)).toBe(true);
+  });
+
   it('produces a usable option for every declared chart type', () => {
     const ids = Object.keys(CHART_TYPES) as ChartTypeId[];
     for (const id of ids) {

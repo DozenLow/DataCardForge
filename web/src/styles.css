@@ -890,6 +890,44 @@ body {
   max-width: 440px;
 }
 
+.chart-card__popup--panels {
+  min-width: 300px;
+  max-height: min(520px, 70vh);
+  overflow: auto;
+}
+
+.chart-card__panel-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 8px;
+  border-top: 1px solid var(--border);
+}
+
+.chart-card__panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.chart-card__panel-label {
+  width: 52px;
+}
+
+.chart-card__panel-sources {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 11px;
+}
+
+.chart-card__panel-sources label {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  white-space: nowrap;
+}
+
 .chart-card__annotation-section {
   display: flex;
   flex-direction: column;
