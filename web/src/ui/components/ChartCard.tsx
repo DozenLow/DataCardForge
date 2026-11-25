@@ -36,6 +36,7 @@ import {
   minimumColumnsForConfig,
   nonPositiveAxisCounts,
   type ChartAnnotationAxis,
+  type ChartAnalysisOptions,
   type ChartLimitRange,
   type ChartPanel,
   type ChartSource,
@@ -92,6 +93,8 @@ export function ChartCard({
   const setChartType = useWorkspace((s) => s.setChartType);
   const setChartConfig = useWorkspace((s) => s.setChartConfig);
   const setChartColumnPanel = useWorkspace((s) => s.setChartColumnPanel);
+  const runChartAnalysis = useWorkspace((s) => s.runChartAnalysis);
+  const analysisRun = useWorkspace((s) => s.chartAnalyses[card.id]);
   const matrices = useWorkspace((s) => s.matrices);
   const cards = useWorkspace((s) => s.cards);
   const showToast = useWorkspace((s) => s.showToast);
@@ -122,6 +125,15 @@ export function ChartCard({
   );
   const [fieldMax, setFieldMax] = useState(
     card.config.fieldColorRange ? String(card.config.fieldColorRange.max) : '',
+  );
+  const [analysisInitial, setAnalysisInitial] = useState(
+    card.config.analysis?.initial?.join(', ') ?? '',
+  );
+  const [analysisLower, setAnalysisLower] = useState(
+    card.config.analysis?.lower?.join(', ') ?? '',
+  );
+  const [analysisUpper, setAnalysisUpper] = useState(
+    card.config.analysis?.upper?.join(', ') ?? '',
   );
 
   // A `single`-arity type plots only the first column, so counting every attached column in
@@ -274,9 +286,18 @@ export function ChartCard({
             strings,
             yAxisUnit,
             colorAxisUnit,
+            analysis: analysisRun?.output,
           })
         : null,
-    [card.config, card.smoothing, strings, drawable, yAxisUnit, colorAxisUnit],
+    [
+      card.config,
+      card.smoothing,
+      strings,
+      drawable,
+      yAxisUnit,
+      colorAxisUnit,
+      analysisRun?.output,
+    ],
   );
 
   useEffect(() => {
@@ -556,6 +577,55 @@ export function ChartCard({
       ? value
       : '';
   })();
+
+  const setAnalysisModel = useCallback(
+    (model: ChartAnalysisOptions['model'] | 'none') => {
+      if (model === 'none') {
+        setChartConfig(card.id, {
+          analysis: null,
+          showAnalysisDiagnostics: false,
+        });
+        return;
+      }
+      const analysis: ChartAnalysisOptions = {
+        model,
+        throughOrigin: false,
+        weighting: 'none',
+        initial: null,
+        lower: null,
+        upper: null,
+        confidence: 0.95,
+        bands: 'both',
+      };
+      setAnalysisInitial('');
+      setAnalysisLower('');
+      setAnalysisUpper('');
+      setChartConfig(card.id, { analysis });
+    },
+    [card.id, setChartConfig],
+  );
+
+  const patchAnalysis = useCallback(
+    (patch: Partial<ChartAnalysisOptions>) => {
+      if (!card.config.analysis) return;
+      setChartConfig(card.id, {
+        analysis: { ...card.config.analysis, ...patch },
+      });
+    },
+    [card.config.analysis, card.id, setChartConfig],
+  );
+
+  const parseAnalysisArray = (text: string): number[] | null | undefined => {
+    if (!text.trim()) return null;
+    const values = text.split(',').map((token) => Number(token.trim()));
+    if (values.some((value) => !Number.isFinite(value))) return undefined;
+    return values;
+  };
+  const analysisArrayInvalid = [
+    analysisInitial,
+    analysisLower,
+    analysisUpper,
+  ].some((text) => parseAnalysisArray(text) === undefined);
 
   return (
     <CardShell
@@ -1360,6 +1430,169 @@ export function ChartCard({
                     />
                     <span>{t('chart.fitLine')}</span>
                   </label>
+                ) : null}
+                {card.config.type === 'line' ||
+                card.config.type === 'scatter' ||
+                card.config.type === 'regression' ? (
+                  <div className="chart-card__analysis-section">
+                    <label className="chart-card__field">
+                      <span>{t('chart.analysisModel')}</span>
+                      <select
+                        className="card__control"
+                        value={card.config.analysis?.model ?? 'none'}
+                        onChange={(event) =>
+                          setAnalysisModel(
+                            event.target.value as ChartAnalysisOptions['model'] | 'none',
+                          )
+                        }
+                      >
+                        <option value="none">{t('chart.analysisOff')}</option>
+                        <option value="linear">{t('chart.analysis.linear')}</option>
+                        <option value="4pl">{t('chart.analysis.4pl')}</option>
+                        <option value="exponential">{t('chart.analysis.exponential')}</option>
+                        <option value="power">{t('chart.analysis.power')}</option>
+                      </select>
+                    </label>
+                    {card.config.analysis ? (
+                      <>
+                        {card.config.analysis.model === 'linear' ? (
+                          <label className="chart-card__field">
+                            <input
+                              type="checkbox"
+                              checked={card.config.analysis.throughOrigin}
+                              onChange={(event) =>
+                                patchAnalysis({ throughOrigin: event.target.checked })
+                              }
+                            />
+                            <span>{t('chart.analysisThroughOrigin')}</span>
+                          </label>
+                        ) : null}
+                        <label className="chart-card__field">
+                          <span>{t('chart.analysisWeighting')}</span>
+                          <select
+                            className="card__control"
+                            value={card.config.analysis.weighting}
+                            onChange={(event) =>
+                              patchAnalysis({
+                                weighting: event.target.value as ChartAnalysisOptions['weighting'],
+                              })
+                            }
+                          >
+                            <option value="none">{t('chart.analysisWeighting.none')}</option>
+                            <option value="inverseX">{t('chart.analysisWeighting.inverseX')}</option>
+                            <option value="inverseX2">{t('chart.analysisWeighting.inverseX2')}</option>
+                          </select>
+                        </label>
+                        <label className="chart-card__field chart-card__field--column">
+                          <span>{t('chart.analysisInitial')}</span>
+                          <input
+                            className="card__control"
+                            value={analysisInitial}
+                            placeholder={t('chart.analysisDefaults')}
+                            onChange={(event) => {
+                              setAnalysisInitial(event.target.value);
+                              const parsed = parseAnalysisArray(event.target.value);
+                              if (parsed !== undefined) patchAnalysis({ initial: parsed });
+                            }}
+                          />
+                        </label>
+                        <label className="chart-card__field chart-card__field--column">
+                          <span>{t('chart.analysisLower')}</span>
+                          <input
+                            className="card__control"
+                            value={analysisLower}
+                            placeholder={t('chart.analysisDefaults')}
+                            onChange={(event) => {
+                              setAnalysisLower(event.target.value);
+                              const parsed = parseAnalysisArray(event.target.value);
+                              if (parsed !== undefined) patchAnalysis({ lower: parsed });
+                            }}
+                          />
+                        </label>
+                        <label className="chart-card__field chart-card__field--column">
+                          <span>{t('chart.analysisUpper')}</span>
+                          <input
+                            className="card__control"
+                            value={analysisUpper}
+                            placeholder={t('chart.analysisDefaults')}
+                            onChange={(event) => {
+                              setAnalysisUpper(event.target.value);
+                              const parsed = parseAnalysisArray(event.target.value);
+                              if (parsed !== undefined) patchAnalysis({ upper: parsed });
+                            }}
+                          />
+                        </label>
+                        <label className="chart-card__field">
+                          <span>{t('chart.analysisBands')}</span>
+                          <select
+                            className="card__control"
+                            value={card.config.analysis.bands}
+                            onChange={(event) =>
+                              patchAnalysis({
+                                bands: event.target.value as ChartAnalysisOptions['bands'],
+                              })
+                            }
+                          >
+                            <option value="none">{t('chart.analysisBands.none')}</option>
+                            <option value="confidence">
+                              {t('chart.analysisBands.confidence')}
+                            </option>
+                            <option value="prediction">
+                              {t('chart.analysisBands.prediction')}
+                            </option>
+                            <option value="both">{t('chart.analysisBands.both')}</option>
+                          </select>
+                        </label>
+                        <label className="chart-card__field">
+                          <input
+                            type="checkbox"
+                            checked={card.config.showAnalysisDiagnostics}
+                            onChange={(event) =>
+                              setChartConfig(card.id, {
+                                showAnalysisDiagnostics: event.target.checked,
+                              })
+                            }
+                          />
+                          <span>{t('chart.analysisDiagnostics')}</span>
+                        </label>
+                        <button
+                          type="button"
+                          className="chart-card__popup-item"
+                          disabled={analysisRun?.state === 'running' || analysisArrayInvalid}
+                          onClick={() => void runChartAnalysis(card.id)}
+                        >
+                          {analysisRun?.state === 'running'
+                            ? t('chart.analysisRunning')
+                            : t('chart.analysisRun')}
+                        </button>
+                        {analysisArrayInvalid ? (
+                          <p className="chart-card__warn">{t('chart.analysisArrayInvalid')}</p>
+                        ) : null}
+                        {analysisRun?.state === 'error' ? (
+                          <p className="chart-card__warn">
+                            {t('chart.analysisError', {
+                              code: analysisRun.code ?? 'internalError',
+                              reason: String(analysisRun.params?.reason ?? ''),
+                            })}
+                          </p>
+                        ) : null}
+                        {analysisRun?.state === 'done' && analysisRun.output ? (
+                          <p className="chart-card__note">
+                            {t('chart.analysisSummary', {
+                              r2: Number(analysisRun.output.summary.r2).toFixed(4),
+                              n: String(analysisRun.output.summary.n),
+                              lod: Number.isFinite(analysisRun.output.summary.lod)
+                                ? Number(analysisRun.output.summary.lod).toFixed(4)
+                                : '—',
+                              loq: Number.isFinite(analysisRun.output.summary.loq)
+                                ? Number(analysisRun.output.summary.loq).toFixed(4)
+                                : '—',
+                            })}
+                          </p>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
                 ) : null}
                 {card.config.type === 'bar' ? (
                   <label className="chart-card__field">

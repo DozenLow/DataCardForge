@@ -1036,6 +1036,15 @@ body {
   margin-top: 3px;
 }
 
+.chart-card__field--column {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.chart-card__analysis-section {
+  border-top: 1px solid var(--border);
+}
+
 .chart-card__field input[type="range"] {
   width: 84px;
   accent-color: var(--accent);

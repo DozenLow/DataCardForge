@@ -63,6 +63,34 @@ export interface ChartComposition {
   panels: ChartPanel[];
 }
 
+export type ChartFitModel = 'linear' | '4pl' | 'exponential' | 'power';
+
+export interface ChartAnalysisOptions {
+  model: ChartFitModel;
+  throughOrigin: boolean;
+  weighting: 'none' | 'inverseX' | 'inverseX2';
+  initial: number[] | null;
+  lower: number[] | null;
+  upper: number[] | null;
+  confidence: 0.95;
+  bands: 'confidence' | 'prediction' | 'both' | 'none';
+}
+
+export interface ChartAnalysisOutput {
+  summary: Record<string, number>;
+  x: number[];
+  y: number[];
+  fitted: number[];
+  residual: number[];
+  standardizedResidual: number[];
+  confidenceLower: number[];
+  confidenceUpper: number[];
+  predictionLower: number[];
+  predictionUpper: number[];
+  qqTheoretical: number[];
+  qqResidual: number[];
+}
+
 export interface ChartConfig {
   type: ChartTypeId;
   sources: ChartSource[];
@@ -107,6 +135,10 @@ export interface ChartConfig {
     facet: boolean;
     heatmapStrip: boolean;
   };
+  /** Optional finite-model analysis run by the hidden backend chart node. */
+  analysis: ChartAnalysisOptions | null;
+  /** Replace the main plot with a 2x2 curve + residual diagnostic figure. */
+  showAnalysisDiagnostics: boolean;
   /** Bin count for the histogram; `0` means "choose automatically". */
   binCount: number;
   /** Which spread the error bars show. */
@@ -137,6 +169,8 @@ export function defaultChartConfig(type: ChartTypeId, sources: ChartSource[]): C
     showFieldContours: false,
     factorSource: null,
     factorMapping: { color: false, shape: false, facet: false, heatmapStrip: false },
+    analysis: null,
+    showAnalysisDiagnostics: false,
     binCount: 0,
     errorKind: 'sd',
     layout: 'grouped',

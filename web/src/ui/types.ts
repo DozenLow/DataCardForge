@@ -23,7 +23,11 @@
 
 import type { SmoothingOptions } from '../core/Smoothing.ts';
 import type { MatrixData } from '../core/MatrixData.ts';
-import type { ChartConfig, ChartSource } from '../charts/chartModel.ts';
+import type {
+  ChartAnalysisOutput,
+  ChartConfig,
+  ChartSource,
+} from '../charts/chartModel.ts';
 import type { ChartTypeId } from '../charts/chartTypes.ts';
 import type { UnitConversionDto, UnitWarningDto } from '../backend/client.ts';
 
@@ -129,6 +133,15 @@ export interface ChartCardModel extends CardBase {
    * the card). Absent on older snapshots — normalizeRestoredCards reads it as false.
    */
   columnPanelOpen?: boolean;
+}
+
+export interface ChartAnalysisRun {
+  nodeId: number | null;
+  resultMatrixIds: number[] | null;
+  state: 'dirty' | 'running' | 'done' | 'error';
+  code?: string;
+  params?: Record<string, unknown>;
+  output?: ChartAnalysisOutput;
 }
 
 /**
@@ -535,4 +548,4 @@ export interface WorkspaceSnapshot {
   nextMatrixId: number;
 }
 
-export type { ChartConfig, ChartSource, ChartTypeId };
+export type { ChartAnalysisOutput, ChartConfig, ChartSource, ChartTypeId };

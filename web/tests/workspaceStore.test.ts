@@ -157,6 +157,139 @@ describe('addChartCard', () => {
     expect(chart.config.factorSource).toEqual(factor);
     expect(store().dependencies.getDependents(matrixCardId)).toEqual([chartId]);
   });
+
+  it('creates, computes, and pulls a hidden chart-analysis node', async () => {
+    const registrations = vi.spyOn(BackendClient.prototype, 'registerMatrix').mockResolvedValue({
+      ok: true,
+      matrixId: 41,
+      revision: 1,
+    });
+    const create = vi.spyOn(BackendClient.prototype, 'createNode').mockResolvedValue({
+      ok: true,
+      nodeId: 77,
+      resultMatrixId: 101,
+      resultMatrixIds: [101, 102],
+      signatureId: 'builtin:chart-analysis',
+      state: 'dirty',
+    });
+    const patch = vi.spyOn(BackendClient.prototype, 'patchNode').mockResolvedValue({
+      ok: true,
+      nodeId: 77,
+      state: 'dirty',
+    });
+    const compute = vi.spyOn(BackendClient.prototype, 'computeNode').mockResolvedValue({
+      ok: true,
+      state: 'done',
+      resultMatrixIds: [101, 102],
+    });
+    const window = vi.spyOn(BackendClient.prototype, 'window').mockImplementation(
+      async (id: number) => {
+        if (id === 101) {
+          return {
+            ok: true,
+            rows: 1,
+            columns: 14,
+            totalRows: 1,
+            totalCols: 14,
+            names: [
+              'Pos.1 n', 'Pos.2 dropped', 'Pos.3 parameterCount', 'Pos.4 r2',
+              'Pos.5 sse', 'Pos.6 residualStandardError', 'Pos.7 slope',
+              'Pos.8 intercept', 'Pos.9 a', 'Pos.10 b', 'Pos.11 c',
+              'Pos.12 d', 'Pos.13 lod', 'Pos.14 loq',
+            ],
+            data: [
+              new Float64Array([4]), new Float64Array([0]), new Float64Array([2]),
+              new Float64Array([0.99]), new Float64Array([0.4]), new Float64Array([0.5]),
+              new Float64Array([2]), new Float64Array([0]), new Float64Array([2]),
+              new Float64Array([0]), new Float64Array([NaN]), new Float64Array([NaN]),
+              new Float64Array([0.825]), new Float64Array([2.5]),
+            ],
+          };
+        }
+        return {
+          ok: true,
+          rows: 4,
+          columns: 11,
+          totalRows: 4,
+          totalCols: 11,
+          names: [
+            'Pos.1 x', 'Pos.2 y', 'Pos.3 fitted', 'Pos.4 residual',
+            'Pos.5 standardizedResidual', 'Pos.6 confidenceLower',
+            'Pos.7 confidenceUpper', 'Pos.8 predictionLower',
+            'Pos.9 predictionUpper', 'Pos.10 qqTheoretical', 'Pos.11 qqResidual',
+          ],
+          data: [
+            new Float64Array([1, 2, 3, 4]),
+            new Float64Array([2, 4, 6, 8]),
+            new Float64Array([2, 4, 6, 8]),
+            new Float64Array([0, 0, 0, 0]),
+            new Float64Array([0, 0, 0, 0]),
+            new Float64Array([1.8, 3.8, 5.8, 7.8]),
+            new Float64Array([2.2, 4.2, 6.2, 8.2]),
+            new Float64Array([1.5, 3.5, 5.5, 7.5]),
+            new Float64Array([2.5, 4.5, 6.5, 8.5]),
+            new Float64Array([-1, -0.3, 0.3, 1]),
+            new Float64Array([-0.2, 0, 0, 0.2]),
+          ],
+        };
+      },
+    );
+    try {
+      const matrixId = store().addMatrixCard([
+        { name: 'fit.csv', matrix: matrix([[1, 2], [2, 4], [3, 6], [4, 8]]) },
+      ]);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      const chartId = store().addChartCard(matrixId, 0, 'scatter')!;
+      store().setChartConfig(chartId, {
+        analysis: {
+          model: 'linear',
+          throughOrigin: false,
+          weighting: 'none',
+          initial: null,
+          lower: null,
+          upper: null,
+          confidence: 0.95,
+          bands: 'both',
+        },
+      });
+
+      await store().runChartAnalysis(chartId);
+      expect(create).toHaveBeenCalledWith(
+        [
+          { portId: 'x', varName: 'x', mode: 'cell', sourceMatrixId: 41, columnIndex: 0 },
+          { portId: 'y', varName: 'y', mode: 'cell', sourceMatrixId: 41, columnIndex: 1 },
+        ],
+        {
+          signatureId: 'builtin:chart-analysis',
+          params: {
+            model: 'linear',
+            throughOrigin: false,
+            weighting: 'none',
+            confidence: 0.95,
+          },
+        },
+      );
+      expect(compute).toHaveBeenCalledWith(77);
+      expect(window).toHaveBeenCalledTimes(2);
+      expect(store().chartAnalyses[chartId]).toMatchObject({
+        nodeId: 77,
+        state: 'done',
+        resultMatrixIds: [101, 102],
+      });
+      expect(store().chartAnalyses[chartId].output?.summary.r2).toBe(0.99);
+      expect(store().chartAnalyses[chartId].output?.residual).toEqual([0, 0, 0, 0]);
+
+      await store().runChartAnalysis(chartId);
+      expect(patch).toHaveBeenCalledTimes(1);
+      expect(create).toHaveBeenCalledTimes(1);
+    } finally {
+      registrations.mockRestore();
+      create.mockRestore();
+      patch.mockRestore();
+      compute.mockRestore();
+      window.mockRestore();
+    }
+  });
 });
 
 describe('setActiveSource refreshes dependent charts', () => {

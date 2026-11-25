@@ -236,6 +236,97 @@ describe('factor mappings', () => {
   });
 });
 
+describe('backend chart analysis', () => {
+  function analysis() {
+    return {
+      summary: {
+        n: 4,
+        r2: 0.98,
+        residualStandardError: 0.5,
+        lod: 0.1,
+        loq: 0.3,
+      },
+      x: [1, 2, 3, 4],
+      y: [2, 4.2, 5.7, 8.1],
+      fitted: [2, 4, 6, 8],
+      residual: [0, 0.2, -0.3, 0.1],
+      standardizedResidual: [0, 0.4, -0.6, 0.2],
+      confidenceLower: [1.8, 3.7, 5.6, 7.5],
+      confidenceUpper: [2.2, 4.3, 6.4, 8.5],
+      predictionLower: [1.5, 3.4, 5.3, 7.2],
+      predictionUpper: [2.5, 4.6, 6.7, 8.8],
+      qqTheoretical: [-1.2, -0.3, 0.3, 1.2],
+      qqResidual: [-0.3, 0, 0.1, 0.2],
+    };
+  }
+
+  it('renders the backend fit with distinct confidence and prediction bands', () => {
+    const config = defaultChartConfig('regression', [
+      source('X', [1, 2, 3, 4]),
+      source('Y', [2, 4.2, 5.7, 8.1], 1),
+    ]);
+    config.analysis = {
+      model: 'linear',
+      throughOrigin: false,
+      weighting: 'none',
+      initial: null,
+      lower: null,
+      upper: null,
+      confidence: 0.95,
+      bands: 'both',
+    };
+    const series = buildSeries({ ...context('regression', config.sources, config), analysis: analysis() });
+
+    expect(series.some((entry) => entry.type === 'line' && entry.name === 'backend fit')).toBe(true);
+    expect(series.some(
+      (entry) => entry.type === 'line' && String(entry.name).includes('fit y='),
+    )).toBe(false);
+    expect(series.filter((entry) => entry.type === 'custom').map((entry) => entry.name)).toEqual([
+      'mean confidence band',
+      'individual prediction band',
+    ]);
+  });
+
+  it('builds four aligned diagnostic panels with +-2 sigma residual guides', () => {
+    const config = defaultChartConfig('regression', [
+      source('X', [1, 2, 3, 4]),
+      source('Y', [2, 4.2, 5.7, 8.1], 1),
+    ]);
+    config.analysis = {
+      model: 'linear',
+      throughOrigin: false,
+      weighting: 'none',
+      initial: null,
+      lower: null,
+      upper: null,
+      confidence: 0.95,
+      bands: 'both',
+    };
+    config.showAnalysisDiagnostics = true;
+    const option = buildOption({
+      ...context('regression', config.sources, config),
+      analysis: analysis(),
+    });
+    const residual = (option.series as Array<{
+      name?: string;
+      markLine?: { data: Array<{ yAxis?: number }> };
+    }>).find((entry) => entry.name === 'Residual vs fitted');
+
+    expect((option.grid as unknown[])).toHaveLength(4);
+    expect((option.xAxis as unknown[])).toHaveLength(4);
+    expect((option.yAxis as unknown[])).toHaveLength(4);
+    expect(residual?.markLine?.data.map((entry) => entry.yAxis)).toEqual([0, 1, -1]);
+    expect(
+      (option.title as Array<{ text: string }>).map((entry) => entry.text),
+    ).toEqual([
+      'A · Fit',
+      'B · Residual vs fitted',
+      'C · Residual order',
+      'D · QQ',
+    ]);
+  });
+});
+
 describe('isDrawable', () => {
   it('is false without enough columns for the type', () => {
     expect(isDrawable(defaultChartConfig('line', []))).toBe(false);

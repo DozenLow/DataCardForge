@@ -43,7 +43,11 @@ import {
   stdDev,
 } from '../core/stats.ts';
 import { applySmoothing, type SmoothingOptions } from '../core/Smoothing.ts';
-import type { ChartConfig, ChartSource } from './chartModel.ts';
+import type {
+  ChartAnalysisOutput,
+  ChartConfig,
+  ChartSource,
+} from './chartModel.ts';
 import { chartConfigForPanel, resolveSeries } from './chartModel.ts';
 import { lineColor } from './palette.ts';
 import { chartTypeDef } from './chartTypes.ts';
@@ -81,6 +85,8 @@ export interface BuildContext {
   yAxisUnit?: string;
   /** Unit carried by the Z/colour dimension of a field heatmap. */
   colorAxisUnit?: string;
+  /** Server-produced fit/interval/diagnostic result; absent before an explicit run. */
+  analysis?: ChartAnalysisOutput;
   /** Localised axis/tooltip labels, resolved by the caller (keeps this module i18n-free). */
   strings: {
     rowIndex: string;
@@ -157,7 +163,8 @@ export function buildSeries(context: BuildContext): SeriesOption[] {
   const annotated = applyVectorAnnotations(series, context);
   const rawPoints = seriesContexts.flatMap((entry) => smallSamplePointSeries(entry.context));
   const strip = factorAnnotationSeries(context);
-  return [...annotated, ...rawPoints, ...strip];
+  const analysis = analysisOverlaySeries(context);
+  return [...annotated, ...rawPoints, ...strip, ...analysis];
 }
 
 function buildBaseSeries(context: BuildContext): SeriesOption[] {
@@ -466,7 +473,7 @@ function scatterSeries(context: BuildContext): SeriesOption[] {
       largeThreshold: 2000,
       animation: false,
     });
-    if (config.showFitLine) {
+    if (config.showFitLine && !config.analysis) {
       const fit = fitOverlay(entry.points, entry.label, index, config);
       if (fit) out.push(fit);
     }
@@ -490,8 +497,10 @@ function regressionSeries(context: BuildContext): SeriesOption[] {
       largeThreshold: 2000,
       animation: false,
     });
-    const fit = fitOverlay(entry.points, entry.label, index, config);
-    if (fit) out.push(fit);
+    if (!config.analysis) {
+      const fit = fitOverlay(entry.points, entry.label, index, config);
+      if (fit) out.push(fit);
+    }
   });
 
   return out;
@@ -576,6 +585,81 @@ function fitOverlay(
     z: 10,
     animation: false,
   };
+}
+
+function analysisOverlaySeries(context: BuildContext): SeriesOption[] {
+  const { analysis, config } = context;
+  if (!analysis || !config.analysis) return [];
+  const fit: SeriesOption = {
+    name: 'backend fit',
+    type: 'line',
+    data: analysis.x.map((x, index) => [x, analysis.fitted[index]] as [number, number]),
+    showSymbol: false,
+    silent: false,
+    lineStyle: { width: 2.2, color: lineColor(1) },
+    z: 10,
+    animation: false,
+  };
+  const series: SeriesOption[] = [fit];
+  const addBand = (
+    name: string,
+    lower: number[],
+    upper: number[],
+    color: string,
+  ) => {
+    const quads: Array<number[]> = [];
+    for (let index = 0; index + 1 < analysis.x.length; ++index) {
+      quads.push([
+        analysis.x[index],
+        lower[index],
+        upper[index],
+        analysis.x[index + 1],
+        lower[index + 1],
+        upper[index + 1],
+      ]);
+    }
+    if (quads.length === 0) return;
+    series.push({
+      name,
+      type: 'custom',
+      data: quads,
+      coordinateSystem: 'cartesian2d',
+      animation: false,
+      silent: true,
+      z: 2,
+      renderItem: (
+        _params: CustomSeriesRenderItemParams,
+        api: CustomSeriesRenderItemAPI,
+      ) => {
+        const p0 = api.coord([api.value(0), api.value(1)]);
+        const p1 = api.coord([api.value(0), api.value(2)]);
+        const p2 = api.coord([api.value(3), api.value(5)]);
+        const p3 = api.coord([api.value(3), api.value(4)]);
+        return {
+          type: 'polygon',
+          shape: { points: [p0, p1, p2, p3] },
+          style: { fill: color, stroke: 'none' },
+        } as unknown as RenderItemResult;
+      },
+    } as CustomSeriesOption);
+  };
+  if (config.analysis.bands === 'confidence' || config.analysis.bands === 'both') {
+    addBand(
+      'mean confidence band',
+      analysis.confidenceLower,
+      analysis.confidenceUpper,
+      'rgba(44, 123, 182, 0.16)',
+    );
+  }
+  if (config.analysis.bands === 'prediction' || config.analysis.bands === 'both') {
+    addBand(
+      'individual prediction band',
+      analysis.predictionLower,
+      analysis.predictionUpper,
+      'rgba(230, 159, 0, 0.13)',
+    );
+  }
+  return series;
 }
 
 // ── histogram ──────────────────────────────────────────────────────────────
@@ -1406,10 +1490,124 @@ function xAxisKind(config: ChartConfig): AxisKind {
 }
 
 export function buildOption(context: BuildContext): EChartsOption {
+  if (context.config.showAnalysisDiagnostics && context.analysis) {
+    return buildAnalysisDiagnosticOption(context);
+  }
   const effectiveContext = factorFacetContext(context);
   const composition = effectiveContext.config.composition;
   if (composition && composition.panels.length > 1) {
     return buildComposedOption(effectiveContext);
+  }
+
+  function buildAnalysisDiagnosticOption(context: BuildContext): EChartsOption {
+    const analysis = context.analysis!;
+    const sigma = analysis.summary.residualStandardError;
+    const main = buildSingleOption({
+      ...context,
+      config: { ...context.config, showAnalysisDiagnostics: false },
+    });
+    const grid = [
+      { left: '10%', top: '10%', width: '38%', height: '35%', containLabel: false },
+      { left: '56%', top: '10%', width: '38%', height: '35%', containLabel: false },
+      { left: '10%', top: '58%', width: '38%', height: '32%', containLabel: false },
+      { left: '56%', top: '58%', width: '38%', height: '32%', containLabel: false },
+    ];
+    const mainX = Array.isArray(main.xAxis) ? main.xAxis[0] : main.xAxis;
+    const mainY = Array.isArray(main.yAxis) ? main.yAxis[0] : main.yAxis;
+    const mainSeries = Array.isArray(main.series) ? main.series : [];
+    const series: SeriesOption[] = mainSeries.map((entry) => ({
+      ...entry,
+      xAxisIndex: 0,
+      yAxisIndex: 0,
+    }));
+    series.push(
+      {
+        name: 'Residual vs fitted',
+        type: 'scatter',
+        xAxisIndex: 1,
+        yAxisIndex: 1,
+        data: analysis.fitted.map(
+          (value, index) => [value, analysis.residual[index]] as [number, number],
+        ),
+        symbolSize: 5,
+        itemStyle: { color: lineColor(2) },
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          data: [
+            { yAxis: 0 },
+            { yAxis: 2 * sigma, name: '+2σ' },
+            { yAxis: -2 * sigma, name: '−2σ' },
+          ],
+          lineStyle: { type: 'dashed', color: '#8b3a3a' },
+          label: { show: true, formatter: (params: { name?: string }) => params.name ?? '0' },
+        },
+        animation: false,
+      } as SeriesOption,
+      {
+        name: 'Residual order',
+        type: 'scatter',
+        xAxisIndex: 2,
+        yAxisIndex: 2,
+        data: analysis.residual.map(
+          (value, index) => [index + 1, value] as [number, number],
+        ),
+        symbolSize: 5,
+        itemStyle: { color: lineColor(3) },
+        markLine: {
+          silent: true,
+          symbol: 'none',
+          data: [{ yAxis: 0 }, { yAxis: 2 * sigma }, { yAxis: -2 * sigma }],
+          lineStyle: { type: 'dashed', color: '#8b3a3a' },
+        },
+        animation: false,
+      } as SeriesOption,
+      {
+        name: 'QQ',
+        type: 'scatter',
+        xAxisIndex: 3,
+        yAxisIndex: 3,
+        data: analysis.qqTheoretical.map(
+          (value, index) => [value, analysis.qqResidual[index]] as [number, number],
+        ),
+        symbolSize: 5,
+        itemStyle: { color: lineColor(4) },
+        animation: false,
+      },
+    );
+    const axes = [
+      { ...(mainX as object), gridIndex: 0 },
+      { type: 'value', gridIndex: 1, scale: true, name: 'Fitted' },
+      { type: 'value', gridIndex: 2, min: 1, name: 'Observation' },
+      { type: 'value', gridIndex: 3, scale: true, name: 'Theoretical normal' },
+    ];
+    const yAxes = [
+      { ...(mainY as object), gridIndex: 0 },
+      { type: 'value', gridIndex: 1, scale: true, name: 'Residual' },
+      { type: 'value', gridIndex: 2, scale: true, name: 'Residual' },
+      { type: 'value', gridIndex: 3, scale: true, name: 'Observed residual' },
+    ];
+    return {
+      animation: false,
+      grid,
+      xAxis: axes as EChartsOption['xAxis'],
+      yAxis: yAxes as EChartsOption['yAxis'],
+      series: series as EChartsOption['series'],
+      title: [
+        { text: 'A · Fit', left: '10%', top: '2%', textStyle: { fontSize: 11 } },
+        { text: 'B · Residual vs fitted', left: '56%', top: '2%', textStyle: { fontSize: 11 } },
+        { text: 'C · Residual order', left: '10%', top: '50%', textStyle: { fontSize: 11 } },
+        { text: 'D · QQ', left: '56%', top: '50%', textStyle: { fontSize: 11 } },
+      ],
+      legend: { show: false },
+      tooltip: { trigger: 'axis', confine: true },
+      dataZoom: [
+        { type: 'inside', xAxisIndex: 0, yAxisIndex: 0, filterMode: 'none' },
+        { type: 'inside', xAxisIndex: 1, yAxisIndex: 1, filterMode: 'none' },
+        { type: 'inside', xAxisIndex: 2, yAxisIndex: 2, filterMode: 'none' },
+        { type: 'inside', xAxisIndex: 3, yAxisIndex: 3, filterMode: 'none' },
+      ],
+    };
   }
   return buildSingleOption(effectiveContext);
 }

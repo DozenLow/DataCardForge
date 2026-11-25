@@ -271,4 +271,76 @@ describe('chart annotation SVG export', () => {
     expect(svg).toContain('<path');
     expect(chart.getOption().series).toHaveLength(2);
   });
+
+  it('exports backend fit bands and all four diagnostic panels without raster images', () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 720 });
+    Object.defineProperty(container, 'clientHeight', { value: 520 });
+    document.body.appendChild(container);
+    const chart = echarts.init(container, undefined, {
+      renderer: 'svg',
+      width: 720,
+      height: 520,
+    });
+    instances.push(chart);
+    const config = {
+      ...defaultChartConfig('regression', [
+        { matrixId: 1, columnIndex: 0, label: 'X', raw: [1, 2, 3, 4] },
+        { matrixId: 1, columnIndex: 1, label: 'Y', raw: [2, 4.2, 5.7, 8.1] },
+      ]),
+      analysis: {
+        model: 'linear' as const,
+        throughOrigin: false,
+        weighting: 'none' as const,
+        initial: null,
+        lower: null,
+        upper: null,
+        confidence: 0.95 as const,
+        bands: 'both' as const,
+      },
+      showAnalysisDiagnostics: true,
+    };
+    const analysis = {
+      summary: {
+        n: 4,
+        r2: 0.98,
+        residualStandardError: 0.5,
+        lod: 0.825,
+        loq: 2.5,
+      },
+      x: [1, 2, 3, 4],
+      y: [2, 4.2, 5.7, 8.1],
+      fitted: [2, 4, 6, 8],
+      residual: [0, 0.2, -0.3, 0.1],
+      standardizedResidual: [0, 0.4, -0.6, 0.2],
+      confidenceLower: [1.8, 3.7, 5.6, 7.5],
+      confidenceUpper: [2.2, 4.3, 6.4, 8.5],
+      predictionLower: [1.5, 3.4, 5.3, 7.2],
+      predictionUpper: [2.5, 4.6, 6.7, 8.8],
+      qqTheoretical: [-1.2, -0.3, 0.3, 1.2],
+      qqResidual: [-0.3, 0, 0.1, 0.2],
+    };
+    const strings: BuildContext['strings'] = {
+      rowIndex: 'No.',
+      value: 'Value',
+      count: 'Count',
+      density: 'Density',
+      binCentre: 'Bin centre',
+      correlation: 'r',
+      quartiles: 'IQR',
+      mean: 'Mean',
+      outliers: 'Outliers',
+      secondAxis: 'Second',
+      drawnOfTotal: (drawn, total) => `Drawn ${drawn} / total ${total}`,
+    };
+    chart.setOption(
+      buildOption({ config, smoothing: DEFAULT_SMOOTHING, strings, analysis }),
+    );
+
+    const svg = chartToSvgString(container, '#ffffff');
+    expect(svg).not.toContain('<image');
+    expect(svg).toContain('A · Fit');
+    expect(svg).toContain('D · QQ');
+    expect(svg.match(/<svg\b/g)).toHaveLength(1);
+  });
 });
