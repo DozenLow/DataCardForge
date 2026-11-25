@@ -14,6 +14,24 @@ export function isNumeric(token: string): boolean {
   return NUMERIC_RE.test(token);
 }
 
+/**
+ * Spellings of "this cell holds no number" that measurement files actually contain.
+ *
+ * Exports from Python/pandas, HDF5 and most instrument software write missing values as
+ * `NaN`; read literally that is a text token, which made a column of numbers look like a
+ * text column and refused the whole file. Treating it as an empty cell is what the producer
+ * meant, and it keeps `isNumeric` strict about everything else.
+ *
+ * Deliberately NOT here: `inf`/`-inf` (a value, not a gap), and `NA`/`N/A`/`-`, which are
+ * ALSO plausible category labels in a group column — guessing would relabel real data.
+ */
+const MISSING_TOKEN_RE = /^[+-]?nan$/i;
+
+/** True when a cell carries no number at all: empty, or a NaN spelling. */
+export function isMissingToken(token: string): boolean {
+  return token === '' || MISSING_TOKEN_RE.test(token);
+}
+
 /** Parse a token, returning `fallback` when it is not a plain decimal number. */
 export function parseNumeric(token: string, fallback = NaN): number {
   if (!NUMERIC_RE.test(token)) return fallback;

@@ -91,6 +91,46 @@ describe('TxtLoader', () => {
     expect(mat.categoricalLabel(1, 1)).toBe('treated');
   });
 
+  it('reads a NaN spelling as a gap, not as text', async () => {
+    // What pandas/HDF5/instrument exports actually write for a missing sample: read
+    // literally it is a text token, and it used to make the whole column "mixed".
+    const mat = await new CsvLoader().load(
+      makeFile('a.csv', 'x,y\n1,2.5\n2,NaN\n3,4.5\n4,nan\n5,NAN\n'),
+    );
+
+    expect(mat.columnCount()).toBe(2);
+    expect(mat.column(1).categories).toBeUndefined();
+    expect(mat.cell(0, 1)).toBe(2.5);
+    expect(Number.isNaN(mat.cell(1, 1))).toBe(true);
+    expect(mat.cell(2, 1)).toBe(4.5);
+    // Every spelling of the gap, including the signed ones, lands as missing.
+    expect(Number.isNaN(mat.cell(3, 1))).toBe(true);
+    expect(Number.isNaN(mat.cell(4, 1))).toBe(true);
+  });
+
+  it('loads a column that is nothing but gaps', async () => {
+    const mat = await new CsvLoader().load(makeFile('a.csv', 'x,y\n1,NaN\n2,nan\n'));
+
+    expect(mat.columnCount()).toBe(2);
+    expect(Number.isNaN(mat.cell(0, 1))).toBe(true);
+    expect(Number.isNaN(mat.cell(1, 1))).toBe(true);
+  });
+
+  it('still refuses a gap plus genuine text in a numeric column', async () => {
+    await expect(
+      new CsvLoader().load(makeFile('a.csv', 'x,y\n1,2.5\n2,NaN\n3,treatment\n')),
+    ).rejects.toThrow(/mixes numeric and text/);
+  });
+
+  it('does not guess that N/A or a dash is a gap', async () => {
+    // Both are plausible category labels in a group column; calling them gaps would relabel
+    // real data, so they stay text (and a mixed column still refuses) until the author says
+    // otherwise.
+    const mat = await new CsvLoader().load(makeFile('a.csv', 'x,group\n1,NA\n2,-\n3,NA\n'));
+    expect(mat.column(1).categories).toEqual(['NA', '-']);
+    expect(mat.column(1).data).toEqual([0, 1, 0]);
+  });
+
   it('rejects a mixed numeric and text column instead of silently coercing it', async () => {
     await expect(
       new CsvLoader().load(makeFile('a.csv', 'x,group\n1,0\n2,treatment\n')),

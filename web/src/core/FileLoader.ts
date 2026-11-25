@@ -6,7 +6,7 @@
  * `load()` is identical, so `MatrixData` stays the single source of truth.
  */
 import { MatrixData } from './MatrixData.ts';
-import { isNumeric, parseNumeric } from './numeric.ts';
+import { isMissingToken, isNumeric, parseNumeric } from './numeric.ts';
 
 export interface FileLoader {
   /** Parse the file. Rejects with a human-readable message when unsupported/corrupt. */
@@ -38,8 +38,9 @@ export function extensionOf(name: string): string {
  * silently swallow the header row into the data.
  *
  * A column that is entirely text is categorical: the numeric array carries stable codes
- * and the matrix keeps the label dictionary as display metadata. Mixing text and numbers
- * in one column is refused instead of silently inventing zeroes or changing its meaning.
+ * and the matrix keeps the label dictionary as display metadata. Mixing genuine text with
+ * numbers in one column is refused instead of silently inventing zeroes or changing its
+ * meaning — but a NaN spelling is a gap, not text, and never makes a column "mixed".
  */
 export function gridToMatrix(grid: string[][]): MatrixData {
   let rows = grid.filter((r) => r.length > 0);
@@ -64,7 +65,9 @@ export function gridToMatrix(grid: string[][]): MatrixData {
     let hasNumeric = false;
     let hasText = false;
     for (const token of tokens) {
-      if (token === '') continue;
+      // A missing cell is neither evidence of numbers nor of text: a column of numbers with
+      // a few `NaN` gaps is numeric, not mixed.
+      if (isMissingToken(token)) continue;
       if (isNumeric(token)) hasNumeric = true;
       else hasText = true;
     }
@@ -78,7 +81,7 @@ export function gridToMatrix(grid: string[][]): MatrixData {
     const categories: string[] = [];
     const categoryCodes = new Map<string, number>();
     const data = tokens.map((token) => {
-      if (token === '') return NaN;
+      if (isMissingToken(token)) return NaN;
       if (!hasText) return parseNumeric(token);
       let code = categoryCodes.get(token);
       if (code === undefined) {
