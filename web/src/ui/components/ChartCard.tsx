@@ -69,7 +69,7 @@ function annotationId(prefix: string): string {
   return `${prefix}-${Date.now().toString(36)}-${annotationSequence.toString(36)}`;
 }
 
-type PanelKind = 'type' | 'options' | 'annotations' | 'panels' | 'export';
+type PanelKind = 'type' | 'options' | 'annotations' | 'panels' | 'factors' | 'export';
 
 /** An open toolbar dropdown, pinned to the button that opened it in viewport coordinates. */
 interface OpenPanel {
@@ -492,8 +492,13 @@ export function ChartCard({
    */
   const availableColumns = useMemo(() => {
     const ownerIds = new Set(card.config.sources.map((source) => source.matrixId));
-    const options: Array<{ matrixId: number; columnIndex: number; label: string; file: string }> =
-      [];
+    const options: Array<{
+      matrixId: number;
+      columnIndex: number;
+      label: string;
+      file: string;
+      categories?: string[];
+    }> = [];
     for (const entry of cards) {
       if (!isMatrixCard(entry)) continue;
       for (const fileSource of entry.sources) {
@@ -507,6 +512,7 @@ export function ChartCard({
             columnIndex: index,
             label: column.annotation !== '' ? column.annotation : column.posName,
             file: fileSource.name,
+            categories: column.categories?.slice(),
           });
         }
       }
@@ -532,6 +538,20 @@ export function ChartCard({
     const value = `${source.matrixId}:${source.columnIndex}`;
     return availableColumns.some(
       (column) => column.matrixId === source.matrixId && column.columnIndex === source.columnIndex,
+    )
+      ? value
+      : '';
+  })();
+
+  const factorSelectValue = (() => {
+    const source = card.config.factorSource;
+    if (!source) return '';
+    const value = `${source.matrixId}:${source.columnIndex}`;
+    return availableColumns.some(
+      (column) =>
+        column.matrixId === source.matrixId &&
+        column.columnIndex === source.columnIndex &&
+        column.categories,
     )
       ? value
       : '';
@@ -597,6 +617,146 @@ export function ChartCard({
                     </button>
                   );
                 })}
+              </Popup>
+            ) : null}
+          </div>
+
+          <div className="chart-card__tp">
+            <button
+              type="button"
+              className={`chart-card__tbutton card__control${
+                panel?.kind === 'factors' ? ' is-open' : ''
+              }`}
+              onMouseDown={(event) => event.stopPropagation()}
+              onClick={(event) => togglePanel('factors', event)}
+            >
+              {t('chart.factors')} ▾
+            </button>
+            {panel?.kind === 'factors' ? (
+              <Popup
+                x={panel.x}
+                y={panel.y}
+                className="chart-card__popup chart-card__popup--wide"
+                onDismiss={dismissPanel}
+              >
+                <label className="chart-card__field">
+                  <span>{t('chart.factorSource')}</span>
+                  <select
+                    className="card__control"
+                    value={factorSelectValue}
+                    onChange={(event) => {
+                      if (!event.target.value) {
+                        setChartConfig(card.id, { factorSource: null });
+                        return;
+                      }
+                      const [matrixId, columnIndex] = event.target.value.split(':').map(Number);
+                      const column = availableColumns.find(
+                        (entry) =>
+                          entry.matrixId === matrixId &&
+                          entry.columnIndex === columnIndex &&
+                          entry.categories,
+                      );
+                      const matrix = matrices.get(matrixId);
+                      if (!column?.categories || !matrix) return;
+                      const data = matrix.column(columnIndex)?.data;
+                      if (!data) return;
+                      setChartConfig(card.id, {
+                        factorSource: {
+                          matrixId,
+                          columnIndex,
+                          label: column.label,
+                          raw: data.slice(),
+                          categories: column.categories.slice(),
+                        },
+                        factorMapping: {
+                          ...card.config.factorMapping,
+                          color: true,
+                        },
+                      });
+                    }}
+                  >
+                    <option value="">{t('chart.factorNone')}</option>
+                    {availableColumns
+                      .filter((column) => column.categories && column.categories.length > 0)
+                      .map((column) => (
+                        <option
+                          key={`${column.matrixId}:${column.columnIndex}`}
+                          value={`${column.matrixId}:${column.columnIndex}`}
+                        >
+                          {column.label} · {column.file}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                {card.config.type !== 'heatmap' ? (
+                  <>
+                    <label className="chart-card__field">
+                      <input
+                        type="checkbox"
+                        disabled={!card.config.factorSource}
+                        checked={card.config.factorMapping.color}
+                        onChange={(event) =>
+                          setChartConfig(card.id, {
+                            factorMapping: {
+                              ...card.config.factorMapping,
+                              color: event.target.checked,
+                            },
+                          })
+                        }
+                      />
+                      <span>{t('chart.factorColor')}</span>
+                    </label>
+                    <label className="chart-card__field">
+                      <input
+                        type="checkbox"
+                        disabled={!card.config.factorSource}
+                        checked={card.config.factorMapping.shape}
+                        onChange={(event) =>
+                          setChartConfig(card.id, {
+                            factorMapping: {
+                              ...card.config.factorMapping,
+                              shape: event.target.checked,
+                            },
+                          })
+                        }
+                      />
+                      <span>{t('chart.factorShape')}</span>
+                    </label>
+                  </>
+                ) : (
+                  <label className="chart-card__field">
+                    <input
+                      type="checkbox"
+                      disabled={!card.config.factorSource}
+                      checked={card.config.factorMapping.heatmapStrip}
+                      onChange={(event) =>
+                        setChartConfig(card.id, {
+                          factorMapping: {
+                            ...card.config.factorMapping,
+                            heatmapStrip: event.target.checked,
+                          },
+                        })
+                      }
+                    />
+                    <span>{t('chart.factorHeatmapStrip')}</span>
+                  </label>
+                )}
+                <label className="chart-card__field">
+                  <input
+                    type="checkbox"
+                    disabled={!card.config.factorSource}
+                    checked={card.config.factorMapping.facet}
+                    onChange={(event) =>
+                      setChartConfig(card.id, {
+                        factorMapping: {
+                          ...card.config.factorMapping,
+                          facet: event.target.checked,
+                        },
+                      })
+                    }
+                  />
+                  <span>{t('chart.factorFacet')}</span>
+                </label>
               </Popup>
             ) : null}
           </div>
@@ -1029,6 +1189,7 @@ export function ChartCard({
                             columnIndex,
                             label: col.annotation || col.posName,
                             raw: col.data.slice(),
+                            categories: col.categories?.slice(),
                           },
                         });
                       }}

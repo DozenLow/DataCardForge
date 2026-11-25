@@ -30,7 +30,7 @@ import { chartTypeDef } from '../../charts/chartTypes.ts';
 import { minimumColumnsForConfig } from '../../charts/chartModel.ts';
 import { publishedMatrices, useTranslator, useWorkspace } from '../workspaceStore.ts';
 import { registerPort, unregisterPort, type AnchorSide } from '../cardMetrics.ts';
-import { CHART_PORT_X, chartPortId } from '../migrate.ts';
+import { CHART_PORT_FACTOR, CHART_PORT_X, chartPortId } from '../migrate.ts';
 import type { ChartCardModel } from '../types.ts';
 import { SidePanel } from './SidePanel.tsx';
 
@@ -153,10 +153,29 @@ export function ColumnDock({ card, open, onToggle, onScroll }: ColumnDockProps) 
         label: source.label,
       });
     }
+    const factor = card.config.factorSource;
+    if (factor) {
+      const key = `${factor.matrixId}:${factor.columnIndex}`;
+      if (!listed.has(key)) {
+        listed.add(key);
+        unlisted.push({
+          matrixId: factor.matrixId,
+          columnIndex: factor.columnIndex,
+          label: factor.label,
+        });
+      }
+    }
     if (unlisted.length > 0) out.push({ name: t('chart.columnDockUnlisted'), columns: unlisted });
 
     return out;
-  }, [cards, matrices, card.config.sources, connected, t]);
+  }, [
+    cards,
+    matrices,
+    card.config.sources,
+    card.config.factorSource,
+    connected,
+    t,
+  ]);
 
   const isChecked = (matrixId: number, columnIndex: number): boolean =>
     card.config.sources.some(
@@ -173,6 +192,11 @@ export function ColumnDock({ card, open, onToggle, onScroll }: ColumnDockProps) 
     card.config.xAxisSource.matrixId === matrixId &&
     card.config.xAxisSource.columnIndex === columnIndex;
 
+  const isFactor = (matrixId: number, columnIndex: number): boolean =>
+    card.config.factorSource !== null &&
+    card.config.factorSource.matrixId === matrixId &&
+    card.config.factorSource.columnIndex === columnIndex;
+
   /**
    * Port ids this card's dependency edges name — the ids the connection layer looks up.
    *
@@ -185,8 +209,9 @@ export function ColumnDock({ card, open, onToggle, onScroll }: ColumnDockProps) 
       chartPortId(source.matrixId, source.columnIndex),
     );
     if (card.config.xAxisSource) ids.push(CHART_PORT_X);
+    if (card.config.factorSource) ids.push(CHART_PORT_FACTOR);
     return ids;
-  }, [card.config.sources, card.config.xAxisSource]);
+  }, [card.config.sources, card.config.xAxisSource, card.config.factorSource]);
 
   /**
    * Register one rendered element as the endpoint of `portId`.
@@ -260,6 +285,18 @@ export function ColumnDock({ card, open, onToggle, onScroll }: ColumnDockProps) 
             {t('chart.xAxisPort')}
           </button>
         ) : null}
+        {card.config.factorSource ? (
+          <button
+            type="button"
+            className="rail-port"
+            key={CHART_PORT_FACTOR}
+            ref={portRefFor(CHART_PORT_FACTOR, 'left')}
+            title={t('chart.factorSource')}
+            onClick={() => onToggle(true)}
+          >
+            G
+          </button>
+        ) : null}
       </>
     );
 
@@ -296,6 +333,7 @@ export function ColumnDock({ card, open, onToggle, onScroll }: ColumnDockProps) 
                 {group.columns.map((column) => {
                   const checked = isChecked(column.matrixId, column.columnIndex);
                   const xAxis = isXAxis(column.matrixId, column.columnIndex);
+                  const factor = isFactor(column.matrixId, column.columnIndex);
                   const atFloor = card.config.sources.length <= floor;
                   const portId = portIdOfColumn(column.matrixId, column.columnIndex);
                   return (
@@ -306,7 +344,13 @@ export function ColumnDock({ card, open, onToggle, onScroll }: ColumnDockProps) 
                       className={`formula-card__port chart-card__dock-item${
                         checked ? ' chart-card__dock-item--port' : ''
                       }`}
-                      ref={checked ? portRefFor(portId, 'left') : undefined}
+                      ref={
+                        factor
+                          ? portRefFor(CHART_PORT_FACTOR, 'left')
+                          : checked
+                            ? portRefFor(portId, 'left')
+                            : undefined
+                      }
                       data-port-id={portId}
                     >
                       <input
@@ -353,6 +397,17 @@ export function ColumnDock({ card, open, onToggle, onScroll }: ColumnDockProps) 
                           }}
                         >
                           X
+                        </button>
+                      ) : null}
+                      {factor ? (
+                        <button
+                          type="button"
+                          className="formula-card__port-id chart-card__dock-badge card__control"
+                          title={t('chart.factorSource')}
+                          aria-label={t('chart.factorSource')}
+                          onClick={() => setChartConfig(card.id, { factorSource: null })}
+                        >
+                          G
                         </button>
                       ) : null}
                     </li>

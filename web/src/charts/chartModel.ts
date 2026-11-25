@@ -20,6 +20,8 @@ export interface ChartSource {
   label: string;
   /** Full-resolution values, smoothing applied on top by the renderer. */
   raw: number[];
+  /** Stable category labels when this source is a text factor column. */
+  categories?: string[];
 }
 
 export type ChartAnnotationAxis = 'x' | 'y';
@@ -50,6 +52,8 @@ export interface ChartPanel {
   label: string;
   type: ChartTypeId;
   sources: Array<Pick<ChartSource, 'matrixId' | 'columnIndex'>>;
+  /** Optional factor level used by auto-generated facet panels. */
+  factorCode?: number;
 }
 
 export interface ChartComposition {
@@ -94,6 +98,15 @@ export interface ChartConfig {
   fieldColorRange: { min: number; max: number } | null;
   /** Draw contour polylines when the field is a complete Cartesian grid. */
   showFieldContours: boolean;
+  /** Optional long-table grouping column. */
+  factorSource: ChartSource | null;
+  /** Visual channels driven by the selected factor. */
+  factorMapping: {
+    color: boolean;
+    shape: boolean;
+    facet: boolean;
+    heatmapStrip: boolean;
+  };
   /** Bin count for the histogram; `0` means "choose automatically". */
   binCount: number;
   /** Which spread the error bars show. */
@@ -122,6 +135,8 @@ export function defaultChartConfig(type: ChartTypeId, sources: ChartSource[]): C
     heatmapMode: 'correlation',
     fieldColorRange: null,
     showFieldContours: false,
+    factorSource: null,
+    factorMapping: { color: false, shape: false, facet: false, heatmapStrip: false },
     binCount: 0,
     errorKind: 'sd',
     layout: 'grouped',
@@ -219,17 +234,35 @@ export function nonPositiveAxisCounts(config: ChartConfig): { x: number; y: numb
 
 /** Resolve one panel back onto the chart's authoritative source list. */
 export function chartConfigForPanel(config: ChartConfig, panel: ChartPanel): ChartConfig {
+  let indices: number[] | null = null;
+  if (panel.factorCode !== undefined && config.factorSource) {
+    indices = [];
+    for (let index = 0; index < config.factorSource.raw.length; ++index) {
+      if (config.factorSource.raw[index] === panel.factorCode) indices.push(index);
+    }
+  }
   const selected = panel.sources.flatMap((ref) => {
     const source = config.sources.find(
       (candidate) =>
         candidate.matrixId === ref.matrixId && candidate.columnIndex === ref.columnIndex,
     );
-    return source ? [source] : [];
+    if (!source) return [];
+    return [
+      indices
+        ? { ...source, raw: indices.map((index) => source.raw[index] ?? NaN) }
+        : source,
+    ];
   });
+  const filterSource = (source: ChartSource | null): ChartSource | null => {
+    if (!source || !indices) return source;
+    return { ...source, raw: indices.map((index) => source.raw[index] ?? NaN) };
+  };
   return {
     ...config,
     type: panel.type,
     sources: selected,
+    xAxisSource: filterSource(config.xAxisSource),
+    factorSource: filterSource(config.factorSource),
     composition: null,
   };
 }

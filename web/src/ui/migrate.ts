@@ -73,6 +73,8 @@ export function chartPortId(matrixId: number, column: number): string {
 
 /** Port id a chart card uses for its explicit X axis. */
 export const CHART_PORT_X = 'x';
+/** Port id a chart card uses for its categorical factor column. */
+export const CHART_PORT_FACTOR = 'factor';
 
 interface CardBaseShape {
   id: number;

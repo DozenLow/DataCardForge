@@ -137,6 +137,30 @@ export interface BuiltChart {
 export const ZOOM_COMPONENT_IDS = ['zoom-x', 'zoom-y'] as const;
 
 export function buildSeries(context: BuildContext): SeriesOption[] {
+  const grouped: Array<{ context: BuildContext; series?: SeriesOption[] }> =
+    context.config.factorSource &&
+    (context.config.factorMapping.color || context.config.factorMapping.shape)
+      ? factorSeriesContexts(context)
+      : [{ context }];
+  const categoryFactor =
+    context.config.factorSource &&
+    (context.config.factorMapping.color || context.config.factorMapping.shape) &&
+    ['boxplot', 'violin', 'errorBar'].includes(context.config.type)
+      ? factorExpandedContext(context)
+      : null;
+  const seriesContexts = categoryFactor ? [{ context: categoryFactor }] : grouped;
+
+  let series: SeriesOption[] = [];
+  for (const entry of seriesContexts) {
+    series.push(...(entry.series ?? buildBaseSeries(entry.context)));
+  }
+  const annotated = applyVectorAnnotations(series, context);
+  const rawPoints = seriesContexts.flatMap((entry) => smallSamplePointSeries(entry.context));
+  const strip = factorAnnotationSeries(context);
+  return [...annotated, ...rawPoints, ...strip];
+}
+
+function buildBaseSeries(context: BuildContext): SeriesOption[] {
   let series: SeriesOption[];
   switch (context.config.type) {
     case 'line':
@@ -169,9 +193,205 @@ export function buildSeries(context: BuildContext): SeriesOption[] {
     default:
       series = [];
   }
+  return series;
+}
+
+const FACTOR_SYMBOLS = ['circle', 'diamond', 'triangle', 'rect', 'roundRect', 'pin'] as const;
+
+interface FactorGroup {
+  code: number;
+  label: string;
+  indices: number[];
+}
+
+function factorGroups(config: ChartConfig): FactorGroup[] {
+  const source = config.factorSource;
+  if (!source) return [];
+  const groups = new Map<number, FactorGroup>();
+  for (let index = 0; index < source.raw.length; ++index) {
+    const code = source.raw[index];
+    if (!Number.isFinite(code) || !Number.isInteger(code)) continue;
+    const current = groups.get(code);
+    if (current) current.indices.push(index);
+    else {
+      groups.set(code, {
+        code,
+        label: source.categories?.[code] ?? String(code),
+        indices: [index],
+      });
+    }
+  }
+  return [...groups.values()];
+}
+
+function filteredFactorConfig(config: ChartConfig, indices: number[]): ChartConfig {
+  const filter = (source: ChartSource | null): ChartSource | null =>
+    source
+      ? { ...source, raw: indices.map((index) => source.raw[index] ?? NaN) }
+      : null;
+  return {
+    ...config,
+    sources: config.sources.map(
+      (source) => filter(source) as ChartSource,
+    ),
+    xAxisSource: filter(config.xAxisSource),
+    factorSource: filter(config.factorSource),
+  };
+}
+
+function factorSeriesContexts(
+  context: BuildContext,
+): Array<{ context: BuildContext; series?: SeriesOption[] }> {
+  if (
+    context.config.type === 'heatmap' ||
+    ['boxplot', 'violin', 'errorBar'].includes(context.config.type)
+  ) {
+    return [{ context }];
+  }
+  const groups = factorGroups(context.config);
+  if (groups.length <= 1) return [{ context }];
+  return groups.map((group, index) => {
+    const config = filteredFactorConfig(context.config, group.indices);
+    const base = buildBaseSeries({ ...context, config });
+    const color = lineColor(index);
+    const symbol = FACTOR_SYMBOLS[index % FACTOR_SYMBOLS.length];
+    const styled = base.map((entry) => {
+      const originalName = (entry as { name?: unknown }).name;
+      const name =
+        typeof originalName === 'string'
+          ? `${originalName} · ${group.label}`
+          : group.label;
+      const withStyle = {
+        ...entry,
+        name,
+      } as SeriesOption & Record<string, unknown>;
+      if (context.config.factorMapping.color) {
+        withStyle.lineStyle = {
+          ...((entry as { lineStyle?: object }).lineStyle ?? {}),
+          color,
+        };
+        withStyle.itemStyle = {
+          ...((entry as { itemStyle?: object }).itemStyle ?? {}),
+          color,
+        };
+      }
+      if (
+        context.config.factorMapping.shape &&
+        (entry.type === 'line' || entry.type === 'scatter') &&
+        !name.includes('fit y=')
+      ) {
+        withStyle.symbol = symbol;
+        withStyle.showSymbol = true;
+      }
+      return withStyle as SeriesOption;
+    });
+    return {
+      context: { ...context, config },
+      series: styled,
+    };
+  });
+}
+
+function factorExpandedContext(context: BuildContext): BuildContext {
+  const groups = factorGroups(context.config);
+  if (groups.length === 0) return context;
+  const sources = groups.flatMap((group) =>
+    context.config.sources.map((source) => ({
+      ...source,
+      label: `${source.label} · ${group.label}`,
+      raw: group.indices.map((index) => source.raw[index] ?? NaN),
+    })),
+  );
+  return { ...context, config: { ...context.config, sources } };
+}
+
+function factorFacetContext(context: BuildContext): BuildContext {
+  const { config } = context;
+  if (!config.factorMapping.facet || !config.factorSource) return context;
+  const groups = factorGroups(config);
+  if (groups.length <= 1) return context;
+  return {
+    ...context,
+    config: {
+      ...config,
+      composition: {
+        columns: 2,
+        shareXTicks: true,
+        shareXRange: true,
+        panels: groups.map((group) => ({
+          id: `factor-${group.code}`,
+          label: group.label,
+          type: config.type,
+          sources: config.sources.map((source) => ({
+            matrixId: source.matrixId,
+            columnIndex: source.columnIndex,
+          })),
+          factorCode: group.code,
+        })),
+      },
+    },
+  };
+}
+
+function factorAnnotationSeries(context: BuildContext): SeriesOption[] {
+  const { config } = context;
+  if (
+    !config.factorMapping.heatmapStrip ||
+    config.type !== 'heatmap' ||
+    !config.factorSource
+  ) {
+    return [];
+  }
+  const field = config.heatmapMode === 'field';
+  const bounds = computeBounds(context);
+  const xSource = field ? config.sources[0] : null;
+  const factor = config.factorSource;
+  const count = field ? Math.min(xSource?.raw.length ?? 0, factor.raw.length) : config.sources.length;
+  const data: Array<[number, number, number]> = [];
+  for (let index = 0; index < count; ++index) {
+    const code = factor.raw[index];
+    if (!Number.isFinite(code)) continue;
+    const x = field ? Number(xSource?.raw[index]) : index;
+    const y = field ? (bounds.yMax ?? 0) : -0.45;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) continue;
+    data.push([x, y, code]);
+  }
+  if (data.length === 0) return [];
+
+  const xStep = field ? fieldAxisStep(data, 0) : 1;
   return [
-    ...applyVectorAnnotations(series, context),
-    ...smallSamplePointSeries(context),
+    {
+      name: 'factor strip',
+      type: 'custom',
+      data,
+      clip: false,
+      z: 20,
+      animation: false,
+      renderItem: (
+        _params: CustomSeriesRenderItemParams,
+        api: CustomSeriesRenderItemAPI,
+      ) => {
+        const x = Number(api.value(0));
+        const y = Number(api.value(1));
+        const code = Number(api.value(2));
+        const left = api.coord([x - xStep / 2, y])[0];
+        const right = api.coord([x + xStep / 2, y])[0];
+        const cy = api.coord([x, y])[1];
+        return {
+          type: 'rect',
+          shape: {
+            x: Math.min(left, right),
+            y: cy - 5,
+            width: Math.max(1, Math.abs(right - left)),
+            height: 5,
+          },
+          style: {
+            fill: lineColor(Math.max(0, Math.floor(code))),
+            opacity: 0.88,
+          },
+        } as unknown as RenderItemResult;
+      },
+    } as CustomSeriesOption,
   ];
 }
 
@@ -394,13 +614,25 @@ function boxplotSeries(context: BuildContext): SeriesOption[] {
   const { config, smoothing, strings } = context;
 
   const summaries = config.sources.map((source) => fiveNumberSummary(smoothed(source, smoothing)));
-  const boxData = summaries.map((summary) => [
-    summary.min,
-    summary.q1,
-    summary.median,
-    summary.q3,
-    summary.max,
-  ]);
+  const factorColors = config.factorSource && config.factorMapping.color;
+  const boxData = summaries.map((summary, index) => {
+    const values = [
+      summary.min,
+      summary.q1,
+      summary.median,
+      summary.q3,
+      summary.max,
+    ];
+    return factorColors
+      ? {
+          value: values,
+          itemStyle: {
+            color: withAlpha(lineColor(index), 0.18),
+            borderColor: lineColor(index),
+          },
+        }
+      : values;
+  });
 
   const series: SeriesOption[] = [
     {
@@ -1174,17 +1406,24 @@ function xAxisKind(config: ChartConfig): AxisKind {
 }
 
 export function buildOption(context: BuildContext): EChartsOption {
-  const composition = context.config.composition;
+  const effectiveContext = factorFacetContext(context);
+  const composition = effectiveContext.config.composition;
   if (composition && composition.panels.length > 1) {
-    return buildComposedOption(context);
+    return buildComposedOption(effectiveContext);
   }
-  return buildSingleOption(context);
+  return buildSingleOption(effectiveContext);
 }
 
 function buildSingleOption(context: BuildContext): EChartsOption {
   const { config, strings } = context;
   const series = buildSeries(context);
-  const categories = config.sources.map((source) => source.label);
+  const categoryConfig =
+    config.factorSource &&
+    (config.factorMapping.color || config.factorMapping.shape) &&
+    ['boxplot', 'violin', 'errorBar'].includes(config.type)
+      ? factorExpandedContext(context).config
+      : config;
+  const categories = categoryConfig.sources.map((source) => source.label);
   const isHeatmap = config.type === 'heatmap';
   const isCorrelationHeatmap = isHeatmap && config.heatmapMode === 'correlation';
   const isFieldHeatmap = isHeatmap && config.heatmapMode === 'field';

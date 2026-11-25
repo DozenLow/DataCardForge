@@ -81,6 +81,7 @@ import {
 } from './types.ts';
 import {
   CHART_PORT_X,
+  CHART_PORT_FACTOR,
   EXPRESSION_COLUMNS_SIGNATURE,
   INPUT_PORT_SOURCE,
   REGRESSION_SIGNATURE,
@@ -3378,6 +3379,7 @@ function ensureChartData(ownerCardId: number): void {
     if (!card || !isChartCard(card)) continue;
     for (const source of card.config.sources) wanted.add(source.matrixId);
     if (card.config.xAxisSource) wanted.add(card.config.xAxisSource.matrixId);
+    if (card.config.factorSource) wanted.add(card.config.factorSource.matrixId);
   }
   if (wanted.size === 0) return;
 
@@ -3439,6 +3441,7 @@ function isMatrixReferenced(cards: CardModel[], matrixId: number): boolean {
     } else if (isChartCard(card)) {
       if (card.config.sources.some((source) => source.matrixId === matrixId)) return true;
       if (card.config.xAxisSource?.matrixId === matrixId) return true;
+      if (card.config.factorSource?.matrixId === matrixId) return true;
     } else if (isFormulaCard(card)) {
       if (card.displayMatrixId === matrixId) return true;
       if (card.inputs.some((input) => input.target.matrixId === matrixId)) return true;
@@ -3479,6 +3482,21 @@ function chartInputsFromConfig(card: ChartCardModel, cards: CardModel[]): PortCo
       inputs.push({
         portId: CHART_PORT_X,
         target: { type: 'cell', cardId, matrixId: x.matrixId, column: x.columnIndex },
+      });
+    }
+  }
+  const factor = card.config.factorSource;
+  if (factor) {
+    const cardId = ownerIdOf(factor.matrixId);
+    if (cardId !== undefined) {
+      inputs.push({
+        portId: CHART_PORT_FACTOR,
+        target: {
+          type: 'cell',
+          cardId,
+          matrixId: factor.matrixId,
+          column: factor.columnIndex,
+        },
       });
     }
   }
@@ -3695,6 +3713,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         matrixId: target.id,
         raw,
         label: columnLabel(column),
+        categories: column.categories?.slice(),
       };
     };
 
@@ -3748,11 +3767,26 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
                   : rePoint(xAxisSource, target);
             }
           }
+          let factorSource = card.config.factorSource;
+          if (
+            factorSource &&
+            matrixIds.has(factorSource.matrixId) &&
+            slotComplete(factorSource.matrixId)
+          ) {
+            const target = refreshSource(factorSource.matrixId);
+            if (target) {
+              changed = true;
+              factorSource =
+                factorSource.columnIndex >= target.matrix.columnCount()
+                  ? null
+                  : rePoint(factorSource, target);
+            }
+          }
 
           if (!changed) return card;
           const next: ChartCardModel = {
             ...card,
-            config: { ...card.config, sources, xAxisSource },
+            config: { ...card.config, sources, xAxisSource, factorSource },
           };
           // Charts follow the new file by design (a chart is a *view*), so their
           // authoritative edges are re-derived from the re-pointed config in the same
@@ -4290,6 +4324,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           columnIndex: index,
           label: columnLabel(column),
           raw: column.data.slice(),
+          categories: column.categories?.slice(),
         });
       }
       if (sources.length < minimumColumns(type)) return null;
@@ -4686,6 +4721,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
                 columnIndex: index,
                 label: columnLabel(column),
                 raw: column.data.slice(),
+                categories: column.categories?.slice(),
               });
             };
             for (let index = anchor; index < matrix.columnCount() && sources.length < needed; ++index) {
@@ -4735,6 +4771,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         columnIndex,
         label: columnLabel(column),
         raw: column.data.slice(),
+        categories: column.categories?.slice(),
       };
       commitChartConfig(cardId, (config) => ({
         ...config,

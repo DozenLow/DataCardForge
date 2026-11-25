@@ -122,6 +122,120 @@ describe('resolveSeries', () => {
   });
 });
 
+describe('factor mappings', () => {
+  const factor: ChartSource = {
+    matrixId: 1,
+    columnIndex: 2,
+    label: 'group',
+    raw: [0, 1, 0, 1],
+    categories: ['control', 'treated'],
+  };
+
+  it('splits a tidy scatter into named colour series and a legend', () => {
+    const option = buildOption(
+      context(
+        'scatter',
+        [source('X', [1, 2, 3, 4]), source('Y', [4, 8, 5, 9], 1)],
+        {
+          showFitLine: false,
+          factorSource: factor,
+          factorMapping: { color: true, shape: false, facet: false, heatmapStrip: false },
+        },
+      ),
+    );
+    const series = option.series as Array<{
+      type: string;
+      name: string;
+      data: Array<[number, number]>;
+      itemStyle: { color: string };
+    }>;
+    expect(series.map((entry) => entry.name)).toEqual([
+      'X → Y · control',
+      'X → Y · treated',
+    ]);
+    expect(series.map((entry) => entry.data)).toEqual([
+      [[1, 4], [3, 5]],
+      [[2, 8], [4, 9]],
+    ]);
+    expect(series[0].itemStyle.color).not.toBe(series[1].itemStyle.color);
+    expect((option.legend as { data: string[] }).data).toEqual(series.map((entry) => entry.name));
+  });
+
+  it('maps factor levels to distinct scatter symbols', () => {
+    const series = buildSeries(
+      context(
+        'scatter',
+        [source('X', [1, 2, 3, 4]), source('Y', [4, 8, 5, 9], 1)],
+        {
+          showFitLine: false,
+          factorSource: factor,
+          factorMapping: { color: false, shape: true, facet: false, heatmapStrip: false },
+        },
+      ),
+    ) as Array<{ symbol?: string }>;
+
+    expect(series).toHaveLength(2);
+    expect(series[0].symbol).not.toBe(series[1].symbol);
+  });
+
+  it('expands box groups into labelled category slots', () => {
+    const option = buildOption(
+      context('boxplot', [source('Signal', [1, 9, 2, 10])], {
+        factorSource: factor,
+        factorMapping: { color: true, shape: false, facet: false, heatmapStrip: false },
+      }),
+    );
+    const xAxis = option.xAxis as { data: string[] };
+    const box = (option.series as Array<{ type: string; data?: number[][] }>).find(
+      (entry) => entry.type === 'boxplot',
+    );
+
+    expect(xAxis.data).toEqual(['Signal · control', 'Signal · treated']);
+    expect(box?.data).toHaveLength(2);
+  });
+
+  it('creates one facet panel per factor level with filtered rows', () => {
+    const option = buildOption(
+      context(
+        'scatter',
+        [source('X', [1, 2, 3, 4]), source('Y', [4, 8, 5, 9], 1)],
+        {
+          showFitLine: false,
+          factorSource: factor,
+          factorMapping: { color: false, shape: false, facet: true, heatmapStrip: false },
+        },
+      ),
+    );
+    const series = option.series as Array<{ data: Array<[number, number]> }>;
+
+    expect((option.grid as unknown[])).toHaveLength(2);
+    expect((option.title as Array<{ text: string }>).map((entry) => entry.text)).toEqual([
+      'control',
+      'treated',
+    ]);
+    expect(series[0].data).toEqual([[1, 4], [3, 5]]);
+    expect(series[1].data).toEqual([[2, 8], [4, 9]]);
+  });
+
+  it('adds a vector factor strip to correlation heatmaps', () => {
+    const series = buildSeries(
+      context('heatmap', [source('A', ramp), source('B', wave)], {
+        factorSource: {
+          ...factor,
+          raw: [0, 1],
+        },
+        factorMapping: { color: false, shape: false, facet: false, heatmapStrip: true },
+      }),
+    );
+    const strip = series.find(
+      (entry) => (entry as { name?: unknown }).name === 'factor strip',
+    ) as { type: string; data: unknown[] };
+
+    expect(strip.type).toBe('custom');
+    expect(strip.data).toHaveLength(2);
+  });
+});
+
 describe('isDrawable', () => {
   it('is false without enough columns for the type', () => {
     expect(isDrawable(defaultChartConfig('line', []))).toBe(false);

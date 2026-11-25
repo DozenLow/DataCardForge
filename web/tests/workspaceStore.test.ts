@@ -134,6 +134,29 @@ describe('addChartCard', () => {
     expect(store().addChartCard(cardId, 5)).toBeNull();
     expect(store().addChartCard(999, 0)).toBeNull();
   });
+
+  it('registers a categorical factor source as an independent chart input', () => {
+    const table = matrix([[1, 2, 0], [3, 4, 1]], ['x', 'y', 'group']);
+    table.setColumnCategories(2, ['control', 'treated']);
+    const matrixCardId = store().addMatrixCard([{ name: 'tidy.csv', matrix: table }]);
+    const chartId = store().addChartCard(matrixCardId, 0, 'scatter')!;
+    const factor = {
+      matrixId: 1,
+      columnIndex: 2,
+      label: 'group',
+      raw: [0, 1],
+      categories: ['control', 'treated'],
+    };
+    store().setChartConfig(chartId, {
+      factorSource: factor,
+      factorMapping: { color: true, shape: false, facet: false, heatmapStrip: false },
+    });
+
+    const chart = store().cards.find((card) => card.id === chartId) as ChartCardModel;
+    expect(chart.inputs.map((input) => input.portId)).toContain('factor');
+    expect(chart.config.factorSource).toEqual(factor);
+    expect(store().dependencies.getDependents(matrixCardId)).toEqual([chartId]);
+  });
 });
 
 describe('setActiveSource refreshes dependent charts', () => {
@@ -167,6 +190,34 @@ describe('setActiveSource refreshes dependent charts', () => {
     expect(chart.config.sources[0].raw).toEqual([3, 6]);
     expect(chart.config.sources[0].matrixId).toBe(2);
     expect(chart.config.sources[0].label).toBe('Pos.3');
+  });
+
+  it('refreshes factor codes and labels with the active file', () => {
+    const first = matrix([[1, 2, 0], [3, 4, 1]], ['x', 'y', 'group']);
+    first.setColumnCategories(2, ['control', 'treated']);
+    const second = matrix([[5, 6, 1], [7, 8, 0]], ['x', 'y', 'group']);
+    second.setColumnCategories(2, ['treated', 'control']);
+    const cardId = store().addMatrixCard([
+      { name: 'first.csv', matrix: first },
+      { name: 'second.csv', matrix: second },
+    ]);
+    const chartId = store().addChartCard(cardId, 0, 'scatter')!;
+    store().setChartConfig(chartId, {
+      factorSource: {
+        matrixId: 1,
+        columnIndex: 2,
+        label: 'group',
+        raw: [0, 1],
+        categories: ['control', 'treated'],
+      },
+    });
+
+    store().setActiveSource(cardId, 1);
+    const chart = store().cards.find((entry) => entry.id === chartId) as ChartCardModel;
+
+    expect(chart.config.factorSource?.matrixId).toBe(2);
+    expect(chart.config.factorSource?.raw).toEqual([1, 0]);
+    expect(chart.config.factorSource?.categories).toEqual(['treated', 'control']);
   });
 
   it('ignores an invalid or unchanged index', () => {

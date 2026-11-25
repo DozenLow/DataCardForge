@@ -178,4 +178,97 @@ describe('chart annotation SVG export', () => {
     expect(svg).toContain('K');
     expect(svg).toContain('<path');
   });
+
+  it('exports categorical factor series and legend labels as SVG', () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 640 });
+    Object.defineProperty(container, 'clientHeight', { value: 420 });
+    document.body.appendChild(container);
+    const chart = echarts.init(container, undefined, {
+      renderer: 'svg',
+      width: 640,
+      height: 420,
+    });
+    instances.push(chart);
+    const config = {
+      ...defaultChartConfig('scatter', [
+        { matrixId: 1, columnIndex: 0, label: 'X', raw: [1, 2, 3, 4] },
+        { matrixId: 1, columnIndex: 1, label: 'Y', raw: [4, 8, 5, 9] },
+      ]),
+      showFitLine: false,
+      factorSource: {
+        matrixId: 1,
+        columnIndex: 2,
+        label: 'group',
+        raw: [0, 1, 0, 1],
+        categories: ['control', 'treated'],
+      },
+      factorMapping: { color: true, shape: true, facet: false, heatmapStrip: false },
+    };
+    const strings: BuildContext['strings'] = {
+      rowIndex: 'No.',
+      value: 'Value',
+      count: 'Count',
+      density: 'Density',
+      binCentre: 'Bin centre',
+      correlation: 'r',
+      quartiles: 'IQR',
+      mean: 'Mean',
+      outliers: 'Outliers',
+      secondAxis: 'Second',
+      drawnOfTotal: (drawn, total) => `Drawn ${drawn} / total ${total}`,
+    };
+    chart.setOption(buildOption({ config, smoothing: DEFAULT_SMOOTHING, strings }));
+
+    const svg = chartToSvgString(container, '#ffffff');
+    expect(svg).not.toContain('<image');
+    expect(svg).toContain('control');
+    expect(svg).toContain('treated');
+  });
+
+  it('renders a heatmap factor annotation strip with vector shapes', () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 500 });
+    Object.defineProperty(container, 'clientHeight', { value: 400 });
+    document.body.appendChild(container);
+    const chart = echarts.init(container, undefined, {
+      renderer: 'svg',
+      width: 500,
+      height: 400,
+    });
+    instances.push(chart);
+    const config = {
+      ...defaultChartConfig('heatmap', [
+        { matrixId: 1, columnIndex: 0, label: 'A', raw: [1, 2, 3] },
+        { matrixId: 1, columnIndex: 1, label: 'B', raw: [3, 2, 1] },
+      ]),
+      factorSource: {
+        matrixId: 1,
+        columnIndex: 2,
+        label: 'group',
+        raw: [0, 1],
+        categories: ['control', 'treated'],
+      },
+      factorMapping: { color: false, shape: false, facet: false, heatmapStrip: true },
+    };
+    const strings: BuildContext['strings'] = {
+      rowIndex: 'No.',
+      value: 'Value',
+      count: 'Count',
+      density: 'Density',
+      binCentre: 'Bin centre',
+      correlation: 'r',
+      quartiles: 'IQR',
+      mean: 'Mean',
+      outliers: 'Outliers',
+      secondAxis: 'Second',
+      drawnOfTotal: (drawn, total) => `Drawn ${drawn} / total ${total}`,
+    };
+    chart.setOption(buildOption({ config, smoothing: DEFAULT_SMOOTHING, strings }));
+
+    const svg = chartToSvgString(container, '#ffffff');
+    expect(svg).not.toContain('<image');
+    expect(svg).toContain('<path');
+    expect(chart.getOption().series).toHaveLength(2);
+  });
 });
