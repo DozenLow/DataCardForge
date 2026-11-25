@@ -1439,7 +1439,8 @@ export function ChartCard({
                     </select>
                   </label>
                 ) : null}
-                {card.config.type === 'scatter' || card.config.type === 'regression' ? (
+                {(card.config.type === 'scatter' || card.config.type === 'regression') &&
+                !card.config.analysis ? (
                   <label className="chart-card__field">
                     <input
                       type="checkbox"
@@ -1977,12 +1978,14 @@ export function ChartCard({
             ))}
           </div>
 
-          <div className="chart-card__controls">
+          {card.config.type === 'line' || card.config.type === 'bar' ? (
+            <div className="chart-card__controls">
             <label className="chart-card__control">
               <span>{t('chart.smoothing')}</span>
               <select
                 className="card__control"
                 value={card.smoothing.mode}
+                disabled={card.config.displayFilter !== null}
                 onChange={(event) =>
                   setSmoothing(card.id, {
                     ...card.smoothing,
@@ -2007,6 +2010,7 @@ export function ChartCard({
                   max={1}
                   step={0.01}
                   value={card.smoothing.alpha}
+                  disabled={card.config.displayFilter !== null}
                   onChange={(event) =>
                     setSmoothing(card.id, { ...card.smoothing, alpha: Number(event.target.value) })
                   }
@@ -2022,7 +2026,7 @@ export function ChartCard({
                   max={101}
                   step={2}
                   value={card.smoothing.window}
-                  disabled={card.smoothing.mode === 'none'}
+                  disabled={card.smoothing.mode === 'none' || card.config.displayFilter !== null}
                   onChange={(event) =>
                     setSmoothing(card.id, { ...card.smoothing, window: Number(event.target.value) })
                   }
@@ -2037,6 +2041,7 @@ export function ChartCard({
                 <input
                   type="number"
                   className="card__control chart-card__number"
+                  disabled={card.config.displayFilter !== null}
                   min={1}
                   max={5}
                   value={card.smoothing.degree}
@@ -2052,7 +2057,15 @@ export function ChartCard({
                 />
               </label>
             ) : null}
-          </div>
+              {card.config.displayFilter ? (
+                <span className="chart-card__note">{t('chart.filterReplacesSmoothing')}</span>
+              ) : null}
+            </div>
+          ) : (
+            <div className="chart-card__controls">
+              <span className="chart-card__note">{t('chart.statisticsUseRaw')}</span>
+            </div>
+          )}
         </div>
         </div>
       </div>

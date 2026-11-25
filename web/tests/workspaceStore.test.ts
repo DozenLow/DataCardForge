@@ -399,6 +399,17 @@ describe('addChartCard', () => {
       expect(store().chartFilters[chartId].state).toBe('done');
       expect(store().chartFilters[chartId].output?.filtered).toEqual([2, 3, 4, 5]);
 
+      store().setChartConfig(chartId, {
+        xAxisSource: {
+          matrixId: 1,
+          columnIndex: 0,
+          label: 'Pos.1',
+          raw: [1, 2, 3, 4],
+        },
+      });
+      expect(store().chartFilters[chartId].state).toBe('dirty');
+      expect(store().chartFilters[chartId].output).toBeUndefined();
+
       await store().runChartFilter(chartId);
       expect(patch).toHaveBeenCalledTimes(1);
       expect(create).toHaveBeenCalledTimes(1);

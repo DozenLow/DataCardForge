@@ -420,7 +420,9 @@ function lineSeries(context: BuildContext): SeriesOption[] {
     const values =
       index === 0 && filtered
         ? filtered.filtered
-        : smoothed(source, smoothing);
+        : index === 0 && config.displayFilter
+          ? source.raw
+          : smoothed(source, smoothing);
     const points = new Array<{ x: number; y: number }>(values.length);
     for (let i = 0; i < values.length; i++) {
       points[i] = { x: xData ? xData[i] ?? i + 1 : i + 1, y: values[i] };

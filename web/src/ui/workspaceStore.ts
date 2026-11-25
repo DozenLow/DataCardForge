@@ -4228,7 +4228,37 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       nextCard,
       state.cards.map((entry) => (entry.id === cardId ? nextCard : entry)),
     );
-    return applyCardInputs(cardId, nextInputs, nextCard);
+    const committed = applyCardInputs(cardId, nextInputs, nextCard);
+    if (!committed) return false;
+    const sourceIdentity = (config: ChartConfig): string =>
+      JSON.stringify({
+        sources: config.sources.map((source) => [
+          source.matrixId,
+          source.columnIndex,
+        ]),
+        x: config.xAxisSource
+          ? [config.xAxisSource.matrixId, config.xAxisSource.columnIndex]
+          : null,
+      });
+    if (sourceIdentity(card.config) !== sourceIdentity(nextConfig)) {
+      if (state.chartAnalyses[cardId]) {
+        patchChartAnalysisRun(cardId, {
+          state: 'dirty',
+          code: undefined,
+          params: undefined,
+          output: undefined,
+        });
+      }
+      if (state.chartFilters[cardId]) {
+        patchChartFilterRun(cardId, {
+          state: 'dirty',
+          code: undefined,
+          params: undefined,
+          output: undefined,
+        });
+      }
+    }
+    return true;
   };
 
   return {

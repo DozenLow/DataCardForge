@@ -116,6 +116,8 @@ const dictionaries = {
     'table.invalidNumber': '「{value}」不是数值，已忽略该次编辑',
 
     'chart.smoothing': '平滑',
+    'chart.statisticsUseRaw': '统计量始终使用原始数据，不受显示平滑/滤波影响。',
+    'chart.filterReplacesSmoothing': '低通/去趋势已启用；图面暂不叠加旧平滑。',
     'chart.mode.none': '关闭',
     'chart.mode.movingAverage': '滑动平均',
     'chart.mode.exponential': '指数平滑',
@@ -709,6 +711,8 @@ const dictionaries = {
     'table.invalidNumber': '"{value}" is not a number; the edit was discarded',
 
     'chart.smoothing': 'Smoothing',
+    'chart.statisticsUseRaw': 'Statistics always use raw data, not display smoothing or filtering.',
+    'chart.filterReplacesSmoothing': 'Display filtering is active; legacy smoothing is not stacked.',
     'chart.mode.none': 'Off',
     'chart.mode.movingAverage': 'Moving average',
     'chart.mode.exponential': 'Exponential',

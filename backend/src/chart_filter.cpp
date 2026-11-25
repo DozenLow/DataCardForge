@@ -64,7 +64,7 @@ Samples finiteSamples(const std::vector<double>* x, const std::vector<double>& y
   Samples samples;
   const size_t count = x ? std::min(x->size(), y.size()) : y.size();
   for (size_t index = 0; index < count; ++index) {
-    const double xv = x ? (*x)[index] : static_cast<double>(index);
+    const double xv = x ? (*x)[index] : static_cast<double>(index + 1);
     const double yv = y[index];
     if (!std::isfinite(xv) || !std::isfinite(yv)) {
       ++samples.dropped;

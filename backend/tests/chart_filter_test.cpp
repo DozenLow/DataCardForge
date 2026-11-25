@@ -98,6 +98,9 @@ void testLowPass() {
   check(withoutX.errorCode.empty(), "row-index data accepts an explicit sample rate");
   check(std::abs(value(withoutX.summary, "sampleRateHz") - 100.0) < 1e-12,
         "explicit sample rate is reported");
+  const std::vector<double>* rowIndex = values(withoutX.series, "x");
+  check(rowIndex && rowIndex->front() == 1.0 && rowIndex->back() == 400.0,
+        "implicit row X follows the chart's one-based No.N contract");
 }
 
 void testDetrend() {
