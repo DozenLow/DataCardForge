@@ -105,6 +105,13 @@ export interface BuildContext {
     outliers: string;
     secondAxis: string;
     drawnOfTotal: (drawn: number, total: number) => string;
+    /** Legend name for the backend fit curve (the fit itself is computed server-side). */
+    backendFit: string;
+    /** Legend names for the two bands; they claim different things, so they never share one. */
+    confidenceBand: string;
+    predictionBand: string;
+    /** Legend name for the raw curve drawn under a display filter. */
+    rawOverlay: string;
   };
 }
 
@@ -452,7 +459,7 @@ function rawCurveOverlay(context: BuildContext): SeriesOption[] {
   }
   return [
     {
-      name: 'Raw',
+      name: context.strings.rawOverlay,
       type: 'line',
       data: displayFilter.x.map(
         (x, index) => [x, displayFilter.raw[index]] as [number, number],
@@ -631,8 +638,9 @@ function fitOverlay(
 function analysisOverlaySeries(context: BuildContext): SeriesOption[] {
   const { analysis, config } = context;
   if (!analysis || !config.analysis) return [];
+  const strings = context.strings;
   const fit: SeriesOption = {
-    name: 'backend fit',
+    name: strings.backendFit,
     type: 'line',
     data: analysis.x.map((x, index) => [x, analysis.fitted[index]] as [number, number]),
     showSymbol: false,
@@ -686,7 +694,7 @@ function analysisOverlaySeries(context: BuildContext): SeriesOption[] {
   };
   if (config.analysis.bands === 'confidence' || config.analysis.bands === 'both') {
     addBand(
-      'mean confidence band',
+      strings.confidenceBand,
       analysis.confidenceLower,
       analysis.confidenceUpper,
       'rgba(44, 123, 182, 0.16)',
@@ -694,7 +702,7 @@ function analysisOverlaySeries(context: BuildContext): SeriesOption[] {
   }
   if (config.analysis.bands === 'prediction' || config.analysis.bands === 'both') {
     addBand(
-      'individual prediction band',
+      strings.predictionBand,
       analysis.predictionLower,
       analysis.predictionUpper,
       'rgba(230, 159, 0, 0.13)',

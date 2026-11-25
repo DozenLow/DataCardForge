@@ -1022,6 +1022,19 @@ body {
   white-space: normal;
 }
 
+/* Fitted numbers: one fact per line (n/R², the equation, LOD/LOQ) instead of one long run-on
+   sentence, so the equation stays readable when the panel is narrow. */
+.chart-card__fit {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.chart-card__fit p {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .chart-card__warn {
   margin: 2px 0 4px;
   font-size: 11px;

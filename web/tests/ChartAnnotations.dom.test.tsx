@@ -41,6 +41,10 @@ describe('chart annotation SVG export', () => {
       outliers: 'Outliers',
       secondAxis: 'Second',
       drawnOfTotal: (drawn, total) => `Drawn ${drawn} / total ${total}`,
+    backendFit: 'backend fit',
+    confidenceBand: 'mean confidence band',
+    predictionBand: 'individual prediction band',
+    rawOverlay: 'Raw',
     };
     const config = {
       ...defaultChartConfig('line', [
@@ -103,6 +107,10 @@ describe('chart annotation SVG export', () => {
       outliers: 'Outliers',
       secondAxis: 'Second',
       drawnOfTotal: (drawn, total) => `Drawn ${drawn} / total ${total}`,
+    backendFit: 'backend fit',
+    confidenceBand: 'mean confidence band',
+    predictionBand: 'individual prediction band',
+    rawOverlay: 'Raw',
     };
     chart.setOption(buildOption({ config, smoothing: DEFAULT_SMOOTHING, strings }));
 
@@ -163,6 +171,10 @@ describe('chart annotation SVG export', () => {
       outliers: 'Outliers',
       secondAxis: 'Second',
       drawnOfTotal: (drawn, total) => `Drawn ${drawn} / total ${total}`,
+    backendFit: 'backend fit',
+    confidenceBand: 'mean confidence band',
+    predictionBand: 'individual prediction band',
+    rawOverlay: 'Raw',
     };
     chart.setOption(
       buildOption({
@@ -217,6 +229,10 @@ describe('chart annotation SVG export', () => {
       outliers: 'Outliers',
       secondAxis: 'Second',
       drawnOfTotal: (drawn, total) => `Drawn ${drawn} / total ${total}`,
+    backendFit: 'backend fit',
+    confidenceBand: 'mean confidence band',
+    predictionBand: 'individual prediction band',
+    rawOverlay: 'Raw',
     };
     chart.setOption(buildOption({ config, smoothing: DEFAULT_SMOOTHING, strings }));
 
@@ -263,6 +279,10 @@ describe('chart annotation SVG export', () => {
       outliers: 'Outliers',
       secondAxis: 'Second',
       drawnOfTotal: (drawn, total) => `Drawn ${drawn} / total ${total}`,
+    backendFit: 'backend fit',
+    confidenceBand: 'mean confidence band',
+    predictionBand: 'individual prediction band',
+    rawOverlay: 'Raw',
     };
     chart.setOption(buildOption({ config, smoothing: DEFAULT_SMOOTHING, strings }));
 
@@ -332,6 +352,10 @@ describe('chart annotation SVG export', () => {
       outliers: 'Outliers',
       secondAxis: 'Second',
       drawnOfTotal: (drawn, total) => `Drawn ${drawn} / total ${total}`,
+    backendFit: 'backend fit',
+    confidenceBand: 'mean confidence band',
+    predictionBand: 'individual prediction band',
+    rawOverlay: 'Raw',
     };
     chart.setOption(
       buildOption({ config, smoothing: DEFAULT_SMOOTHING, strings, analysis }),

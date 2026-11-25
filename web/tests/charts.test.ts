@@ -50,6 +50,10 @@ const strings: BuildContext['strings'] = {
   outliers: 'outliers',
   secondAxis: '2nd',
   drawnOfTotal: (drawn, total) => `Drawn ${drawn} / total ${total}`,
+  backendFit: 'backend fit',
+  confidenceBand: 'mean confidence band',
+  predictionBand: 'individual prediction band',
+  rawOverlay: 'Raw',
 };
 
 function context(type: ChartTypeId, sources: ChartSource[], patch: Partial<BuildContext['config']> = {}): BuildContext {

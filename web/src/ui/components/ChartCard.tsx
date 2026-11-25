@@ -42,6 +42,11 @@ import {
   type ChartSource,
 } from '../../charts/chartModel.ts';
 import { exportChart, type ExportType } from '../../charts/export.ts';
+import {
+  failureText,
+  limitsText,
+  parameterText,
+} from '../chartResultText.ts';
 import { CardShell } from './CardShell.tsx';
 import { ColumnDock } from './ColumnDock.tsx';
 import { Popup } from './Popup.tsx';
@@ -97,6 +102,20 @@ export function ChartCard({
   const runChartFilter = useWorkspace((s) => s.runChartFilter);
   const analysisRun = useWorkspace((s) => s.chartAnalyses[card.id]);
   const filterRun = useWorkspace((s) => s.chartFilters[card.id]);
+  // Every phrase the fit panel shows comes from here, so a backend reason never reaches the
+  // screen as a bare code (`fitFailed`, `nonUniformX`) and the fitted numbers get labels that
+  // match the model instead of the column name.
+  const analysisFailure =
+    analysisRun?.state === 'error' ? failureText('analysis', analysisRun, t) : null;
+  const analysisOutput = analysisRun?.state === 'done' ? analysisRun.output : undefined;
+  const analysisFitLine =
+    analysisOutput && card.config.analysis
+      ? parameterText(card.config.analysis.model, analysisOutput.summary)
+      : null;
+  const analysisLimits =
+    analysisOutput && card.config.analysis
+      ? limitsText(card.config.analysis.model, analysisOutput.summary)
+      : null;
   const matrices = useWorkspace((s) => s.matrices);
   const cards = useWorkspace((s) => s.cards);
   const showToast = useWorkspace((s) => s.showToast);
@@ -226,6 +245,10 @@ export function ChartCard({
       outliers: t('chart.outliers'),
       secondAxis: t('chart.secondAxis'),
       drawnOfTotal: (drawn, total) => t('chart.drawnOfTotal', { drawn, total }),
+      backendFit: t('chart.legend.backendFit'),
+      confidenceBand: t('chart.legend.confidenceBand'),
+      predictionBand: t('chart.legend.predictionBand'),
+      rawOverlay: t('chart.legend.rawOverlay'),
     }),
     // The legend name embeds the selected error kind, so it must rebuild with it.
     // `t` is stable per locale (see `translatorFor`), so this only rebuilds when it must.
@@ -1624,10 +1647,10 @@ export function ChartCard({
                                 ) : null}
                                 {filterRun?.state === 'error' ? (
                                   <p className="chart-card__warn">
-                                    {t('chart.filterError', {
-                                      code: filterRun.code ?? 'internalError',
-                                      reason: String(filterRun.params?.reason ?? ''),
-                                    })}
+                                    {(() => {
+                                      const text = failureText('filter', filterRun, t);
+                                      return t(text.key, text.vars);
+                                    })()}
                                   </p>
                                 ) : null}
                                 {filterRun?.state === 'done' && filterRun.output ? (
@@ -1751,27 +1774,26 @@ export function ChartCard({
                         {analysisArrayInvalid ? (
                           <p className="chart-card__warn">{t('chart.analysisArrayInvalid')}</p>
                         ) : null}
-                        {analysisRun?.state === 'error' ? (
+                        {analysisFailure ? (
                           <p className="chart-card__warn">
-                            {t('chart.analysisError', {
-                              code: analysisRun.code ?? 'internalError',
-                              reason: String(analysisRun.params?.reason ?? ''),
-                            })}
+                            {t(analysisFailure.key, analysisFailure.vars)}
                           </p>
                         ) : null}
-                        {analysisRun?.state === 'done' && analysisRun.output ? (
-                          <p className="chart-card__note">
-                            {t('chart.analysisSummary', {
-                              r2: Number(analysisRun.output.summary.r2).toFixed(4),
-                              n: String(analysisRun.output.summary.n),
-                              lod: Number.isFinite(analysisRun.output.summary.lod)
-                                ? Number(analysisRun.output.summary.lod).toFixed(4)
-                                : '—',
-                              loq: Number.isFinite(analysisRun.output.summary.loq)
-                                ? Number(analysisRun.output.summary.loq).toFixed(4)
-                                : '—',
-                            })}
-                          </p>
+                        {analysisOutput ? (
+                          <div className="chart-card__note chart-card__fit">
+                            <p>
+                              {t('chart.analysisSummary', {
+                                r2: Number(analysisOutput.summary.r2).toFixed(4),
+                                n: String(analysisOutput.summary.n),
+                              })}
+                            </p>
+                            {analysisFitLine ? (
+                              <p>{t(analysisFitLine.key, analysisFitLine.vars)}</p>
+                            ) : null}
+                            {analysisLimits ? (
+                              <p>{t(analysisLimits.key, analysisLimits.vars)}</p>
+                            ) : null}
+                          </div>
                         ) : null}
                       </>
                     ) : null}
