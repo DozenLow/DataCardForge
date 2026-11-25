@@ -362,6 +362,90 @@ describe('heatmap', () => {
     expect(label.formatter({ value: [0, 1, NaN] })).toBe('—');
     expect(label.formatter({ value: [0, 0, 1] })).toBe('1.00');
   });
+
+  it('draws X/Y/Z field triplets on value axes with a unit-bearing colourbar', () => {
+    const xs = [0, 1, 2, 0, 1, 2, 0, 1, 2];
+    const ys = [10, 10, 10, 20, 20, 20, 30, 30, 30];
+    const zs = [1, 2, 3, 2, 4, 6, 3, 6, 9];
+    const option = buildOption({
+      ...context(
+        'heatmap',
+        [
+          source('Temperature', xs),
+          source('Field', ys, 1),
+          source('Signal_K', zs, 2),
+        ],
+        {
+          heatmapMode: 'field',
+          fieldColorRange: { min: 0, max: 10 },
+        },
+      ),
+      colorAxisUnit: 'K',
+    });
+    const series = (option.series as Array<{
+      type: string;
+      data?: Array<[number, number, number]>;
+    }>)[0];
+    const visualMap = option.visualMap as Array<{
+      min: number;
+      max: number;
+      text?: string[];
+      calculable?: boolean;
+    }>;
+
+    expect(series.type).toBe('custom');
+    expect(series.data).toHaveLength(9);
+    expect(series.data).toContainEqual([1, 20, 4]);
+    expect(option.xAxis).toMatchObject({ type: 'value', name: 'Temperature' });
+    expect(option.yAxis).toMatchObject({ type: 'value', name: 'Field' });
+    expect(visualMap[0]).toMatchObject({
+      min: 0,
+      max: 10,
+      text: ['K', ''],
+      calculable: false,
+    });
+  });
+
+  it('adds contour segments only for a complete Cartesian field grid', () => {
+    const xs = [0, 1, 2, 0, 1, 2, 0, 1, 2];
+    const ys = [0, 0, 0, 1, 1, 1, 2, 2, 2];
+    const zs = [0, 1, 2, 1, 2, 3, 2, 3, 4];
+    const complete = buildSeries(
+      context(
+        'heatmap',
+        [source('X', xs), source('Y', ys, 1), source('Z', zs, 2)],
+        { heatmapMode: 'field', showFieldContours: true },
+      ),
+    );
+    const incomplete = buildSeries(
+      context(
+        'heatmap',
+        [
+          source('X', xs.slice(1)),
+          source('Y', ys.slice(1), 1),
+          source('Z', zs.slice(1), 2),
+        ],
+        { heatmapMode: 'field', showFieldContours: true },
+      ),
+    );
+
+    expect(complete.some((entry) => entry.type === 'lines')).toBe(true);
+    expect(incomplete.some((entry) => entry.type === 'lines')).toBe(false);
+  });
+
+  it('requires X, Y and Z before a field heatmap becomes drawable', () => {
+    const pair = [
+      source('X', [1]),
+      source('Y', [2], 1),
+    ];
+    expect(isDrawable(defaultChartConfig('heatmap', pair))).toBe(true);
+    expect(
+      isDrawable({
+        ...defaultChartConfig('heatmap', pair),
+        heatmapMode: 'field',
+      }),
+    ).toBe(false);
+  });
 });
 
 describe('buildOption axis selection', () => {

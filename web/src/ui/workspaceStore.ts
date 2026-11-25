@@ -43,7 +43,12 @@ import { DEFAULT_SMOOTHING, type SmoothingOptions } from '../core/Smoothing.ts';
 // belongs to `core/` — this import is not the retired browser compute path.
 import { inferInheritedUnit, type InheritedUnits } from '../core/unitInheritance.ts';
 import { columnUnitResolutions } from '../core/units.ts';
-import { defaultChartConfig, type ChartConfig, type ChartSource } from '../charts/chartModel.ts';
+import {
+  defaultChartConfig,
+  minimumColumnsForConfig,
+  type ChartConfig,
+  type ChartSource,
+} from '../charts/chartModel.ts';
 import { chartTypeDef, minimumColumns, type ChartTypeId } from '../charts/chartTypes.ts';
 import { lineColor } from '../charts/palette.ts';
 // Backend-owned compute (docs/decisions/2026-10-17-backend-owns-compute.md): no numeric compute lives in
@@ -4749,8 +4754,14 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // drop below what the *current type* needs: silently degrading a scatter to
       // "needs at least 2 columns" destroys work the user cannot undo.
       const compositionFloors =
-        card.config.composition?.panels.map((panel) => minimumColumns(panel.type)) ?? [];
-      const floor = Math.max(1, minimumColumns(card.config.type), ...compositionFloors);
+        card.config.composition?.panels.map((panel) =>
+          minimumColumnsForConfig({ ...card.config, type: panel.type }),
+        ) ?? [];
+      const floor = Math.max(
+        1,
+        minimumColumnsForConfig(card.config),
+        ...compositionFloors,
+      );
       if (sources.length < floor) return;
       // The X axis may have pointed at the column just removed.
       const xAxisSource =

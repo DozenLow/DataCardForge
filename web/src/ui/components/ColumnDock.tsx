@@ -26,7 +26,8 @@
  */
 import { useMemo } from 'react';
 
-import { chartTypeDef, minimumColumns } from '../../charts/chartTypes.ts';
+import { chartTypeDef } from '../../charts/chartTypes.ts';
+import { minimumColumnsForConfig } from '../../charts/chartModel.ts';
 import { publishedMatrices, useTranslator, useWorkspace } from '../workspaceStore.ts';
 import { registerPort, unregisterPort, type AnchorSide } from '../cardMetrics.ts';
 import { CHART_PORT_X, chartPortId } from '../migrate.ts';
@@ -77,7 +78,12 @@ export function ColumnDock({ card, open, onToggle, onScroll }: ColumnDockProps) 
 
   const typeDef = chartTypeDef(card.config.type);
   // A chart must always keep at least one column, and a paired type needs two.
-  const floor = Math.max(1, minimumColumns(card.config.type));
+  const floor = Math.max(
+    minimumColumnsForConfig(card.config),
+    ...(card.config.composition?.panels.map((panel) =>
+      minimumColumnsForConfig({ ...card.config, type: panel.type, composition: null }),
+    ) ?? []),
+  );
 
   /**
    * The cards this chart reads — its own edges, not the workspace.

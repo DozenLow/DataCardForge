@@ -29,15 +29,16 @@ import {
   CHART_TYPE_ORDER,
   EXPORT_FORMATS,
   chartTypeDef,
-  minimumColumns,
 } from '../../charts/chartTypes.ts';
 import { buildOption, ZOOM_COMPONENT_IDS, type BuildContext } from '../../charts/chartOptions.ts';
 import {
   isDrawable,
+  minimumColumnsForConfig,
   nonPositiveAxisCounts,
   type ChartAnnotationAxis,
   type ChartLimitRange,
   type ChartPanel,
+  type ChartSource,
 } from '../../charts/chartModel.ts';
 import { exportChart, type ExportType } from '../../charts/export.ts';
 import { CardShell } from './CardShell.tsx';
@@ -116,6 +117,12 @@ export function ChartCard({
   const [acceptedLower, setAcceptedLower] = useState('');
   const [acceptedUpper, setAcceptedUpper] = useState('');
   const [acceptedLabel, setAcceptedLabel] = useState('');
+  const [fieldMin, setFieldMin] = useState(
+    card.config.fieldColorRange ? String(card.config.fieldColorRange.min) : '',
+  );
+  const [fieldMax, setFieldMax] = useState(
+    card.config.fieldColorRange ? String(card.config.fieldColorRange.max) : '',
+  );
 
   // A `single`-arity type plots only the first column, so counting every attached column in
   // the badge made a histogram claim "2 × 10000 points" while drawing one series.
@@ -129,7 +136,7 @@ export function ChartCard({
     typeDef.columnArity === 'pairs'
       ? Math.floor(card.config.sources.length / 2) + (card.config.sources.length % 2)
       : drawnSources.length;
-  const needed = minimumColumns(card.config.type);
+  const needed = minimumColumnsForConfig(card.config);
   const drawable = isDrawable(card.config);
 
   /**
@@ -212,6 +219,24 @@ export function ChartCard({
    * or any of them is ambiguous/unknown, the axis keeps the plain "Value" title. An axis
    * title is a statement about every number on it, so a mixed set must not claim one.
    */
+  const recognizedUnit = useCallback((source: ChartSource): string | undefined => {
+    const matrix = matrices.get(source.matrixId);
+    if (!matrix || !matrix.column(source.columnIndex)) return undefined;
+    const { resolutions } = columnUnitResolutions(
+      matrix.columns().map((entry) => entry.annotation),
+      unitConfirmations,
+      { constants: unitConstants, preconfirm: globalUnitPreconfirm, inherited: inheritedUnits },
+    );
+    const resolution = resolutions[source.columnIndex];
+    return resolution?.state === 'recognized' ? resolution.unit : undefined;
+  }, [
+    matrices,
+    unitConfirmations,
+    unitConstants,
+    globalUnitPreconfirm,
+    inheritedUnits,
+  ]);
+
   const yAxisUnit = useMemo((): string | undefined => {
     // A histogram plots counts and a heatmap plots correlation coefficients; neither y axis
     // measures the column's unit.
@@ -221,42 +246,37 @@ export function ChartCard({
     if (sources.length === 0) return undefined;
     let shared: string | null = null;
     for (const source of sources) {
-      const matrix = matrices.get(source.matrixId);
-      if (!matrix || !matrix.column(source.columnIndex)) return undefined;
-      // Same derivation the data card's header chips use, so the axis and the chips can
-      // never disagree about a column's unit.
-      const { resolutions } = columnUnitResolutions(
-        matrix.columns().map((entry) => entry.annotation),
-        unitConfirmations,
-        // Identical context to the header chips: a constant that renames a dimension must
-        // move the axis label with it, or the same column would have two units on screen —
-        // and the same goes for a unit a formula output inherits (units L2a).
-        { constants: unitConstants, preconfirm: globalUnitPreconfirm, inherited: inheritedUnits },
-      );
-      const resolution = resolutions[source.columnIndex];
-      if (!resolution) return undefined;
-      if (resolution.state !== 'recognized') return undefined;
-      if (shared === null) shared = resolution.unit;
-      else if (shared !== resolution.unit) return undefined;
+      const unit = recognizedUnit(source);
+      if (!unit) return undefined;
+      if (shared === null) shared = unit;
+      else if (shared !== unit) return undefined;
     }
     return shared ?? undefined;
   }, [
     card.config.type,
     card.config.sources,
     typeDef.columnArity,
-    matrices,
-    unitConfirmations,
-    unitConstants,
-    globalUnitPreconfirm,
-    inheritedUnits,
+    recognizedUnit,
   ]);
+
+  const colorAxisUnit = useMemo(() => {
+    if (card.config.type !== 'heatmap' || card.config.heatmapMode !== 'field') return undefined;
+    const source = card.config.sources[2];
+    return source ? recognizedUnit(source) : undefined;
+  }, [card.config.heatmapMode, card.config.sources, card.config.type, recognizedUnit]);
 
   const option = useMemo(
     () =>
       drawable
-        ? buildOption({ config: card.config, smoothing: card.smoothing, strings, yAxisUnit })
+        ? buildOption({
+            config: card.config,
+            smoothing: card.smoothing,
+            strings,
+            yAxisUnit,
+            colorAxisUnit,
+          })
         : null,
-    [card.config, card.smoothing, strings, drawable, yAxisUnit],
+    [card.config, card.smoothing, strings, drawable, yAxisUnit, colorAxisUnit],
   );
 
   useEffect(() => {
@@ -1036,6 +1056,95 @@ export function ChartCard({
                     />
                     <span>{t('chart.logScale')}</span>
                   </label>
+                ) : null}
+                {card.config.type === 'heatmap' ? (
+                  <>
+                    <label className="chart-card__field">
+                      <span>{t('chart.heatmapMode')}</span>
+                      <select
+                        className="card__control"
+                        value={card.config.heatmapMode}
+                        onChange={(event) =>
+                          setChartConfig(card.id, {
+                            heatmapMode: event.target.value as 'correlation' | 'field',
+                          })
+                        }
+                      >
+                        <option value="correlation">{t('chart.heatmapMode.correlation')}</option>
+                        <option value="field">{t('chart.heatmapMode.field')}</option>
+                      </select>
+                    </label>
+                    {card.config.heatmapMode === 'field' ? (
+                      <>
+                        <p className="chart-card__note">{t('chart.fieldTripletHint')}</p>
+                        <label className="chart-card__field">
+                          <span>{t('chart.colorMin')}</span>
+                          <input
+                            type="number"
+                            className="card__control chart-card__number"
+                            value={fieldMin}
+                            onChange={(event) => setFieldMin(event.target.value)}
+                          />
+                        </label>
+                        <label className="chart-card__field">
+                          <span>{t('chart.colorMax')}</span>
+                          <input
+                            type="number"
+                            className="card__control chart-card__number"
+                            value={fieldMax}
+                            onChange={(event) => setFieldMax(event.target.value)}
+                          />
+                        </label>
+                        <div className="chart-card__field">
+                          <button
+                            type="button"
+                            className="card__control"
+                            onClick={() => {
+                              const min = Number(fieldMin);
+                              const max = Number(fieldMax);
+                              if (
+                                fieldMin.trim() === '' ||
+                                fieldMax.trim() === '' ||
+                                !Number.isFinite(min) ||
+                                !Number.isFinite(max) ||
+                                min >= max
+                              ) {
+                                return;
+                              }
+                              setChartConfig(card.id, {
+                                fieldColorRange: { min, max },
+                              });
+                            }}
+                          >
+                            {t('chart.lockColorRange')}
+                          </button>
+                          <button
+                            type="button"
+                            className="card__control"
+                            onClick={() => {
+                              setChartConfig(card.id, { fieldColorRange: null });
+                              setFieldMin('');
+                              setFieldMax('');
+                            }}
+                          >
+                            {t('chart.autoColorRange')}
+                          </button>
+                        </div>
+                        <label className="chart-card__field">
+                          <input
+                            type="checkbox"
+                            checked={card.config.showFieldContours}
+                            onChange={(event) =>
+                              setChartConfig(card.id, {
+                                showFieldContours: event.target.checked,
+                              })
+                            }
+                          />
+                          <span>{t('chart.fieldContours')}</span>
+                        </label>
+                      </>
+                    ) : null}
+                  </>
                 ) : null}
                 {typeDef.supportsLogX ? (
                   <label className="chart-card__field">

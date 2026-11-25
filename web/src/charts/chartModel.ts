@@ -88,6 +88,12 @@ export interface ChartConfig {
   rawPointMode: 'auto' | 'always' | 'never';
   /** Optional single-card multi-panel composition. */
   composition: ChartComposition | null;
+  /** Correlation matrix or X/Y/Z field for the heatmap family. */
+  heatmapMode: 'correlation' | 'field';
+  /** Optional fixed colour range for field maps. */
+  fieldColorRange: { min: number; max: number } | null;
+  /** Draw contour polylines when the field is a complete Cartesian grid. */
+  showFieldContours: boolean;
   /** Bin count for the histogram; `0` means "choose automatically". */
   binCount: number;
   /** Which spread the error bars show. */
@@ -113,6 +119,9 @@ export function defaultChartConfig(type: ChartTypeId, sources: ChartSource[]): C
     pointLabels: 'none',
     rawPointMode: 'auto',
     composition: null,
+    heatmapMode: 'correlation',
+    fieldColorRange: null,
+    showFieldContours: false,
     binCount: 0,
     errorKind: 'sd',
     layout: 'grouped',
@@ -230,14 +239,14 @@ export function isDrawable(config: ChartConfig): boolean {
   if (config.composition) {
     return config.composition.panels.some((panel) => {
       const resolved = chartConfigForPanel(config, panel);
-      const needed = chartTypeDef(panel.type).columnArity;
-      return needed === 'pairs' || needed === 'matrix'
-        ? resolved.sources.length >= 2
-        : resolved.sources.length >= 1;
+      return resolved.sources.length >= minimumColumnsForConfig(resolved);
     });
   }
   const def = chartTypeDef(config.type);
   if (config.sources.length === 0) return false;
+  if (config.type === 'heatmap' && config.heatmapMode === 'field') {
+    return config.sources.length >= 3;
+  }
   switch (def.columnArity) {
     case 'pairs':
       return config.sources.length >= 2;
@@ -246,4 +255,10 @@ export function isDrawable(config: ChartConfig): boolean {
     default:
       return true;
   }
+}
+
+export function minimumColumnsForConfig(config: ChartConfig): number {
+  if (config.type === 'heatmap' && config.heatmapMode === 'field') return 3;
+  const def = chartTypeDef(config.type);
+  return def.columnArity === 'pairs' || def.columnArity === 'matrix' ? 2 : 1;
 }

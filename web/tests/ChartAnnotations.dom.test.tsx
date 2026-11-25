@@ -129,4 +129,53 @@ describe('chart annotation SVG export', () => {
     expect(svg).not.toContain('<image');
     for (const label of ['A', 'B', 'C', 'D']) expect(svg).toContain(`>${label}<`);
   });
+
+  it('exports field cells, contours, and the colourbar unit as SVG', () => {
+    const container = document.createElement('div');
+    Object.defineProperty(container, 'clientWidth', { value: 640 });
+    Object.defineProperty(container, 'clientHeight', { value: 420 });
+    document.body.appendChild(container);
+    const chart = echarts.init(container, undefined, {
+      renderer: 'svg',
+      width: 640,
+      height: 420,
+    });
+    instances.push(chart);
+    const config = {
+      ...defaultChartConfig('heatmap', [
+        { matrixId: 1, columnIndex: 0, label: 'Temperature', raw: [0, 1, 0, 1] },
+        { matrixId: 1, columnIndex: 1, label: 'Field', raw: [0, 0, 1, 1] },
+        { matrixId: 1, columnIndex: 2, label: 'Signal_K', raw: [1, 2, 2, 3] },
+      ]),
+      heatmapMode: 'field' as const,
+      showFieldContours: true,
+      fieldColorRange: { min: 0, max: 4 },
+    };
+    const strings: BuildContext['strings'] = {
+      rowIndex: 'No.',
+      value: 'Value',
+      count: 'Count',
+      density: 'Density',
+      binCentre: 'Bin centre',
+      correlation: 'r',
+      quartiles: 'IQR',
+      mean: 'Mean',
+      outliers: 'Outliers',
+      secondAxis: 'Second',
+      drawnOfTotal: (drawn, total) => `Drawn ${drawn} / total ${total}`,
+    };
+    chart.setOption(
+      buildOption({
+        config,
+        smoothing: DEFAULT_SMOOTHING,
+        strings,
+        colorAxisUnit: 'K',
+      }),
+    );
+
+    const svg = chartToSvgString(container, '#ffffff');
+    expect(svg).not.toContain('<image');
+    expect(svg).toContain('K');
+    expect(svg).toContain('<path');
+  });
 });

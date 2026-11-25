@@ -79,6 +79,8 @@ export interface BuildContext {
    * it, so a mixed or unconfirmed set must leave it out rather than say something false.
    */
   yAxisUnit?: string;
+  /** Unit carried by the Z/colour dimension of a field heatmap. */
+  colorAxisUnit?: string;
   /** Localised axis/tooltip labels, resolved by the caller (keeps this module i18n-free). */
   strings: {
     rowIndex: string;
@@ -436,6 +438,19 @@ function boxplotSeries(context: BuildContext): SeriesOption[] {
   return series;
 }
 
+function fieldAxisStep(
+  data: ReadonlyArray<[number, number, number]>,
+  dimension: 0 | 1,
+): number {
+  const values = [...new Set(data.map((point) => point[dimension]))].sort((a, b) => a - b);
+  if (values.length < 2) return Math.max(1, Math.abs(values[0] ?? 1));
+  let step = Infinity;
+  for (let index = 1; index < values.length; ++index) {
+    step = Math.min(step, values[index] - values[index - 1]);
+  }
+  return Number.isFinite(step) && step > 0 ? step : 1;
+}
+
 // ── violin (custom series — no native ECharts type) ────────────────────────
 
 interface ViolinShape {
@@ -608,6 +623,7 @@ function errorBarSeries(context: BuildContext): SeriesOption[] {
 // ── heatmap / correlation matrix ───────────────────────────────────────────
 
 function heatmapSeries(context: BuildContext): SeriesOption[] {
+  if (context.config.heatmapMode === 'field') return fieldHeatmapSeries(context);
   const { config, smoothing, strings } = context;
   const series = config.sources.map((source) => smoothed(source, smoothing));
   const matrix = correlationMatrix(series);
@@ -640,6 +656,158 @@ function heatmapSeries(context: BuildContext): SeriesOption[] {
       animation: false,
     },
   ];
+}
+
+function fieldHeatmapSeries(context: BuildContext): SeriesOption[] {
+  const { config } = context;
+  const [xSource, ySource, zSource] = config.sources;
+  if (!xSource || !ySource || !zSource) return [];
+  const length = Math.min(xSource.raw.length, ySource.raw.length, zSource.raw.length);
+  const data: Array<[number, number, number]> = [];
+  for (let index = 0; index < length; ++index) {
+    const x = xSource.raw[index];
+    const y = ySource.raw[index];
+    const z = zSource.raw[index];
+    if (Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(z)) {
+      data.push([x, y, z]);
+    }
+  }
+
+  const xStep = fieldAxisStep(data, 0);
+  const yStep = fieldAxisStep(data, 1);
+  const series: SeriesOption[] = [
+    {
+      name: zSource.label,
+      type: 'custom',
+      data,
+      encode: { x: 0, y: 1 },
+      clip: true,
+      z: 2,
+      animation: false,
+      renderItem: (_params: CustomSeriesRenderItemParams, api: CustomSeriesRenderItemAPI) => {
+        const x = Number(api.value(0));
+        const y = Number(api.value(1));
+        const left = api.coord([x - xStep / 2, y])[0];
+        const right = api.coord([x + xStep / 2, y])[0];
+        const top = api.coord([x, y + yStep / 2])[1];
+        const bottom = api.coord([x, y - yStep / 2])[1];
+        return {
+          type: 'rect',
+          shape: {
+            x: Math.min(left, right),
+            y: Math.min(top, bottom),
+            width: Math.max(1, Math.abs(right - left)),
+            height: Math.max(1, Math.abs(bottom - top)),
+          },
+          style: {
+            fill: api.visual('color'),
+            stroke: 'rgba(255,255,255,0.35)',
+            lineWidth: 0.4,
+          },
+        } as unknown as RenderItemResult;
+      },
+    } as CustomSeriesOption,
+  ];
+  if (config.showFieldContours) {
+    const contours = contourSegments(data, fieldColorBounds(config, data));
+    if (contours.length > 0) {
+      series.push({
+        name: 'contours',
+        type: 'lines',
+        coordinateSystem: 'cartesian2d',
+        polyline: false,
+        data: contours.map((coords) => ({ coords })),
+        lineStyle: { width: 1.1, color: 'rgba(32,32,32,0.72)', opacity: 0.8 },
+        silent: true,
+        animation: false,
+        z: 8,
+      } as SeriesOption);
+    }
+  }
+  return series;
+}
+
+function fieldColorBounds(
+  config: ChartConfig,
+  data: ReadonlyArray<[number, number, number]>,
+): [number, number] {
+  if (
+    config.fieldColorRange &&
+    Number.isFinite(config.fieldColorRange.min) &&
+    Number.isFinite(config.fieldColorRange.max) &&
+    config.fieldColorRange.min < config.fieldColorRange.max
+  ) {
+    return [config.fieldColorRange.min, config.fieldColorRange.max];
+  }
+  let min = Infinity;
+  let max = -Infinity;
+  for (const point of data) {
+    if (point[2] < min) min = point[2];
+    if (point[2] > max) max = point[2];
+  }
+  return Number.isFinite(min) && Number.isFinite(max) && min < max
+    ? [min, max]
+    : [0, 1];
+}
+
+type ContourPoint = [number, number];
+
+function contourSegments(
+  data: ReadonlyArray<[number, number, number]>,
+  range: [number, number],
+): Array<[ContourPoint, ContourPoint]> {
+  const xs = [...new Set(data.map((point) => point[0]))].sort((a, b) => a - b);
+  const ys = [...new Set(data.map((point) => point[1]))].sort((a, b) => a - b);
+  if (xs.length < 2 || ys.length < 2 || data.length !== xs.length * ys.length) return [];
+
+  const values = new Map<string, number>();
+  for (const [x, y, z] of data) values.set(`${x}\u0000${y}`, z);
+  if (xs.some((x) => ys.some((y) => !values.has(`${x}\u0000${y}`)))) return [];
+
+  const segments: Array<[ContourPoint, ContourPoint]> = [];
+  const levels = 6;
+  for (let levelIndex = 1; levelIndex < levels; ++levelIndex) {
+    const level = range[0] + ((range[1] - range[0]) * levelIndex) / levels;
+    for (let yi = 0; yi < ys.length - 1; ++yi) {
+      for (let xi = 0; xi < xs.length - 1; ++xi) {
+        const x0 = xs[xi];
+        const x1 = xs[xi + 1];
+        const y0 = ys[yi];
+        const y1 = ys[yi + 1];
+        const corners: Array<{ point: ContourPoint; value: number }> = [
+          { point: [x0, y0], value: values.get(`${x0}\u0000${y0}`)! },
+          { point: [x1, y0], value: values.get(`${x1}\u0000${y0}`)! },
+          { point: [x1, y1], value: values.get(`${x1}\u0000${y1}`)! },
+          { point: [x0, y1], value: values.get(`${x0}\u0000${y1}`)! },
+        ];
+        const hits: ContourPoint[] = [];
+        for (let edge = 0; edge < 4; ++edge) {
+          const from = corners[edge];
+          const to = corners[(edge + 1) % 4];
+          const crosses =
+            (from.value < level && to.value >= level) ||
+            (from.value >= level && to.value < level);
+          if (!crosses) continue;
+          const ratio = (level - from.value) / (to.value - from.value);
+          hits.push([
+            from.point[0] + (to.point[0] - from.point[0]) * ratio,
+            from.point[1] + (to.point[1] - from.point[1]) * ratio,
+          ]);
+        }
+        if (hits.length === 2) segments.push([hits[0], hits[1]]);
+        else if (hits.length === 4) {
+          const centre = (corners[0].value + corners[1].value +
+            corners[2].value + corners[3].value) / 4;
+          if (centre >= level) {
+            segments.push([hits[0], hits[3]], [hits[1], hits[2]]);
+          } else {
+            segments.push([hits[0], hits[1]], [hits[2], hits[3]]);
+          }
+        }
+      }
+    }
+  }
+  return segments;
 }
 
 function applyVectorAnnotations(
@@ -899,6 +1067,40 @@ function smallSamplePointSeries(context: BuildContext): SeriesOption[] {
 export function computeBounds(context: BuildContext): AxisBounds {
   const { config, smoothing } = context;
 
+  if (config.type === 'heatmap' && config.heatmapMode === 'field') {
+    const [xSource, ySource, zSource] = config.sources;
+    if (!xSource || !ySource || !zSource) return {};
+    const length = Math.min(xSource.raw.length, ySource.raw.length, zSource.raw.length);
+    const points: Array<[number, number, number]> = [];
+    for (let index = 0; index < length; ++index) {
+      const point: [number, number, number] = [
+        xSource.raw[index],
+        ySource.raw[index],
+        zSource.raw[index],
+      ];
+      if (point.every(Number.isFinite)) points.push(point);
+    }
+    if (points.length === 0) return {};
+    const xStep = fieldAxisStep(points, 0);
+    const yStep = fieldAxisStep(points, 1);
+    let xMin = Infinity;
+    let xMax = -Infinity;
+    let yMin = Infinity;
+    let yMax = -Infinity;
+    for (const [x, y] of points) {
+      xMin = Math.min(xMin, x);
+      xMax = Math.max(xMax, x);
+      yMin = Math.min(yMin, y);
+      yMax = Math.max(yMax, y);
+    }
+    return {
+      xMin: xMin - xStep / 2,
+      xMax: xMax + xStep / 2,
+      yMin: yMin - yStep / 2,
+      yMax: yMax + yStep / 2,
+    };
+  }
+
   // Violin: the outline is drawn along the *value* axis (the KDE curve spans the sample
   // range, and the ribbon width encodes density — normalised to the peak in renderItem).
   // So the range is the data extent, exactly like a box plot, plus room for the
@@ -984,10 +1186,17 @@ function buildSingleOption(context: BuildContext): EChartsOption {
   const series = buildSeries(context);
   const categories = config.sources.map((source) => source.label);
   const isHeatmap = config.type === 'heatmap';
+  const isCorrelationHeatmap = isHeatmap && config.heatmapMode === 'correlation';
+  const isFieldHeatmap = isHeatmap && config.heatmapMode === 'field';
+  const bounds = computeBounds(context);
   // When an explicit X-axis source is set, the X axis is always a value axis regardless
   // of chart type — this enables time-series and arbitrary X plots.
   const hasExplicitX = config.xAxisSource !== null;
-  const kind: AxisKind = isHeatmap ? 'category' : hasExplicitX ? 'value' : xAxisKind(config);
+  const kind: AxisKind = isCorrelationHeatmap
+    ? 'category'
+    : hasExplicitX || isFieldHeatmap
+      ? 'value'
+      : xAxisKind(config);
 
   const xAxis =
     kind === 'category'
@@ -1013,9 +1222,13 @@ function buildSingleOption(context: BuildContext): EChartsOption {
             ? config.xAxisSource!.label
             : config.type === 'histogram'
               ? strings.binCentre
-              : config.type === 'scatter' || config.type === 'regression'
+              : isFieldHeatmap
+                ? config.sources[0]?.label
+                : config.type === 'scatter' || config.type === 'regression'
                 ? config.sources[0]?.label
                 : strings.rowIndex,
+          min: bounds.xMin,
+          max: bounds.xMax,
           nameLocation: 'end' as const,
           axisLabel: { fontSize: 10 },
           minorTick: config.xLogScale
@@ -1039,13 +1252,14 @@ function buildSingleOption(context: BuildContext): EChartsOption {
     config.type === 'histogram'
       ? strings.count
       : config.type === 'heatmap'
-        ? ''
+        ? isFieldHeatmap
+          ? config.sources[1]?.label ?? ''
+          : ''
         : yAxisUnit
           ? `${strings.value} (${yAxisUnit})`
           : strings.value;
 
   // Explicit bounds where the plotted quantity differs from the column values.
-  const bounds = computeBounds(context);
   const hasFixedRange = bounds.yMin !== undefined && bounds.yMax !== undefined;
 
   const primaryYAxis: NonNullable<EChartsOption['yAxis']> = {
@@ -1103,7 +1317,7 @@ function buildSingleOption(context: BuildContext): EChartsOption {
       valueFormatter: (value: unknown) =>
         typeof value === 'number' ? formatTooltipNumber(value) : String(value),
     },
-    dataZoom: isHeatmap
+    dataZoom: isCorrelationHeatmap
       ? []
       : [
           // Both axes are zoomable by wheel/drag. `filterMode: 'none'` keeps the data
@@ -1113,7 +1327,7 @@ function buildSingleOption(context: BuildContext): EChartsOption {
           { id: 'zoom-y', type: 'inside', yAxisIndex: 0, filterMode: 'none' },
         ],
     xAxis,
-    yAxis: isHeatmap ? heatmapYAxis : primaryYAxis,
+    yAxis: isCorrelationHeatmap ? heatmapYAxis : primaryYAxis,
     series: series as EChartsOption['series'],
   };
 
@@ -1162,6 +1376,31 @@ function buildSingleOption(context: BuildContext): EChartsOption {
   }
 
   if (isHeatmap) {
+    if (isFieldHeatmap) {
+      const field = series[0] as {
+        data?: Array<[number, number, number]>;
+      };
+      const [min, max] = fieldColorBounds(config, field?.data ?? []);
+      option.visualMap = [
+        {
+          min,
+          max,
+          calculable: !config.fieldColorRange,
+          orient: 'horizontal',
+          left: 'center',
+          bottom: 4,
+          itemWidth: 14,
+          itemHeight: 200,
+          precision: 3,
+          text: context.colorAxisUnit ? [context.colorAxisUnit, ''] : undefined,
+          textStyle: { fontSize: 10 },
+          seriesIndex: 0,
+          dimension: 2,
+          inRange: { color: ['#253494', '#2c7fb8', '#41b6c4', '#f7fcb9', '#f03b20'] },
+        },
+      ];
+      return option;
+    }
     option.visualMap = [
       {
         min: -1,
