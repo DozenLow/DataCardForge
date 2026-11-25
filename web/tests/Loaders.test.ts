@@ -116,19 +116,39 @@ describe('TxtLoader', () => {
     expect(Number.isNaN(mat.cell(1, 1))).toBe(true);
   });
 
-  it('still refuses a gap plus genuine text in a numeric column', async () => {
-    await expect(
-      new CsvLoader().load(makeFile('a.csv', 'x,y\n1,2.5\n2,NaN\n3,treatment\n')),
-    ).rejects.toThrow(/mixes numeric and text/);
+  it.each(['NA', 'N/A', 'n/a', 'ND', '<LOD', '<LOQ', '-', '--', '—', 'nan'])(
+    'reads %s as a gap inside a numeric column',
+    async (marker) => {
+      // The spellings instrument software and LIMS exports actually use for a missing sample.
+      const mat = await new CsvLoader().load(
+        makeFile('a.csv', `x,y\n1,2.5\n2,${marker}\n3,4.5\n`),
+      );
+
+      expect(mat.rowCount()).toBe(3);
+      expect(mat.column(1).categories).toBeUndefined();
+      expect(mat.cell(0, 1)).toBe(2.5);
+      expect(Number.isNaN(mat.cell(1, 1))).toBe(true);
+      expect(mat.cell(2, 1)).toBe(4.5);
+    },
+  );
+
+  it('keeps a first row that contains a gap as data, not as a header', async () => {
+    // `NA` in row one used to make the row look textual, so it was consumed as column titles
+    // and the file silently lost its first measurement.
+    const mat = await new CsvLoader().load(makeFile('a.csv', '1,NA\n2,5\n3,6\n'));
+
+    expect(mat.rowCount()).toBe(3);
+    expect(mat.column(0).annotation).toBe('');
+    expect(mat.cell(0, 0)).toBe(1);
+    expect(Number.isNaN(mat.cell(0, 1))).toBe(true);
+    expect(mat.cell(2, 1)).toBe(6);
   });
 
-  it('does not guess that N/A or a dash is a gap', async () => {
-    // Both are plausible category labels in a group column; calling them gaps would relabel
-    // real data, so they stay text (and a mixed column still refuses) until the author says
-    // otherwise.
-    const mat = await new CsvLoader().load(makeFile('a.csv', 'x,group\n1,NA\n2,-\n3,NA\n'));
-    expect(mat.column(1).categories).toEqual(['NA', '-']);
-    expect(mat.column(1).data).toEqual([0, 1, 0]);
+  it('still refuses a numeric column that carries a genuine label', async () => {
+    // The gap list is a list, not a licence to blank arbitrary text.
+    await expect(
+      new CsvLoader().load(makeFile('a.csv', 'x,y\n1,2.5\n2,NA\n3,control\n')),
+    ).rejects.toThrow(/mixes numeric and text/);
   });
 
   it('rejects a mixed numeric and text column instead of silently coercing it', async () => {

@@ -27,6 +27,7 @@
 - 🧭 **项目演进史**（`history.md`）— 把决策/日志/踩坑/审计按因果链串成一条历史：四个时代、四条螺旋线、教训清单与现状
   - [项目演进史（DataCardForge）](history.md) · [EN](history.en.md) ← **先读这篇再进各分册**
 - 📌 **决策记录**（`decisions/`）— 已经拍板、影响后续的方向性结论
+  - [缺测记号按缺失读](decisions/2026-11-25-missing-value-markers.md) ← 🔒 **最新**：空、`nan`、`NA`、`N/A`、`ND`、`<LOD`、`<LOQ`、`-`、`—` 一律读成 `NaN`；`inf` 与真文本不动
   - [绘图卡阶段 1：隐藏后端分析节点 + 分类元数据](decisions/2026-11-25-chart-stage1-analysis.md) ← 🔒 **最新**：9 类图型内补齐 8 层；新数值计算留后端，文本 group 只作元数据，DCM2 不变
   - [并行波调度器：就绪队列 + 脚本进程泳道](decisions/2026-11-22-parallel-wave-scheduler.md) ← 🔒 **最新**：上游一完成即开算、不等无关慢卡；脚本子进程并发封顶四、排队可取消；客户端契约零改动
   - [高等数学与统计函数（advanced-math.v1）](decisions/2026-11-23-advanced-math-statistics.md) ← 🧪 实验态、默认关闭：自适应 Simpson/DERIV 级联+折点闸/Excel 统计口径/预算与 oracle 清单；2026-11-23 review 修复轮后口径冻结修订

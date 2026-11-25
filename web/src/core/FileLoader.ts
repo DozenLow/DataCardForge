@@ -48,8 +48,13 @@ export function gridToMatrix(grid: string[][]): MatrixData {
 
   let headerNames: string[] = [];
   const first = rows[0];
-  const allNumeric = first.every((cell) => isNumeric(cell.trim()));
-  if (!allNumeric) {
+  // A first row of numbers with a gap is still a data row: the gap is not evidence of a
+  // header. Demanding at least one real number keeps a stray line of delimiters (all cells
+  // empty) from being read as data.
+  const firstIsData =
+    first.some((cell) => isNumeric(cell.trim())) &&
+    first.every((cell) => isNumeric(cell.trim()) || isMissingToken(cell.trim()));
+  if (!firstIsData) {
     headerNames = first.map((c) => c.trim());
     rows = rows.slice(1);
   }

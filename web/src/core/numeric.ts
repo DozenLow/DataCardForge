@@ -17,19 +17,38 @@ export function isNumeric(token: string): boolean {
 /**
  * Spellings of "this cell holds no number" that measurement files actually contain.
  *
- * Exports from Python/pandas, HDF5 and most instrument software write missing values as
- * `NaN`; read literally that is a text token, which made a column of numbers look like a
- * text column and refused the whole file. Treating it as an empty cell is what the producer
- * meant, and it keeps `isNumeric` strict about everything else.
+ * Exports from Python/pandas, HDF5, LIMS and most instrument software write a missing sample
+ * as `NaN`, `NA`, `N/A`, `ND` (not detected), `<LOD`/`<LOQ` (below the limit) or a bare dash.
+ * Read literally those are text tokens, so one gap made a column of numbers look like a text
+ * column and refused the whole file; the producer meant "no number here".
  *
- * Deliberately NOT here: `inf`/`-inf` (a value, not a gap), and `NA`/`N/A`/`-`, which are
- * ALSO plausible category labels in a group column — guessing would relabel real data.
+ * A censored cell (`<LOD`) becomes a gap rather than a number on purpose: the true value is
+ * unknown and below some threshold, and inventing half the limit would put a fabricated
+ * measurement into every statistic downstream.
+ *
+ * Deliberately NOT here: `inf`/`-inf` (a value, not a gap), `null`/`#N/A` (spreadsheet error
+ * codes, not measurement spellings), and prose. Everything else stays text — which is why a
+ * numeric column containing a genuine label is still refused instead of quietly blanked.
  */
-const MISSING_TOKEN_RE = /^[+-]?nan$/i;
+const MISSING_TOKENS = new Set([
+  'nan',
+  '+nan',
+  '-nan',
+  'na',
+  'n/a',
+  'nd',
+  '<lod',
+  '<loq',
+  '-',
+  '--',
+  // The dash this application itself prints for a missing cell.
+  '—',
+  '–',
+]);
 
-/** True when a cell carries no number at all: empty, or a NaN spelling. */
+/** True when a cell carries no number at all: empty, or one of the missing spellings. */
 export function isMissingToken(token: string): boolean {
-  return token === '' || MISSING_TOKEN_RE.test(token);
+  return token === '' || MISSING_TOKENS.has(token.toLowerCase());
 }
 
 /** Parse a token, returning `fallback` when it is not a plain decimal number. */
