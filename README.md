@@ -3,7 +3,7 @@
 [![CI](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml/badge.svg)](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml)
 [![Pages demo](https://img.shields.io/badge/demo-live%20(front%20end)-2ea44f)](https://dozenlow.github.io/DataCardForge/)
 [![License: GPL-3.0](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
-[![Tests](https://img.shields.io/badge/tests-1401%20unit%20%C2%B7%2032%20ctest-brightgreen)](web/tests)
+[![Tests](https://img.shields.io/badge/tests-1439%20unit%20%C2%B7%2032%20ctest-brightgreen)](web/tests)
 
 **[English](README.md) | [中文](README.zh-CN.md)**
 
@@ -18,7 +18,7 @@ drop a measurement file, get a card you can plot, transform and chain.
 </p>
 
 - **Author & provenance**: `DozenLow` · GPL-3.0 · identity, timeline and commit anchors in [`PROVENANCE.md`](PROVENANCE.md)
-- **Verified state** (2026-11-25): 1401 frontend unit/DOM tests (20 skipped) · 32 backend ctest cases
+- **Verified state** (2026-11-25): 1439 frontend unit/DOM tests (20 skipped) · 32 backend ctest cases
   (4 opt-in) · 102 end-to-end smoke checks — all green
 - **Not finished yet**: function cards are API-stable but UX-incomplete; connection hover and
   disconnect-editing are not done. See [Known gaps](#known-gaps)
@@ -329,7 +329,7 @@ The current state, the next task and the open questions live in `STATE.md` at th
 | Hand-rolled virtual scrolling | Large-table rendering | No third-party dependency |
 | Web Worker (`src/loaders/parse.worker.ts`) | Off-thread file parsing | Keeps the UI responsive |
 | Node.js 22 | Frontend runtime, dev server, CI | CI pins `node-version: 22`; the opt-in fuzz gate needs `--experimental-transform-types` |
-| Vitest 5 + jsdom | Unit / DOM tests | 1401 passed, 20 skipped |
+| Vitest 5 + jsdom | Unit / DOM tests | 1439 passed, 20 skipped |
 | Playwright (Chromium) | End-to-end smoke | 102 checks against `vite preview` |
 | **C++17** (verified with g++ 15) | Compute backend language | `CMAKE_CXX_STANDARD 17`, CMake 3.24+ + Ninja |
 | **Eigen 3.4** | Linear algebra / matrix operations | Header-only, `find_package(Eigen3 REQUIRED NO_MODULE)` |
@@ -382,7 +382,7 @@ npm test                  # unit tests (vitest, includes cross-tier fixtures)
 ### Tests
 
 ```bash
-# Frontend: typecheck + 1401 unit/DOM tests (20 skipped)
+# Frontend: typecheck + 1439 unit/DOM tests (20 skipped)
 cd web && npm run typecheck && npm test
 
 # Backend: 32 ctest cases (28 pass by default, 4 opt-in stress/fuzz/perf gates skipped)

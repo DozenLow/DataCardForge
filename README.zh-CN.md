@@ -3,7 +3,7 @@
 [![CI](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml/badge.svg)](https://github.com/DozenLow/DataCardForge/actions/workflows/ci.yml)
 [![Pages 演示](https://img.shields.io/badge/%E6%BC%94%E7%A4%BA-%E5%89%8D%E7%AB%AF%E5%9C%A8%E7%BA%BF-2ea44f)](https://dozenlow.github.io/DataCardForge/)
 [![许可证](https://img.shields.io/badge/license-GPL--3.0-blue)](LICENSE)
-[![测试](https://img.shields.io/badge/tests-1401%20unit%20%C2%B7%2032%20ctest-brightgreen)](web/tests)
+[![测试](https://img.shields.io/badge/tests-1439%20unit%20%C2%B7%2032%20ctest-brightgreen)](web/tests)
 
 **[English](README.md) | [中文](README.zh-CN.md)**
 
@@ -16,7 +16,7 @@
 </p>
 
 - **作者与权属**：`DozenLow` · GPL-3.0 · 身份、时间线与提交锚点见 [`PROVENANCE.md`](PROVENANCE.md)
-- **实测状态**（2026-11-25）：前端 1401 个单元/DOM 测试（20 个跳过）· 后端 32 个 ctest（4 个 opt-in）· 端到端 102 项检查，全绿
+- **实测状态**（2026-11-25）：前端 1439 个单元/DOM 测试（20 个跳过）· 后端 32 个 ctest（4 个 opt-in）· 端到端 102 项检查，全绿
 - **尚未完成**：函数卡接口稳定、交互未收口；连线 hover 与断线编辑未做。见[状态与已知缺口](#状态与已知缺口)
 
 ## 试一下
@@ -253,7 +253,7 @@ Eigen 3.4 头文件（`sudo apt install build-essential cmake ninja-build libeig
 | 自研虚拟滚动 | 大表渲染 | 无第三方依赖 |
 | Web Worker（`src/loaders/parse.worker.ts`） | 解析离开主线程 | 大文件加载时界面不冻结 |
 | Node.js 22 | 前端运行时、开发服务器、CI | CI 固定 `node-version: 22`；按需 fuzz 门控需 `--experimental-transform-types` |
-| Vitest 5 + jsdom | 单元 / DOM 测试 | 1401 passed，20 skipped |
+| Vitest 5 + jsdom | 单元 / DOM 测试 | 1439 passed，20 skipped |
 | Playwright（Chromium） | 端到端冒烟 | 102 项检查，跑在 `vite preview` 上 |
 | **C++17**（实测 g++ 15） | 计算后端语言 | `CMAKE_CXX_STANDARD 17`，CMake 3.24+ + Ninja |
 | **Eigen 3.4** | 线性代数/矩阵运算 | Header-only，`find_package(Eigen3 REQUIRED NO_MODULE)` |
@@ -306,7 +306,7 @@ npm test                  # 单元测试（vitest，含跨层夹具）
 ### 测试
 
 ```bash
-# 前端：typecheck + 1401 个单元/DOM 测试（20 个 skipped）
+# 前端：typecheck + 1439 个单元/DOM 测试（20 个 skipped）
 cd web && npm run typecheck && npm test
 
 # 后端：32 个 ctest 用例（默认 28 个通过，4 个按需压力/fuzz/性能门控 skipped）
