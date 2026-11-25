@@ -291,6 +291,115 @@ describe('addChartCard', () => {
     }
   });
 
+  it('keeps the backend\'s reason when a fit is refused instead of inventing one', async () => {
+    // `POST /compute` answers 200 with `state:"error"` when the fit refuses — `ok` only says
+    // the request was answered. Reading on past that point fetched two empty matrices and
+    // reported "internalError outputSchema", which described the client, not the data.
+    const registrations = vi.spyOn(BackendClient.prototype, 'registerMatrix').mockResolvedValue({
+      ok: true,
+      matrixId: 41,
+      revision: 1,
+    });
+    const create = vi.spyOn(BackendClient.prototype, 'createNode').mockResolvedValue({
+      ok: true,
+      nodeId: 77,
+      resultMatrixId: 101,
+      resultMatrixIds: [101, 102],
+      signatureId: 'builtin:chart-analysis',
+      state: 'dirty',
+    });
+    const compute = vi.spyOn(BackendClient.prototype, 'computeNode').mockResolvedValue({
+      ok: true,
+      state: 'error',
+      code: 'fitFailed',
+      params: { reason: 'tooFewPoints' },
+      resultMatrixIds: [101, 102],
+    });
+    const window = vi.spyOn(BackendClient.prototype, 'window');
+    try {
+      const matrixId = store().addMatrixCard([
+        { name: 'short.csv', matrix: matrix([[1, 2], [2, 4], [3, 9], [4, 17]]) },
+      ]);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      const chartId = store().addChartCard(matrixId, 0, 'scatter')!;
+      store().setChartConfig(chartId, {
+        analysis: {
+          model: '4pl',
+          throughOrigin: false,
+          weighting: 'none',
+          initial: null,
+          lower: null,
+          upper: null,
+          confidence: 0.95,
+          bands: 'both',
+        },
+      });
+
+      await store().runChartAnalysis(chartId);
+
+      expect(store().chartAnalyses[chartId]).toMatchObject({
+        state: 'error',
+        code: 'fitFailed',
+        params: { reason: 'tooFewPoints' },
+      });
+      // The honest failure must not turn into a read of results that were never produced.
+      expect(window).not.toHaveBeenCalled();
+      expect(store().chartAnalyses[chartId].output).toBeUndefined();
+    } finally {
+      registrations.mockRestore();
+      create.mockRestore();
+      compute.mockRestore();
+      window.mockRestore();
+    }
+  });
+
+  it('keeps the backend\'s reason when a filter is refused', async () => {
+    const registrations = vi.spyOn(BackendClient.prototype, 'registerMatrix').mockResolvedValue({
+      ok: true,
+      matrixId: 51,
+      revision: 1,
+    });
+    const create = vi.spyOn(BackendClient.prototype, 'createNode').mockResolvedValue({
+      ok: true,
+      nodeId: 88,
+      resultMatrixIds: [201, 202],
+      signatureId: 'builtin:chart-filter',
+      state: 'dirty',
+    });
+    const compute = vi.spyOn(BackendClient.prototype, 'computeNode').mockResolvedValue({
+      ok: true,
+      state: 'error',
+      code: 'filterFailed',
+      params: { reason: 'nonUniformX' },
+      resultMatrixIds: [201, 202],
+    });
+    const window = vi.spyOn(BackendClient.prototype, 'window');
+    try {
+      const matrixId = store().addMatrixCard([
+        { name: 'jitter.csv', matrix: matrix([[1, 2], [3, 4], [4, 8], [9, 16]]) },
+      ]);
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      const chartId = store().addChartCard(matrixId, 0, 'line')!;
+      store().setChartConfig(chartId, {
+        displayFilter: { mode: 'lowpass', cutoffHz: 1, order: 4, sampleRateHz: null, overlayRaw: true },
+      });
+
+      await store().runChartFilter(chartId);
+
+      expect(store().chartFilters[chartId]).toMatchObject({
+        state: 'error',
+        code: 'filterFailed',
+        params: { reason: 'nonUniformX' },
+      });
+      expect(window).not.toHaveBeenCalled();
+    } finally {
+      registrations.mockRestore();
+      create.mockRestore();
+      compute.mockRestore();
+      window.mockRestore();
+    }
+  });
+
   it('keeps a display-filter node separate from the fit node', async () => {
     const registrations = vi.spyOn(BackendClient.prototype, 'registerMatrix').mockResolvedValue({
       ok: true,

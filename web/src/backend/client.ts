@@ -568,6 +568,11 @@ export class BackendClient {
     reason?: DirtyReasonName;
     resultMatrixIds?: number[];
     code?: string;
+    /**
+     * Structured detail published with `code` (e.g. `{reason:"tooFewPoints"}` for a fit that
+     * refused). Carried so the card can say WHY instead of only that something failed.
+     */
+    params?: Record<string, unknown>;
     /** Unit advice published with this compute (units L1b / B1); absent when none. */
     warnings?: UnitWarningDto[];
     /** Conversions the `auto` tier performed for this compute (units L2b); absent when none. */
@@ -577,7 +582,10 @@ export class BackendClient {
       const r = await jsonRequest<{
         nodeId: number;
         state: NodeStateName;
+        reason?: DirtyReasonName;
         resultMatrixIds?: number[];
+        code?: string;
+        params?: Record<string, unknown>;
         warnings?: UnitWarningDto[];
         unitConversions?: UnitConversionDto[];
       }>(

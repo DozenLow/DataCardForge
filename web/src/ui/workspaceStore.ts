@@ -5182,6 +5182,29 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         });
         return;
       }
+      // A refused fit is an answered request: `ok` only says the wire worked, while
+      // `state:"error"` plus `code`/`params` carry the reason. Reading on would fetch two
+      // empty matrices and report a fabricated "outputSchema" error instead of the truth.
+      if (computed.state === 'error') {
+        patchChartAnalysisRun(cardId, {
+          state: 'error',
+          code: computed.code ?? 'internalError',
+          params: computed.params,
+          output: undefined,
+        });
+        return;
+      }
+      if (computed.state !== 'done') {
+        // The backend declined to compute right now; mirror that rather than read results
+        // nobody produced.
+        patchChartAnalysisRun(cardId, {
+          state: 'dirty',
+          code: undefined,
+          params: computed.reason ? { reason: computed.reason } : undefined,
+          output: undefined,
+        });
+        return;
+      }
       const resultMatrixIds =
         computed.resultMatrixIds ??
         created.resultMatrixIds ??
@@ -5288,6 +5311,25 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           state: 'error',
           code: computed.code ?? status?.code ?? 'internalError',
           params: status?.params,
+          output: undefined,
+        });
+        return;
+      }
+      // Same rule as the fit node: an answered request is not a successful computation.
+      if (computed.state === 'error') {
+        patchChartFilterRun(cardId, {
+          state: 'error',
+          code: computed.code ?? 'internalError',
+          params: computed.params,
+          output: undefined,
+        });
+        return;
+      }
+      if (computed.state !== 'done') {
+        patchChartFilterRun(cardId, {
+          state: 'dirty',
+          code: undefined,
+          params: computed.reason ? { reason: computed.reason } : undefined,
           output: undefined,
         });
         return;
