@@ -7,6 +7,38 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-11-28
+
+### Features
+
+- Chart analysis now supports categorical factors, log axes, multi-panel figures, field heatmaps
+  with contours, raw-point overlays, vector annotations, and display-only filters.
+- Fit results now explain why a fit was refused and show which data points were fitted.
+- Categorical columns are preserved during import and remain available for grouping and facets.
+- Public, reproducible test-data samples are available in `example/`: a 512-row industrial
+  bearing-vibration excerpt and a 168-row Boston-area surface-weather excerpt.
+
+### Test-data sources
+
+- Industrial sample: Riaz et al. (2024), *Vibration dataset of main journal bearings in internal
+  combustion engines under diverse climatic and varying operating conditions*, Mendeley Data v5,
+  [DOI 10.17632/3fcrrdjjvk.5](https://doi.org/10.17632/3fcrrdjjvk.5), licensed CC BY 4.0. The
+  sample retains 256 healthy and 256 faulty records at 1000 RPM, 50% humidity, and 15 C.
+- Research sample: Kantor et al. (2023), *Local Climatological Data (LCD), Version 2 (LCDv2)*,
+  NOAA National Centers for Environmental Information,
+  [DOI 10.25921/96dw-mb77](https://doi.org/10.25921/96dw-mb77). The sample contains 168 FM-15
+  hourly reports from station `USW00014739` for 2024-07-01 through 2024-07-07 and follows NOAA's
+  Open Data Policy. Full provenance, hashes, transformations, and use limits are in `example/README.md`.
+
+### Bug fixes
+
+- Imports now read common missing-value markers (`nan`, `NA`, `N/A`, `ND`, `<LOD`, `<LOQ`, `-`, and
+  blank cells) as gaps while continuing to reject unexpected text in numeric columns.
+- RGB PNGs export correctly to PDF, and chart cards invalidate derived data when display settings
+  or source bindings change.
+- DCM2 parsing rejects truncated headers, matrix-mode operands report their shapes safely, and
+  workspace replacement failures roll back without leaving a partial state.
+
 ## [0.1.4] - 2026-11-17
 
 ### Features

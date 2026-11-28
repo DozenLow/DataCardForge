@@ -7,6 +7,33 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.5] - 2026-11-28
+
+### 功能
+
+- 图表分析新增分类因子、对数坐标、多面板图、带等高线的热图、原始点叠加、矢量标注和仅影响显示的筛选。
+- 拟合结果会说明拒绝拟合的原因，并显示实际参与拟合的数据点。
+- 导入时保留分类列，后续可继续用于分组和分面。
+- `example/` 提供可复现的公开测试数据：512 行工业轴承振动小样本和 168 行波士顿地区地面气象小样本。
+
+### 测试数据来源
+
+- 工业样本：Riaz 等（2024），*Vibration dataset of main journal bearings in internal combustion
+  engines under diverse climatic and varying operating conditions*，Mendeley Data v5，
+  [DOI 10.17632/3fcrrdjjvk.5](https://doi.org/10.17632/3fcrrdjjvk.5)，许可为 CC BY 4.0。
+  样本保留 1000 RPM、50% 湿度、15 摄氏度条件下的 256 条健康轴承记录和 256 条故障轴承记录。
+- 科研样本：Kantor 等（2023），*Local Climatological Data (LCD), Version 2 (LCDv2)*，
+  美国 NOAA 国家环境信息中心，[DOI 10.25921/96dw-mb77](https://doi.org/10.25921/96dw-mb77)。
+  样本包含站点 `USW00014739` 在 2024-07-01 至 2024-07-07 的 168 条 FM-15 逐小时报告，
+  遵循 NOAA 开放数据政策。完整来源、哈希、转换过程和使用边界见 `example/README.md`。
+
+### 修复
+
+- 导入器现将常见缺测记号（`nan`、`NA`、`N/A`、`ND`、`<LOD`、`<LOQ`、`-` 和空单元格）读为缺口，
+  数字列里意外混入真文本时仍会拒绝。
+- RGB PNG 可正确导出为 PDF；显示设置或数据源绑定改变时，图表会清理相应的派生结果。
+- DCM2 拒绝截断的文件头，矩阵模式安全报告操作数形状，工作区替换失败时会回滚而不留下半成品状态。
+
 ## [0.1.4] - 2026-11-17
 
 ### 功能
