@@ -1,0 +1,19 @@
+name: Provision required Python runtime
+description: Fetch and verify the Linux script-card runtime for a required CI job
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v4
+      with:
+        path: |
+          third_party/.cache
+          third_party/pyruntime
+          third_party/pylib
+        key: python-runtime-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/fetch-python-runtime.sh') }}
+
+    - name: Fetch and check vendored Python runtime
+      shell: bash
+      working-directory: ${{ github.workspace }}
+      run: |
+        bash scripts/fetch-python-runtime.sh
+        bash scripts/check-ci-python-runtime.sh

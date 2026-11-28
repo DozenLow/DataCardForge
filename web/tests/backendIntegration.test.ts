@@ -6,8 +6,8 @@
  * deliberately stub out — DCM1 framing, HTTP status mapping, structured error bodies, and
  * the v2 signature round-trip (portId → K outputs → column contract).
  *
- * It binds to the dev instance on 37811. Every matrix/node it creates is scoped to itself
- * and deleted afterwards, so a developer's running workspace is not disturbed.
+ * Run against an isolated backend via `DC_BACKEND_URL`. Fixtures track the matrix/node IDs
+ * they create for cleanup.
  */
 import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -79,6 +79,119 @@ describe.skipIf(!enabled)('live backend integration', () => {
     expect(frame.columns).toBe(2);
     expect(frame.names).toEqual(['Pos.1 A', 'Pos.2 B']);
     expect(Array.from(frame.data![1])).toEqual([10, 20, 30]);
+  });
+
+  it('rejects a mixed-validity cell PATCH without changing data, revision, or downstream state', async () => {
+    const source = await client.registerMatrix('it-atomic-patch', [
+      { posName: 'Pos.1', annotation: 'A', data: [1, 2, 3] },
+    ]);
+    expect(source.ok).toBe(true);
+    const matrixId = source.matrixId!;
+    createdMatrices.push(matrixId);
+    expect(source.revision).toBe(1);
+
+    const node = await client.createNode(
+      [{ portId: 'src', varName: 'src', mode: 'matrix', sourceMatrixId: matrixId }],
+      { signatureId: 'builtin:summary', params: {} },
+    );
+    expect(node.ok).toBe(true);
+    const nodeId = node.nodeId!;
+    createdNodes.push(nodeId);
+    expect(await client.computeNode(nodeId)).toMatchObject({ ok: true, state: 'done' });
+
+    // Use raw HTTP here: BackendClient.patchCells intentionally discards status and revision.
+    const patch = (cells: Array<{ row: number; col: number; value: number }>) => fetch(`${BASE}/matrices/${matrixId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ cells }),
+    });
+    const edit = { row: 0, col: 0, value: 100 };
+    const rejected = await patch([edit, { row: 3, col: 0, value: 200 }]);
+    expect(rejected.status).toBe(400);
+    expect(await rejected.json()).toMatchObject({ code: 'shapeMismatch' });
+
+    const unchanged = await client.window(matrixId, 0, 3);
+    expect(unchanged.ok).toBe(true);
+    expect(Array.from(unchanged.data![0])).toEqual([1, 2, 3]);
+    expect(await client.getNode(nodeId)).toMatchObject({ state: 'done' });
+
+    const accepted = await patch([edit]);
+    expect(accepted.status).toBe(200);
+    expect(await accepted.json()).toMatchObject({ matrixId, revision: source.revision! + 1 });
+  });
+
+  describe('matrix DELETE', () => {
+    async function registerSource() {
+      const registered = await client.registerMatrix('it-delete', [
+        { posName: 'Pos.1', annotation: 'A', data: [2, 4] },
+      ]);
+      expect(registered.ok).toBe(true);
+      const matrixId = registered.matrixId!;
+      createdMatrices.push(matrixId);
+      return matrixId;
+    }
+
+    async function createReader(matrixId: number) {
+      const created = await client.createNode(
+        [{ portId: 'src', varName: 'src', mode: 'matrix', sourceMatrixId: matrixId }],
+        {
+          signatureId: 'builtin:expression-columns',
+          params: { formulas: [{ name: 'double', expression: 'A * 2' }] },
+        },
+      );
+      expect(created.ok).toBe(true);
+      const nodeId = created.nodeId!;
+      createdNodes.push(nodeId);
+      expect(created.state).toBe('done');
+      expect(created.resultMatrixIds).toHaveLength(1);
+      return { nodeId, outputId: created.resultMatrixIds![0] };
+    }
+
+    // BackendClient.deleteMatrix intentionally drops the HTTP status and params.
+    const deleteMatrix = (id: number) => fetch(`${BASE}/matrices/${id}`, { method: 'DELETE' });
+
+    it('deletes an orphan and returns 404 with the same id when it is now missing', async () => {
+      const matrixId = await registerSource();
+      const deleted = await deleteMatrix(matrixId);
+      expect(deleted.status).toBe(200);
+      expect(await deleted.json()).toEqual({ deleted: matrixId });
+      expect(await client.window(matrixId, 0, 10)).toMatchObject({ ok: false, code: 'unknownMatrix' });
+
+      const missing = await deleteMatrix(matrixId);
+      expect(missing.status).toBe(404);
+      expect(await missing.json()).toEqual({ code: 'unknownMatrix', params: { matrixId } });
+    });
+
+    it('refuses to delete an owned result even when no node reads it', async () => {
+      const sourceId = await registerSource();
+      const { nodeId, outputId } = await createReader(sourceId);
+      const owned = await deleteMatrix(outputId);
+      expect(owned.status).toBe(409);
+      expect(await owned.json()).toEqual({ code: 'hasDependents', params: { matrixId: outputId } });
+
+      const frame = await client.window(outputId, 0, 10);
+      expect(frame.ok).toBe(true);
+      expect(Array.from(frame.data![0])).toEqual([4, 8]);
+      expect(await client.getNode(nodeId)).toMatchObject({ state: 'done', resultMatrixId: outputId });
+    });
+
+    it('refuses to delete a referenced source until its reader is removed', async () => {
+      const matrixId = await registerSource();
+      const { nodeId } = await createReader(matrixId);
+      const referenced = await deleteMatrix(matrixId);
+      expect(referenced.status).toBe(409);
+      expect(await referenced.json()).toEqual({ code: 'hasDependents', params: { matrixId } });
+
+      const frame = await client.window(matrixId, 0, 10);
+      expect(frame.ok).toBe(true);
+      expect(Array.from(frame.data![0])).toEqual([2, 4]);
+      expect(await client.getNode(nodeId)).toMatchObject({ state: 'done' });
+
+      expect(await client.deleteNode(nodeId)).toMatchObject({ ok: true });
+      const deleted = await deleteMatrix(matrixId);
+      expect(deleted.status).toBe(200);
+      expect(await deleted.json()).toEqual({ deleted: matrixId });
+    });
   });
 
   it('creates a signature node with ONE output holding a wide table', async () => {
@@ -281,6 +394,53 @@ describe.skipIf(!enabled)('live backend integration', () => {
     expect(registered.version).toBe(2);
     expect(registered.cards).toHaveLength(1);
     expect(registered.cards[0].inputs).toEqual([]);
+  });
+
+  describe('summary filters', () => {
+    async function createSummary(columns: string[]) {
+      const registered = await client.registerMatrix('it-summary-filter', [
+        { posName: 'Pos.1', annotation: 'Air Temp', data: [2, 4, 6] },
+        { posName: 'Pos.2', annotation: 'Humidity', data: [50, 70, 90] },
+        { posName: 'Pos.3', annotation: '', data: [10, 20, 30] },
+      ]);
+      expect(registered.ok).toBe(true);
+      const matrixId = registered.matrixId!;
+      createdMatrices.push(matrixId);
+      const created = await client.createNode(
+        [{ portId: 'src', varName: 'src', mode: 'matrix', sourceMatrixId: matrixId }],
+        { signatureId: 'builtin:summary', params: { columns, stats: ['MAX', 'mean', 'max'] } },
+      );
+      expect(created.ok).toBe(true);
+      const nodeId = created.nodeId!;
+      createdNodes.push(nodeId);
+      expect(created.state).toBe('dirty');
+      expect(created.resultMatrixIds).toHaveLength(1);
+      return { nodeId, resultId: created.resultMatrixIds![0] };
+    }
+
+    it('matches annotation or unannotated posName case-insensitively and keeps source order without duplicates', async () => {
+      const { nodeId, resultId } = await createSummary(['POS.3', 'air temp', 'pos.3', 'AIR TEMP']);
+      expect(await client.computeNode(nodeId)).toMatchObject({
+        ok: true, state: 'done', resultMatrixIds: [resultId],
+      });
+
+      const frame = await client.window(resultId, 0, 10);
+      expect(frame).toMatchObject({ ok: true, rows: 2, columns: 2, names: ['Pos.1 Air Temp', 'Pos.3'] });
+      // Catalogue order is mean then max, not the order of the stats filter.
+      expect(frame.data?.map((column) => Array.from(column))).toEqual([[4, 6], [20, 30]]);
+    });
+
+    it.each(['MiSsInG', 'pOs.1', ''])('rejects unknown column %j with its original name', async (name) => {
+      // A valid filter first rules out silently dropping just the unknown entry.
+      // Pos.1 is not an alias for an annotated column; posName only names headerless columns.
+      const { nodeId, resultId } = await createSummary(['AIR TEMP', name]);
+      const computed = await fetch(`${BASE}/nodes/${nodeId}/compute`, { method: 'POST' });
+      expect(computed.status).toBe(200);
+      const diagnostic = { state: 'error', code: 'unknownColumn', params: { name } };
+      expect(await computed.json()).toMatchObject({ nodeId, ...diagnostic });
+      expect(await client.getNode(nodeId)).toMatchObject(diagnostic);
+      expect(await client.window(resultId, 0, 10)).toMatchObject({ ok: true, rows: 0, columns: 0 });
+    });
   });
 
   describe('summary (lazy signature)', () => {

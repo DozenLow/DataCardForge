@@ -15,9 +15,19 @@ endif()
 # tier shipped as the recommended download: near-Release speed, but it stops at the first
 # violated contract instead of quietly computing a wrong number. -O2 rather than -O3 because
 # the assertion branches make -O3 rarely worth the build time.
-set(CMAKE_CXX_FLAGS_ASSERTS "-O2 -g -fno-omit-frame-pointer" CACHE STRING
-    "Flags for the Asserts build type")
+# A plain `set(... CACHE ...)` is a no-op here: when the caller already passed
+# -DCMAKE_BUILD_TYPE=Asserts, CMake has created an empty CMAKE_CXX_FLAGS_ASSERTS entry, so the
+# tier silently compiled with no -O at all (the "near-Release speed" the changelog promises).
+# Fill it only when unset, so an explicit -DCMAKE_CXX_FLAGS_ASSERTS still wins.
+if(NOT CMAKE_CXX_FLAGS_ASSERTS)
+  set(CMAKE_CXX_FLAGS_ASSERTS "-O2 -g -fno-omit-frame-pointer" CACHE STRING
+      "Flags for the Asserts build type" FORCE)
+endif()
 set(CMAKE_EXE_LINKER_FLAGS_ASSERTS "" CACHE STRING "Linker flags for the Asserts build type")
+if(CMAKE_BUILD_TYPE STREQUAL "Asserts" AND NOT CMAKE_CXX_FLAGS_ASSERTS MATCHES "-O")
+  message(FATAL_ERROR "Asserts builds must be optimised, but CMAKE_CXX_FLAGS_ASSERTS is "
+                      "'${CMAKE_CXX_FLAGS_ASSERTS}'; pass -DCMAKE_CXX_FLAGS_ASSERTS=<flags>")
+endif()
 
 find_package(Eigen3 REQUIRED NO_MODULE)
 find_package(Threads REQUIRED)
@@ -198,6 +208,9 @@ add_test(NAME xlayer_fixture_node COMMAND dc_xlayer_fixture_node_test)
 add_test(NAME py_fixtures
   COMMAND ${CMAKE_COMMAND} -DSUITE=test_fixtures.py
           -P ${CMAKE_SOURCE_DIR}/tests/run_py_suite.cmake)
+# The suite exits 0 on SKIP so a missing runtime is not a failure; without this property
+# CTest would report that no-op as a pass and "not applicable" would look "verified".
+set_tests_properties(py_fixtures PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP:")
 
 # The runner's own 37-case suite (backend/tests/py/test_runner.py), registered so CI runs the
 # Python half of the data channel too — it is the only oracle for the frame codec on that
@@ -205,6 +218,18 @@ add_test(NAME py_fixtures
 add_test(NAME py_runner
   COMMAND ${CMAKE_COMMAND} -DSUITE=test_runner.py
           -P ${CMAKE_SOURCE_DIR}/tests/run_py_suite.cmake)
+set_tests_properties(py_runner PROPERTIES SKIP_REGULAR_EXPRESSION "SKIP:")
+
+# What the two properties above (and run_py_suite.cmake's DC_PYRUNTIME handling) promise is
+# checked from the outside here: a missing override must skip *and* CTest must report Skipped,
+# a present one must run and pass. Without this, deleting either line silently returns CI to
+# "the suite did not run and the build is green".
+add_test(NAME py_suite_contract
+  COMMAND ${CMAKE_COMMAND}
+          -DBUILD_DIR=${CMAKE_BINARY_DIR}
+          -DCTEST_COMMAND=${CMAKE_CTEST_COMMAND}
+          -DVENDORED_RUNTIME=${CMAKE_SOURCE_DIR}/../third_party/pyruntime
+          -P ${CMAKE_SOURCE_DIR}/tests/py_suite_contract.cmake)
 
 # Zero-special-case gate (scripts/check-zero-special-case.sh): the script card is one
 # ordinary function card, so the generic web infrastructure (bindings, dependency graph,
@@ -388,6 +413,12 @@ add_test(NAME units_autoconvert
 # needed: the gate is a self-contained C++17 binary linked against dc_core.
 add_executable(dc_bench bench/bench_engine.cpp)
 target_link_libraries(dc_bench PRIVATE dc_core)
+# The gate's CWD is whatever build dir ctest runs from — including nested independent
+# builds (backend/build/<subdir>) where the old relative probe missed backend/bench and
+# the gate failed as "missing budgets" although the files ship with the repo. Pin the
+# source bench dir at compile time so any CWD resolves it; a relocated binary without
+# the source tree falls back to the relative probe and still fails closed.
+target_compile_definitions(dc_bench PRIVATE DC_BENCH_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/bench")
 add_test(NAME perf_gate COMMAND dc_bench)
 set_tests_properties(perf_gate PROPERTIES SKIP_RETURN_CODE 101)
 
@@ -396,6 +427,17 @@ set_tests_properties(perf_gate PROPERTIES SKIP_RETURN_CODE 101)
 # the command degenerates to the bare script path, and ctest fails with BAD_COMMAND
 # ("permission denied"). Learned the hard way while wiring the fuzz gate.
 find_package(Python3 COMPONENTS Interpreter QUIET)
+
+# Path/hint regression for the gate itself (opt-in, same tier): from a nested throwaway
+# CWD the default budgets/baseline must be FOUND (gate reaches its verdict, exit 0/1 —
+# which one depends on the machine, not on the path), a genuinely missing file must
+# still fail closed with the absolute path in the message, and the opt-in skip stays.
+if(Python3_Interpreter_FOUND)
+  add_test(NAME perf_gate_paths
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/perf_gate_paths.py
+            --cpp-bin $<TARGET_FILE:dc_bench> --bench-dir ${CMAKE_CURRENT_SOURCE_DIR}/bench)
+  set_tests_properties(perf_gate_paths PROPERTIES SKIP_RETURN_CODE 101)
+endif()
 
 # Differential fuzz: random expressions evaluated by BOTH engines (C++ here, the TS
 # reference via web/scripts/diff_fuzz.mjs importing src/core/expression.ts itself), with
@@ -432,4 +474,40 @@ if(Python3_Interpreter_FOUND)
             --binary $<TARGET_FILE:dc_backend> --port 37911
             --rounds 2 --threads 20 --requests 5)
   set_tests_properties(http_stress PROPERTIES SKIP_RETURN_CODE 101)
+endif()
+
+# ── engine-scaling benchmark (separate from the perf_gate budget) ──────
+# dc_bench_scale prints one JSONL row per measured sample (elapsed_ms + status) and reads
+# no baseline / writes no file, so it is not a CI budget: the scaling study itself is run
+# by the caller. What IS registered here is a deterministic small smoke run per family. The
+# binary exits 0 only when EVERY sample passed its own independent check (long-double
+# recomputation for elem/reduce/quantile/window, sampled dot products for matmul, known
+# solution + relative residual for solve), so a silently wrong engine result in any family
+# turns into a red test instead of a plausible-looking number.
+add_executable(dc_bench_scale bench/bench_scale.cpp)
+target_link_libraries(dc_bench_scale PRIVATE dc_core)
+
+foreach(_scale_case elem reduce quantile window)
+  add_test(NAME bench_scale_${_scale_case}
+    COMMAND dc_bench_scale --rows 64 --cols 4 --case ${_scale_case} --samples 2 --warmup 1)
+endforeach()
+foreach(_scale_case matmul solve)
+  add_test(NAME bench_scale_${_scale_case}
+    COMMAND dc_bench_scale --rows 24 --cols 24 --case ${_scale_case} --samples 2 --warmup 0)
+endforeach()
+# Rectangular matmul exercises the (rows x cols) * (cols x cols) path too.
+add_test(NAME bench_scale_matmul_rect
+  COMMAND dc_bench_scale --rows 16 --cols 8 --case matmul --samples 1 --warmup 0)
+
+# CLI guards: bad rows / unknown case / missing --rows must fail loudly (exit 2), so the
+# pass/fail flag is inverted with WILL_FAIL.
+add_test(NAME bench_scale_cli_bad_rows COMMAND dc_bench_scale --rows 0 --cols 4 --case elem)
+add_test(NAME bench_scale_cli_bad_case COMMAND dc_bench_scale --rows 8 --cols 4 --case nope)
+add_test(NAME bench_scale_cli_missing_rows COMMAND dc_bench_scale --cols 4 --case elem)
+set_tests_properties(bench_scale_cli_bad_rows bench_scale_cli_bad_case
+                     bench_scale_cli_missing_rows PROPERTIES WILL_FAIL TRUE)
+
+if(Python3_Interpreter_FOUND)
+  add_test(NAME bench_harness_protocol
+    COMMAND ${Python3_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/../scripts/perf/test_perf.py)
 endif()

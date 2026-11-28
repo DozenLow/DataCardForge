@@ -635,6 +635,37 @@ def test_runner_bad_arguments_exit_64():
     assert "runner:" in proc.stderr
 
 
+@case
+def test_runner_rejects_bad_execution_inputs_before_running_script():
+    valid_port = {"port": "Input", "frame": "Input.dcm2"}
+    scenarios = [
+        (["out", "out"], [valid_port], "meta.outputs contains the duplicate name 'out'"),
+        (["out"], [valid_port, valid_port], "duplicate port name 'Input'"),
+        (["out"], [{"port": "Input", "frame": "missing.dcm2"}],
+         "cannot read input frame for port 'Input'"),
+    ]
+    for outputs, entries, diagnostic in scenarios:
+        root = _case_dir()
+        sentinel = os.path.join(root, "executed.txt")
+        script = (
+            f"with open({sentinel!r}, 'w', encoding='utf-8') as marker:\n"
+            "    marker.write('executed')\n"
+            "out = 1.0\n"
+        )
+        # The first port is readable so the duplicate case reaches the second entry.
+        in_dir = _write_inputs(root, [{"port": "Input", "arr": [1.0]}])
+        with open(os.path.join(in_dir, "ports.json"), "w", encoding="utf-8") as fh:
+            json.dump(entries, fh)
+        meta = _write_meta(root, script, outputs)
+        out = os.path.join(root, "out.dcm2")
+        proc = _run_runner(["--in", in_dir, "--out", out, "--meta", meta])
+        assert proc.returncode == 64, (diagnostic, proc.returncode, proc.stderr)
+        assert proc.stderr.startswith("runner: ") and diagnostic in proc.stderr, proc.stderr
+        assert not os.path.exists(sentinel), f"script executed despite {diagnostic}"
+        _assert_no_output(out)
+        assert not os.path.exists(os.path.join(root, "out.manifest.json")), diagnostic
+
+
 # ── --check mode ──────────────────────────────────────────────────────
 
 

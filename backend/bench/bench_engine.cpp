@@ -29,6 +29,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
@@ -283,12 +284,25 @@ bool dirExists(const std::string& p) {
   return ::stat(p.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
 }
 
-// ctest 的 CWD 是 backend/build，人在仓库根跑则是 backend/bench：两处都要能找到 JSON。
+// ctest 的 CWD 是构建目录，深度并不固定（backend/build 之外还有 backend/build/<子目录>
+// 这类独立构建），相对探测猜不中所有深度。编译期把源码里的 bench 目录绝对路径钉进来
+// （CMake 的 DC_BENCH_SOURCE_DIR），任何 CWD 都能找到随仓库走的预算/基线；二进制被拷走、
+// 源码目录不在时退回相对探测。找不到就是找不到——仍然 fail closed，不造文件。
 std::string benchDir() {
+#ifdef DC_BENCH_SOURCE_DIR
+  if (dirExists(DC_BENCH_SOURCE_DIR)) return DC_BENCH_SOURCE_DIR;
+#endif
   for (const char* cand : {"backend/bench", "bench", "../bench", "../../backend/bench"}) {
     if (dirExists(cand)) return cand;
   }
   return "backend/bench";
+}
+
+// 报错里给绝对路径：相对路径离开 CWD 就读不懂，用户不知道该去哪个目录放文件。
+std::string absolutePath(const std::string& p) {
+  std::error_code ec;
+  const std::filesystem::path abs = std::filesystem::absolute(p, ec);
+  return ec ? p : abs.string();
 }
 
 // ── 机器写、机器读的小 JSON 扫描器（不引第三方解析器）────────────────────
@@ -494,8 +508,10 @@ int main(int argc, char** argv) {
   if (!updateBaseline) {
     std::string budgetsText;
     if (!readText(budgetsPath, &budgetsText)) {
-      std::fprintf(stderr, "dc_bench: 读不到预算 %s（先用 --update-baseline 取基线，再生成它）\n",
-                   budgetsPath.c_str());
+      std::fprintf(stderr,
+                   "dc_bench: 读不到预算 %s（检查该路径是否有事先认可的预算文件，或用 --budgets "
+                   "指定已认可的路径；不要拿待验代码新采的基线生成预算给这一次放行）\n",
+                   absolutePath(budgetsPath).c_str());
       return 2;
     }
     if (!numberAfter(budgetsText, 0, "regression_ratio", &ratioLimit)) {
@@ -514,8 +530,10 @@ int main(int argc, char** argv) {
 
     std::string baselineText;
     if (!readText(baselinePath, &baselineText)) {
-      std::fprintf(stderr, "dc_bench: 读不到基线 %s（先跑 --update-baseline）\n",
-                   baselinePath.c_str());
+      std::fprintf(stderr,
+                   "dc_bench: 读不到基线 %s（检查该路径是否有事先认可的基线文件，或用 --baseline "
+                   "指定已认可的路径；不要拿待验代码新采的基线给这一次放行）\n",
+                   absolutePath(baselinePath).c_str());
       return 2;
     }
     for (const Measurement& m : rows) {

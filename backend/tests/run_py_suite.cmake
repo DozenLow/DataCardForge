@@ -11,7 +11,9 @@
 # nothing about the runner.
 #
 # The interpreter is resolved by the same rule as resolvePythonRuntime()
-# (backend/src/nodes.cpp): <runtime>/bin/python3, or <runtime>/bin/python.exe on Windows.
+# (backend/src/nodes.cpp): DC_PYRUNTIME wins outright when set — a broken override is
+# reported as missing, never silently replaced by the checkout's copy — else
+# <repo>/third_party/pyruntime, with <runtime>/bin/python3 (python.exe on Windows).
 #
 # Usage: cmake -DSUITE=test_runner.py -P backend/tests/run_py_suite.cmake
 
@@ -21,16 +23,26 @@ endif()
 
 get_filename_component(repo_root "${CMAKE_CURRENT_LIST_DIR}/../.." ABSOLUTE)
 
+if(DEFINED ENV{DC_PYRUNTIME} AND NOT "$ENV{DC_PYRUNTIME}" STREQUAL "")
+  get_filename_component(runtime "$ENV{DC_PYRUNTIME}" ABSOLUTE)
+else()
+  set(runtime "${repo_root}/third_party/pyruntime")
+endif()
+
 if(WIN32)
-  set(python "${repo_root}/third_party/pyruntime/bin/python.exe")
+  set(python "${runtime}/bin/python.exe")
   set(path_sep ";")
 else()
-  set(python "${repo_root}/third_party/pyruntime/bin/python3")
+  set(python "${runtime}/bin/python3")
   set(path_sep ":")
 endif()
 
 if(NOT EXISTS "${python}")
-  message("SKIP: ${SUITE} (no ${python}; run scripts/fetch-python-runtime.sh)")
+  if(DEFINED ENV{DC_PYRUNTIME} AND NOT "$ENV{DC_PYRUNTIME}" STREQUAL "")
+    message("SKIP: ${SUITE} (DC_PYRUNTIME=${runtime} has no interpreter at ${python})")
+  else()
+    message("SKIP: ${SUITE} (no ${python}; run scripts/fetch-python-runtime.sh)")
+  endif()
   return()
 endif()
 

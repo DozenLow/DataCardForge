@@ -257,62 +257,45 @@ try {
   check('active table highlights the line in red', redStroke === 'rgb(200, 50, 50)', String(redStroke));
 
   // ── 6a. port/frame wire, frame-parked arrow, flowing dashes (2026-11-17) ──
-  // Since 2026-11-17 both endpoints are the port sub-cards an edge is bound to, or the
-  // facing card edge when a card renders no port (the mask hides the part inside each
-  // card). These two cards render no port, so the wire runs from the table's right edge to
-  // the chart's left edge. The arrowhead parks on the target frame, and the selected wires
-  // are flowing dashes: red draws long, blue draws short, so colour is not the only cue.
+  // The chart's folded column rail renders a real port. The table has no output port:
+  // its facing frame edge is the fallback, while the path ends on the rail chip itself.
   const geometry = await page.evaluate(() => {
-    const svg = document.querySelector('.connection-layer');
-    const transform = svg.querySelector('g').getAttribute('transform');
-    const m = transform.match(/translate\(([-\d.]+), ([-\d.]+)\) scale\(([-\d.]+)\)/);
-    const [tx, ty, scale] = [Number(m[1]), Number(m[2]), Number(m[3])];
-    const box = svg.getBoundingClientRect();
-    // Plane point -> screen point, the same conversion the world layer performs.
-    const toScreen = (x, y) => ({ x: box.left + x * scale - tx, y: box.top + y * scale - ty });
-    /** Frame edge the fallback anchor uses, in screen px: (right|left, own centre y). */
-    const frameAnchor = (el, side) => {
-      const r = el.getBoundingClientRect();
-      return {
-        x: side === 'right' ? r.right : r.left,
-        y: r.top + r.height / 2,
-      };
+    const wire = document.querySelector('.connection--fg .connection__wire');
+    const arrow = document.querySelector('.connection--fg .connection__arrow');
+    const point = (path, distance) => {
+      const { x, y } = path.getPointAtLength(distance).matrixTransform(path.getScreenCTM());
+      return { x, y };
     };
-    const nums = (d) => (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
-
-    const wire = svg.querySelector('.connection--fg .connection__wire');
-    const wireNumbers = nums(wire.getAttribute('d'));
-    const arrow = svg.querySelector('.connection--fg .connection__arrow');
-    const arrowNumbers = arrow ? nums(arrow.getAttribute('d')) : [];
+    const table = document.querySelector('.card--matrix').getBoundingClientRect();
     const chart = document.querySelector('.card--chart');
     const chartRect = chart.getBoundingClientRect();
-
+    const port = chart.querySelector('.chart-card__dock .rail-port').getBoundingClientRect();
     return {
-      start: toScreen(wireNumbers[0], wireNumbers[1]),
-      end: toScreen(wireNumbers[6], wireNumbers[7]),
-      tableRight: frameAnchor(document.querySelector('.card--matrix'), 'right'),
-      chartLeft: frameAnchor(chart, 'left'),
-      tip: arrowNumbers.length ? toScreen(arrowNumbers[0], arrowNumbers[1]) : null,
+      start: point(wire, 0),
+      end: point(wire, wire.getTotalLength()),
+      tableRight: { x: table.right, y: Math.min(table.bottom, Math.max(table.top, port.top + port.height / 2)) },
+      chartPort: { x: port.left, y: port.top + port.height / 2 },
+      tip: arrow ? point(arrow, 0) : null,
       chartFrame: { left: chartRect.left, top: chartRect.top, right: chartRect.right, bottom: chartRect.bottom },
       dash: wire.getAttribute('stroke-dasharray'),
       flow: getComputedStyle(wire).animationName,
       strokeWidth: Number(wire.getAttribute('stroke-width')),
-      zoom: scale,
+      zoom: wire.getScreenCTM().a,
     };
   });
 
   const near = (a, b) => Math.abs(a - b) <= 2;
   check(
-    'the wire runs from the table frame to the chart frame (neither renders a port)',
+    'the wire runs from the table frame to the folded chart column port',
     near(geometry.start.x, geometry.tableRight.x) &&
       near(geometry.start.y, geometry.tableRight.y) &&
-      near(geometry.end.x, geometry.chartLeft.x) &&
-      near(geometry.end.y, geometry.chartLeft.y),
+      near(geometry.end.x, geometry.chartPort.x) &&
+      near(geometry.end.y, geometry.chartPort.y),
     JSON.stringify({
       start: geometry.start,
       tableRight: geometry.tableRight,
       end: geometry.end,
-      chartLeft: geometry.chartLeft,
+      chartPort: geometry.chartPort,
     }),
   );
 
@@ -431,11 +414,13 @@ try {
 
   // ── 6c. the collapsible column dock picks columns to plot ─────────────
   const chipsBefore = await page.locator('.chart-card__chip').count();
-  await page.locator('.chart-card__dock-toggle').click();
-  await page.waitForSelector('.chart-card__dock--open', { timeout: 5_000 });
+  const dock = page.locator('.card--chart .chart-card__dock');
+  await dock.locator('.rail-port').click();
+  await dock.locator('.side-panel__collapse[aria-expanded="true"]').waitFor({ timeout: 5_000 });
   check('column dock opens from the chart card rail', true);
 
-  await page.locator('.chart-card__dock-item input[type="checkbox"]').nth(1).check();
+  const extraColumn = dock.getByRole('checkbox').nth(1);
+  await extraColumn.check();
   await page.waitForTimeout(300);
   const chipsAfterCheck = await page.locator('.chart-card__chip').count();
   check(
@@ -446,7 +431,7 @@ try {
   const dockLineCount = await page.locator('.connection-layer .connection').count();
   check('a second column of the same table adds no extra line', dockLineCount === 1, `${dockLineCount} lines`);
 
-  await page.locator('.chart-card__dock-item input[type="checkbox"]').nth(1).uncheck();
+  await extraColumn.uncheck();
   await page.waitForTimeout(300);
   const chipsAfterUncheck = await page.locator('.chart-card__chip').count();
   check(
@@ -520,8 +505,8 @@ try {
   // The browser reports en-US, so the app starts in English; switch to Chinese and
   // confirm the menus re-render, then switch back.
   const beforeSwitch = await page.locator('.menubar__trigger').first().innerText();
-  await page.locator('.menubar__trigger').nth(2).click();
-  await page.locator('.menubar__item', { hasText: '中文' }).click();
+  await page.getByRole('button', { name: 'Language', exact: true }).click();
+  await page.getByRole('button', { name: '中文', exact: true }).click();
   await page.waitForTimeout(300);
   const chinese = await page.locator('.menubar__trigger').first().innerText();
   check(
@@ -530,8 +515,8 @@ try {
     `${beforeSwitch} -> ${chinese}`,
   );
 
-  await page.locator('.menubar__trigger').nth(2).click();
-  await page.locator('.menubar__item', { hasText: 'English' }).click();
+  await page.getByRole('button', { name: '语言', exact: true }).click();
+  await page.getByRole('button', { name: 'English', exact: true }).click();
   await page.waitForTimeout(300);
   const english = await page.locator('.menubar__trigger').first().innerText();
   check('language switch renders the English UI', english === 'File', chinese + ' -> ' + english);
@@ -641,9 +626,8 @@ try {
 
   // A log axis must actually reach the ECharts model, not just the checkbox.
   await switchToType(page, 'Line');
-  await page.locator('.chart-card__tbutton').nth(1).click();
-  await page.waitForSelector('.chart-card__popup--wide', { timeout: 5000 });
-  await page.locator('.chart-card__popup--wide input[type="checkbox"]').first().check();
+  await page.locator('.card--chart').getByRole('button', { name: /^Axes/ }).click();
+  await page.getByRole('checkbox', { name: 'Log Y axis', exact: true }).check();
   await page.waitForTimeout(400);
   const axisTypes = await page.evaluate(() => {
     const container = document.querySelector('.chart-card__plot');
@@ -1010,9 +994,9 @@ try {
   );
 
   await summaryCompute.click();
-  await page.waitForSelector('.card--matrix .summary-panel__row', { timeout: 30_000 });
+  await page.waitForSelector('.card--matrix .summary-panel__stat-item', { timeout: 30_000 });
   const summaryStats = await page.$$eval(
-    '.card--matrix .summary-panel__row .summary-panel__stat',
+    '.card--matrix .summary-panel__stat-item .summary-panel__stat',
     (cells) => cells.map((cell) => (cell.textContent ?? '').trim()),
   );
   check(
@@ -1033,7 +1017,7 @@ try {
   // The backend notices the edit and pushes `dirty` + `upstreamChanged` for the node.
   await page.waitForSelector('.card--matrix .summary-panel__bar--stale', { timeout: 30_000 });
   const staleText = (await summaryCard.locator('.summary-panel').innerText()).trim();
-  const staleRows = await summaryCard.locator('.summary-panel__row').count();
+  const staleRows = await summaryCard.locator('.summary-panel__stat-item').count();
   check(
     'summary panel: an upstream edit makes it 待重算 with an empty table',
     /上游已变|Upstream changed/.test(staleText) && staleRows === 0,
@@ -1045,11 +1029,11 @@ try {
   // "the timestamp changed" a real assertion instead of a coin flip.
   await page.waitForTimeout(1_500);
   await summaryCard.locator('.summary-panel__compute').click();
-  await page.waitForSelector('.card--matrix .summary-panel__row', { timeout: 30_000 });
+  await page.waitForSelector('.card--matrix .summary-panel__stat-item', { timeout: 30_000 });
   const secondStamp = (await summaryCard.locator('.summary-panel__status').innerText()).trim();
   check(
     'summary panel: 重算 brings the numbers back and refreshes the timestamp',
-    (await summaryCard.locator('.summary-panel__row').count()) === 12 &&
+    (await summaryCard.locator('.summary-panel__stat-item').count()) === 12 &&
       firstStamp !== secondStamp &&
       /计算于|Computed at/.test(secondStamp),
     `${firstStamp} → ${secondStamp}`,
@@ -1105,8 +1089,8 @@ try {
         panels.length === 2 && editor
           ? Boolean(panels[0].compareDocumentPosition(editor) & Node.DOCUMENT_POSITION_FOLLOWING)
           : false,
-      heads: document.querySelectorAll('.script-card__row-head').length,
-      rows: document.querySelectorAll('.script-card__row').length,
+      heads: document.querySelectorAll('.script-card__port-head').length,
+      rows: document.querySelectorAll('.script-card__port').length,
     };
   });
   check(
@@ -1126,46 +1110,23 @@ try {
   );
 
   const portGeometry = await page.evaluate(() => {
-    const svg = document.querySelector('.connection-layer');
-    const transform = svg.querySelector('g').getAttribute('transform');
-    const m = transform.match(/translate\(([-\d.]+), ([-\d.]+)\) scale\(([-\d.]+)\)/);
-    const [tx, ty, zoom] = [Number(m[1]), Number(m[2]), Number(m[3])];
-    const box = svg.getBoundingClientRect();
-    // The layer's group is `translate(-view.x, -view.y) scale(zoom)`, so a screen point
-    // maps back with MINUS the captured translate (the 6a helper does the forward form).
-    const toPlane = (x, y) => ({ x: (x - box.left - tx) / zoom, y: (y - box.top - ty) / zoom });
-    const rectPlane = (el) => {
-      const r = el.getBoundingClientRect();
-      const topLeft = toPlane(r.left, r.top);
-      const bottomRight = toPlane(r.right, r.bottom);
-      return {
-        left: topLeft.x,
-        top: topLeft.y,
-        right: bottomRight.x,
-        bottom: bottomRight.y,
-        midY: (topLeft.y + bottomRight.y) / 2,
-      };
-    };
-    const frame = rectPlane(document.querySelector('.card--script'));
-    const head = rectPlane(
-      document.querySelector('.script-card__panel--inputs .script-card__row-head'),
-    );
-    const nums = (d) => (d.match(/-?\d+(?:\.\d+)?/g) ?? []).map(Number);
+    const head = document.querySelector('.script-card__panel--inputs .script-card__port-head');
+    if (!head) return { head: null, end: null };
+    const rect = head.getBoundingClientRect();
+    const anchor = { left: rect.left, midY: rect.top + rect.height / 2 };
     const ends = [];
     for (const wire of document.querySelectorAll('.connection__wire')) {
-      const values = nums(wire.getAttribute('d'));
-      // A detoured route is a chain of cubics, so the endpoint is the LAST coordinate
-      // pair, not the 4th (values[6..7] is the first segment's second control point).
-      const end = { x: values[values.length - 2], y: values[values.length - 1] };
+      const point = wire.getPointAtLength(wire.getTotalLength()).matrixTransform(wire.getScreenCTM());
+      const end = { x: point.x, y: point.y };
       ends.push(end);
       // The wire that belongs to the python card is the one whose end sits on the input
       // row head's LEFT edge, at that row's height (the mask makes it visible from the
       // card frame, but the geometry endpoint is the port sub-card's edge).
-      if (Math.abs(end.x - head.left) <= 2 && Math.abs(end.y - head.midY) <= 2) {
-        return { frame, head, end };
+      if (Math.abs(end.x - anchor.left) <= 2 && Math.abs(end.y - anchor.midY) <= 2) {
+        return { anchor, end };
       }
     }
-    return { frame, head, end: null, wireEnds: ends };
+    return { anchor, end: null, wireEnds: ends };
   });
   check(
     "the python card's wire ends on its input row's left edge, at the row height",
@@ -1309,7 +1270,7 @@ async function waitForSeriesChange(page, previous, timeoutMs) {
  * Returns the saved path, or null when no download happened.
  */
 async function exportViaMenu(page, itemIndex, dir, fallbackName) {
-  await page.locator('.chart-card__tbutton').nth(2).click();
+  await page.locator('.card--chart').getByRole('button', { name: /^Export/ }).click();
   await page.waitForSelector('.chart-card__popup--export', { timeout: 5000 });
   const items = page.locator('.chart-card__popup--export .chart-card__popup-item');
   const count = await items.count();
