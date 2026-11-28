@@ -23,6 +23,7 @@ import { PINNED_WORKSPACE_ENV, cloneWorkspaceEnv } from './types.ts';
 import type {
   CardModel,
   ChartCardModel,
+  ChartSource,
   FormulaColumn,
   MatrixCardModel,
   MatrixSnapshot,
@@ -271,15 +272,51 @@ function migrateMatrices(raw: unknown): MatrixSnapshot[] {
       columns: item.columns.map((col) => ({
         posName: asString(col?.posName),
         annotation: asString(col?.annotation),
-        // Missing cells (null/undefined/'') are NaN, never an invented 0: Number(null) and
-        // Number('') are both 0, which would silently corrupt the table. Other strings keep
-        // Number(v) (a non-numeric string already yields NaN).
-        data: Array.isArray(col?.data)
-          ? col.data.map((v: unknown) =>
-              typeof v === 'number' ? v : v === null || v === undefined || v === '' ? NaN : Number(v),
-            )
-          : [],
+        // Category codes index this dictionary; dropping individual labels would shift codes.
+        ...(Array.isArray(col?.categories) && col.categories.every((label) => typeof label === 'string')
+          ? { categories: col.categories.slice() }
+          : {}),
+        data: Array.isArray(col?.data) ? col.data.map(decodeCell) : [],
       })),
+    };
+  });
+}
+
+/**
+ * One number read from a save file. Missing cells (null/undefined/'') are NaN, never an
+ * invented 0: Number(null) and Number('') are both 0, which would silently corrupt the
+ * table. Other strings keep Number(v) — the writer encodes ±Infinity as the numeric
+ * strings "Infinity"/"-Infinity" (a non-numeric string already yields NaN).
+ */
+function decodeCell(v: unknown): number {
+  return typeof v === 'number' ? v : v === null || v === undefined || v === '' ? NaN : Number(v);
+}
+
+/**
+ * A chart card caches its plotted numbers in the config — attached columns, the explicit
+ * X axis and the grouping factor — and after a restore nothing re-pulls them from the
+ * matrices. They travel under the SAME cell rules as matrix columns: without this decode
+ * a restored chart plots null where the file held a gap or an infinity, and the renderer
+ * coerces it (an X null even falls back to the row index) into a plausible-looking curve.
+ */
+function decodeChartSource(source: ChartSource): ChartSource {
+  if (!source || typeof source !== 'object' || !Array.isArray(source.raw)) return source;
+  return { ...source, raw: source.raw.map(decodeCell) };
+}
+
+function decodeChartCards(cards: CardModel[]): CardModel[] {
+  return cards.map((card) => {
+    if (card.kind !== 'chart') return card;
+    const config = card.config;
+    if (!config || typeof config !== 'object') return card;
+    return {
+      ...card,
+      config: {
+        ...config,
+        sources: Array.isArray(config.sources) ? config.sources.map(decodeChartSource) : config.sources,
+        xAxisSource: config.xAxisSource ? decodeChartSource(config.xAxisSource) : config.xAxisSource,
+        factorSource: config.factorSource ? decodeChartSource(config.factorSource) : config.factorSource,
+      },
     };
   });
 }
@@ -331,9 +368,68 @@ function workspaceEnvOf(raw: unknown): WorkspaceEnv {
   return readWorkspaceEnv((raw as { env?: unknown } | null)?.env) ?? cloneWorkspaceEnv(PINNED_WORKSPACE_ENV);
 }
 
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+const isInteger = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isSafeInteger(value);
+const isId = (value: unknown): value is number => isInteger(value) && value > 0;
+const isIndex = (value: unknown): value is number => isInteger(value) && value >= 0;
+
+/** Validate the card structures restore and rendering rely on, not graph connectivity.
+ * Dangling and cyclic edges keep the existing restore warning/repair path. */
+export function validateWorkspaceCards(cards: unknown): asserts cards is CardModel[] {
+  if (!Array.isArray(cards)) throw new WorkspaceFormatError('workspace is missing cards');
+  const ids = new Set<number>();
+  for (const [index, raw] of cards.entries()) {
+    const invalid = (field: string): never => {
+      throw new WorkspaceFormatError(`Invalid workspace card ${index + 1}: ${field}`);
+    };
+    if (!isRecord(raw) || !isId(raw.id)) return invalid('id');
+    if (ids.has(raw.id)) return invalid('duplicate id');
+    ids.add(raw.id);
+    if (typeof raw.title !== 'string' || !['x', 'y', 'width', 'height', 'z', 'createdAt'].every(
+      (key) => typeof raw[key] === 'number' && Number.isFinite(raw[key]),
+    )) return invalid('title or bounds');
+    if (!Array.isArray(raw.inputs) || !raw.inputs.every((input) => {
+      if (!isRecord(input) || typeof input.portId !== 'string' || !isRecord(input.target)) return false;
+      const target = input.target;
+      return isId(target.cardId) && isId(target.matrixId) && (target.type === 'matrix' ||
+        (target.type === 'cell' && isIndex(target.column) &&
+          (target.row === undefined || isIndex(target.row))));
+    })) return invalid('inputs');
+
+    switch (raw.kind) {
+      case 'matrix':
+        if (!Array.isArray(raw.sources) || !raw.sources.every((source) =>
+          isRecord(source) && typeof source.name === 'string' && isId(source.matrixId),
+        ) || !isIndex(raw.activeSource) || raw.activeSource >= raw.sources.length) return invalid('sources');
+        break;
+      case 'formula':
+        if (typeof raw.signatureId !== 'string' || !isInteger(raw.displayMatrixId) || !isRecord(raw.params) ||
+          !Array.isArray(raw.outputs) || !raw.outputs.every((output) => isRecord(output) &&
+            typeof output.outputId === 'string' &&
+            (output.localMatrixId === undefined || isId(output.localMatrixId)))) return invalid('function definition');
+        if (raw.params.formulas != null && (!Array.isArray(raw.params.formulas) ||
+          !raw.params.formulas.every((formula) => isRecord(formula) &&
+            typeof formula.name === 'string' && typeof formula.expression === 'string')))
+          return invalid('formulas');
+        break;
+      case 'chart':
+        if (!isRecord(raw.config) || typeof raw.config.type !== 'string' ||
+          !Array.isArray(raw.config.sources) || !raw.config.sources.every((source) => isRecord(source) &&
+            isId(source.matrixId) && isIndex(source.columnIndex) && Array.isArray(source.raw)))
+          return invalid('chart config');
+        break;
+      default:
+        return invalid('kind');
+    }
+  }
+}
+
 /**
- * Upgrade a parsed workspace file to schema v2. v2 input passes through unchanged (only
- * shape-validated); v1 input is migrated. Any other version is refused.
+ * Upgrade a parsed workspace file to schema v2. v2 input passes through unchanged apart
+ * from the shared cell decode (matrix columns and the chart's cached numbers read under
+ * one rule); v1 input is migrated. Any other version is refused.
  */
 export function migrateWorkspace(raw: unknown): WorkspaceSnapshot {
   if (typeof raw !== 'object' || raw === null) {
@@ -343,12 +439,19 @@ export function migrateWorkspace(raw: unknown): WorkspaceSnapshot {
   const version = snapshot.version;
 
   if (version === 2) {
-    if (!Array.isArray(snapshot.cards)) throw new WorkspaceFormatError('workspace is missing cards');
+    validateWorkspaceCards(snapshot.cards);
+    // Preserve the saved unit layers; loadSnapshot sanitizes their untrusted contents.
+    const { unitConfirmations, unitConstants, unitPolicyOverride } = raw as Pick<
+      WorkspaceSnapshot, 'unitConfirmations' | 'unitConstants' | 'unitPolicyOverride'
+    >;
     return {
       version: 2,
       savedAt: asString((raw as { savedAt?: unknown }).savedAt, new Date().toISOString()),
       env: workspaceEnvOf(raw),
-      cards: snapshot.cards as CardModel[],
+      ...(unitConfirmations !== undefined ? { unitConfirmations } : {}),
+      ...(unitConstants !== undefined ? { unitConstants } : {}),
+      ...(unitPolicyOverride !== undefined ? { unitPolicyOverride } : {}),
+      cards: decodeChartCards(snapshot.cards as CardModel[]),
       matrices: migrateMatrices(snapshot.matrices),
       nextCardId: asNumber((raw as { nextCardId?: unknown }).nextCardId, 1),
       nextMatrixId: asNumber((raw as { nextMatrixId?: unknown }).nextMatrixId, 1),
@@ -361,7 +464,7 @@ export function migrateWorkspace(raw: unknown): WorkspaceSnapshot {
   if (!Array.isArray(snapshot.cards)) throw new WorkspaceFormatError('workspace is missing cards');
 
   const v1Cards = snapshot.cards as V1Card[];
-  const cards = v1Cards.map((card) => migrateCard(card, v1Cards));
+  const cards = decodeChartCards(v1Cards.map((card) => migrateCard(card, v1Cards)));
   return {
     version: 2,
     savedAt: asString((raw as { savedAt?: unknown }).savedAt, new Date().toISOString()),

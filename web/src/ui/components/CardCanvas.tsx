@@ -299,6 +299,10 @@ export function CardCanvas({
     lastY: number;
     moved: boolean;
   } | null>(null);
+  // React dispatches `pointerup` before the synthetic `click`. `endPan` has to clear the
+  // gesture to release capture, so keep one additional bit for the following click: the
+  // tail of a drag must never be mistaken for a request to clear the card selection.
+  const suppressPanClick = useRef(false);
 
   const beginPan = useCallback((event: React.PointerEvent) => {
     const element = canvasRef.current;
@@ -309,6 +313,7 @@ export function CardCanvas({
       lastY: event.clientY,
       moved: false,
     };
+    suppressPanClick.current = false;
     setIsPanning(true);
     // Optional: jsdom (used by the DOM tests) does not implement pointer capture, and a
     // missing capture only costs us events that leave the element mid-drag.
@@ -354,6 +359,7 @@ export function CardCanvas({
   const endPan = (event: React.PointerEvent) => {
     const state = pan.current;
     if (!state || state.pointerId !== event.pointerId) return;
+    suppressPanClick.current = state.moved;
     pan.current = null;
     setIsPanning(false);
     canvasRef.current?.releasePointerCapture?.(event.pointerId);
@@ -760,7 +766,10 @@ export function CardCanvas({
         // Clicking the bare canvas clears the selection (deselects the active card) —
         // unless that "click" was the tail of a pan.
         if (event.target !== canvasRef.current) return;
-        if (pan.current?.moved) return;
+        if (suppressPanClick.current || pan.current?.moved) {
+          suppressPanClick.current = false;
+          return;
+        }
         select(null);
       }}
       onDragEnter={onDragEnter}

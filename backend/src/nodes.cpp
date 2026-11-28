@@ -1563,6 +1563,7 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
   std::vector<std::vector<Column>> outputs;
   std::string errorCode;
   std::string errorName;
+  bool hasSummaryErrorName = false;
   int64_t errorPosition = -1;
   // `unexpectedChar` and friends name the offending thing in their message; the UI localises
   // the message from `code` + `params`, so the value itself has to travel separately.
@@ -1856,6 +1857,7 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
         if (!table.errorCode.empty()) {
           errorCode = table.errorCode;
           errorName = table.errorName;
+          hasSummaryErrorName = true;
         } else {
           outputs.push_back(std::move(table.columns));
         }
@@ -2005,7 +2007,8 @@ void NodeRegistry::evaluateNode(int64_t nodeId) {
       }
       params_out.set("got", Json(errorArgGot));
     }
-    if (!errorName.empty()) params_out.set("name", Json(errorName));
+    // Summary always identifies the offending parameter or item, even if it is empty.
+    if (hasSummaryErrorName || !errorName.empty()) params_out.set("name", Json(errorName));
     if (errorCode == "budgetExceeded") {
       params_out.set("limit", Json(errorBudgetLimit));
       params_out.set("actual", Json(errorBudgetActual));

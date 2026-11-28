@@ -15,9 +15,10 @@ import {
   parseFiles,
   pickFiles,
   readWorkspace,
+  serializeWorkspace,
 } from './fileActions.ts';
 import { exportChart } from '../charts/export.ts';
-import { isChartCard, isMatrixCard, isScriptCard } from './types.ts';
+import { isChartCard, isMatrixCard, isScriptCard, type MatrixSource } from './types.ts';
 import { hashWorkspaceBytes } from './workspaceTrust.ts';
 import { armAlertAudio } from './alerts.ts';
 import { useWorkspace } from './workspaceStore.ts';
@@ -130,16 +131,16 @@ export default function App() {
   /**
    * Replace the data of an existing card — the operation a data card never had.
    *
-   * `mode: 'set'` is a drop on the card (the dropped files become its file set);
-   * `mode: 'file'` is the card's「替换文件…」control (only the shown file changes).
+   * A drop on the card replaces the file set. The「替换文件…」control supplies the
+   * original slot so its asynchronous picker and parse cannot retarget the replacement.
    *
    * Any parse failure aborts the whole replacement: applying half a new file set while
    * the rest of the card keeps its old numbers would leave the user unable to tell which
    * data is on screen (and there is no undo).
    */
   const replaceCardFiles = useCallback(
-    async (cardId: number, files: File[], mode: 'set' | 'file') => {
-      if (files.length === 0) return;
+    async (cardId: number, files: File[], slot?: { index: number; source: MatrixSource }) => {
+      if (files.length === 0 || (slot && files.length !== 1)) return;
       const { loaded, failures } = await parseFiles(files);
       for (const failure of failures) {
         showToast('error', t('dialog.loadFailedBody', { name: failure.name, error: failure.error }));
@@ -149,13 +150,11 @@ export default function App() {
       const state = useWorkspace.getState();
       const card = state.cards.find((entry) => entry.id === cardId);
       if (!card || !isMatrixCard(card)) return;
-      if (mode === 'file' && loaded.length !== 1) return;
+      // The store only replaces the shown slot. If the user moved away or the original
+      // source was replaced while we waited, leave both the old and new slots untouched.
+      if (slot && (card.activeSource !== slot.index || card.sources[slot.index] !== slot.source)) return;
 
-      const replaced = state.replaceCardSources(
-        cardId,
-        loaded,
-        mode === 'file' ? card.activeSource : undefined,
-      );
+      const replaced = state.replaceCardSources(cardId, loaded, slot?.index);
       if (!replaced) return;
 
       if (loaded.length === 1) {
@@ -177,16 +176,21 @@ export default function App() {
   /** Files dropped on a data card replace that card's data (dropping on canvas still
    * creates a card — see `ingestFiles`). */
   const onFilesDroppedOnCard = useCallback(
-    (cardId: number, files: File[]) => void replaceCardFiles(cardId, files, 'set'),
+    (cardId: number, files: File[]) => void replaceCardFiles(cardId, files),
     [replaceCardFiles],
   );
 
   /** The card's replace control: pick one file and swap the file the card is showing. */
   const onPickReplaceFile = useCallback(
     (cardId: number) => {
+      const card = useWorkspace.getState().cards.find((entry) => entry.id === cardId);
+      if (!card || !isMatrixCard(card)) return;
+      const index = card.activeSource;
+      const source = card.sources[index];
+      if (!source) return;
       void (async () => {
         const files = await pickFiles(false);
-        if (files.length > 0) await replaceCardFiles(cardId, files, 'file');
+        await replaceCardFiles(cardId, files, { index, source });
       })();
     },
     [replaceCardFiles],
@@ -197,7 +201,7 @@ export default function App() {
       const snapshot = toSnapshot();
       const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
       const name = `datacardforge-${stamp}.json`;
-      const text = JSON.stringify(snapshot);
+      const text = serializeWorkspace(snapshot);
       const bytes = downloadText(name, text, 'application/json');
       setStatus(t('status.exported', { name, size: formatBytes(bytes) }));
       // The save is the user's own action on their own work: the file just written is

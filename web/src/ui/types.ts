@@ -74,17 +74,13 @@ export interface MatrixSource {
   matrixId: number;
 }
 
-/**
- * Byte identity of a loaded file. Two loads with the same size + lastModified are the
- * same bytes; a different identity under the same name is a *new* file and must not
- * reuse an older parse.
- */
+/** Cheap filesystem metadata; a match alone does not establish content identity. */
 export interface FileIdentity {
   size: number;
   lastModified: number;
 }
 
-/** Cache key for a parse: the bytes, not the label. */
+/** Lookup key for a candidate parse, independent of the display label. */
 export function identityKey(identity: FileIdentity): string {
   return `${identity.size}:${identity.lastModified}`;
 }
@@ -92,8 +88,8 @@ export function identityKey(identity: FileIdentity): string {
 /**
  * One parsed file on its way into a matrix card: a drop, the picker, or a restored set.
  *
- * `identity` is the byte fingerprint used to reuse an identical parse (see
- * `matrixIdByIdentity`); programmatically built tables and restored snapshots leave it out
+ * `identity` finds candidates for sharing an identical parse (see `matrixIdByIdentity`);
+ * programmatically built tables and restored snapshots leave it out
  * and therefore always get a matrix of their own.
  */
 export interface MatrixEntry {

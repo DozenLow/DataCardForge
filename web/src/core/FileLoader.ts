@@ -6,7 +6,7 @@
  * `load()` is identical, so `MatrixData` stays the single source of truth.
  */
 import { MatrixData } from './MatrixData.ts';
-import { isMissingToken, isNumeric, parseNumeric } from './numeric.ts';
+import { isImportNumeric, isMissingToken, parseImportNumeric } from './numeric.ts';
 
 export interface FileLoader {
   /** Parse the file. Rejects with a human-readable message when unsupported/corrupt. */
@@ -30,17 +30,17 @@ export function extensionOf(name: string): string {
 /**
  * Build a `MatrixData` from a rectangular (possibly ragged) grid of raw cell strings.
  *
- * Mirrors the C++ TxtLoader: when the first row is not entirely numeric it is treated
- * as a header/annotation row rather than data.
+ * The first row is data when it has at least one numeric value and every other
+ * cell is numeric or missing. Otherwise it provides column annotations.
  *
- * Numeric detection is driven by the token grammar (`isNumeric`), never by the parsed
+ * Numeric detection is driven by the import token grammar, never by the parsed
  * value — otherwise a tolerant fallback like `0` would make `temp` look numeric and
  * silently swallow the header row into the data.
  *
  * A column that is entirely text is categorical: the numeric array carries stable codes
  * and the matrix keeps the label dictionary as display metadata. Mixing genuine text with
  * numbers in one column is refused instead of silently inventing zeroes or changing its
- * meaning — but a NaN spelling is a gap, not text, and never makes a column "mixed".
+ * meaning — but a missing-value marker is a gap, not text, and never makes a column "mixed".
  */
 export function gridToMatrix(grid: string[][]): MatrixData {
   let rows = grid.filter((r) => r.length > 0);
@@ -52,8 +52,8 @@ export function gridToMatrix(grid: string[][]): MatrixData {
   // header. Demanding at least one real number keeps a stray line of delimiters (all cells
   // empty) from being read as data.
   const firstIsData =
-    first.some((cell) => isNumeric(cell.trim())) &&
-    first.every((cell) => isNumeric(cell.trim()) || isMissingToken(cell.trim()));
+    first.some((cell) => isImportNumeric(cell.trim())) &&
+    first.every((cell) => isImportNumeric(cell.trim()) || isMissingToken(cell.trim()));
   if (!firstIsData) {
     headerNames = first.map((c) => c.trim());
     rows = rows.slice(1);
@@ -73,7 +73,7 @@ export function gridToMatrix(grid: string[][]): MatrixData {
       // A missing cell is neither evidence of numbers nor of text: a column of numbers with
       // a few `NaN` gaps is numeric, not mixed.
       if (isMissingToken(token)) continue;
-      if (isNumeric(token)) hasNumeric = true;
+      if (isImportNumeric(token)) hasNumeric = true;
       else hasText = true;
     }
     if (hasNumeric && hasText) {
@@ -87,7 +87,7 @@ export function gridToMatrix(grid: string[][]): MatrixData {
     const categoryCodes = new Map<string, number>();
     const data = tokens.map((token) => {
       if (isMissingToken(token)) return NaN;
-      if (!hasText) return parseNumeric(token);
+      if (!hasText) return parseImportNumeric(token);
       let code = categoryCodes.get(token);
       if (code === undefined) {
         code = categories.length;

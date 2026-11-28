@@ -207,15 +207,26 @@ describe('the default field adapter', () => {
   it('falls back to the deprecated copy command when there is no async clipboard', () => {
     // jsdom implements neither API, so the fallback is stubbed in place: the point is that the
     // adapter uses it rather than throwing or silently dropping the copy.
-    const execCommand = vi.fn(() => true);
+    const execCommand = vi.fn(() => {
+      const scratch = document.querySelector('textarea[readonly]') as HTMLTextAreaElement | null;
+      expect(scratch?.value).toBe('requested text');
+      expect(scratch?.selectionStart).toBe(0);
+      expect(scratch?.selectionEnd).toBe('requested text'.length);
+      return true;
+    });
     Object.defineProperty(document, 'execCommand', { configurable: true, value: execCommand });
     const host = surface('<input id="input" value="abcdef" />');
     const input = host.querySelector('#input') as HTMLInputElement;
+    input.focus();
     input.setSelectionRange(0, 3);
 
-    writeClipboardText('abc');
+    writeClipboardText('requested text');
 
     expect(execCommand).toHaveBeenCalledWith('copy');
+    expect(document.querySelector('textarea[readonly]')).toBeNull();
+    expect(document.activeElement).toBe(input);
+    expect(input.selectionStart).toBe(0);
+    expect(input.selectionEnd).toBe(3);
   });
 });
 

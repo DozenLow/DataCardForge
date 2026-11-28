@@ -219,6 +219,29 @@ describe('pan gestures', () => {
     expect(store().view).toEqual({ x: 40, y: 30, zoom: 1 });
   });
 
+  it('keeps the selection when the drag ends with a click on the canvas', async () => {
+    const matrixCardId = store().addMatrixCard([{ name: 'a.csv', matrix: matrix([1, 2, 3]) }]);
+    store().select(matrixCardId);
+    const host = await mountCanvas();
+    const canvas = host.querySelector('.canvas') as HTMLElement;
+
+    await act(async () => {
+      canvas.dispatchEvent(
+        new MouseEvent('pointerdown', { button: 0, clientX: 500, clientY: 400, bubbles: true }),
+      );
+      canvas.dispatchEvent(
+        new MouseEvent('pointermove', { clientX: 470, clientY: 380, bubbles: true }),
+      );
+      canvas.dispatchEvent(new MouseEvent('pointerup', { clientX: 470, clientY: 380, bubbles: true }));
+      // Browsers dispatch this click after pointerup. It is the tail of the drag, not a
+      // separate request to clear the selected card.
+      canvas.dispatchEvent(new MouseEvent('click', { clientX: 470, clientY: 380, bubbles: true }));
+    });
+
+    expect(store().view).toEqual({ x: 30, y: 20, zoom: 1 });
+    expect(store().selectedId).toBe(matrixCardId);
+  });
+
   it('pans at any zoom without scaling the delta twice', async () => {
     const host = await mountCanvas();
     const canvas = host.querySelector('.canvas') as HTMLElement;

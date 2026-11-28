@@ -2,12 +2,13 @@
  * Numeric parsing helpers — a lightweight stand-in for `fast_float`.
  *
  * JavaScript's `Number()` accepts a handful of literals that C++'s `from_chars`
- * rejects (`Infinity`, `0x10`, `1e`), so `parseNumeric` narrows the grammar to the
- * shapes a measurement file actually produces: optional sign, decimal digits,
- * optional fraction, optional exponent.
+ * does not treat as plain decimals (`Infinity`, `0x10`). `parseNumeric` keeps the
+ * decimal grammar strict; file import recognises infinity separately.
  */
 
 const NUMERIC_RE = /^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$/;
+// Instrument exports commonly use `inf`, CSV export uses `Infinity`, and the table copies `∞`.
+const INFINITY_RE = /^[+-]?(?:inf(?:inity)?|∞)$/i;
 
 /** True when the token is a plain decimal number (C++ `is_numeric` semantics). */
 export function isNumeric(token: string): boolean {
@@ -26,9 +27,9 @@ export function isNumeric(token: string): boolean {
  * unknown and below some threshold, and inventing half the limit would put a fabricated
  * measurement into every statistic downstream.
  *
- * Deliberately NOT here: `inf`/`-inf` (a value, not a gap), `null`/`#N/A` (spreadsheet error
- * codes, not measurement spellings), and prose. Everything else stays text — which is why a
- * numeric column containing a genuine label is still refused instead of quietly blanked.
+ * Deliberately NOT here: infinity spellings (values, not gaps), `null`/`#N/A` (spreadsheet error
+ * codes, not measurement spellings), and prose. Genuine text in a numeric column is still
+ * refused instead of quietly blanked.
  */
 const MISSING_TOKENS = new Set([
   'nan',
@@ -55,6 +56,18 @@ export function isMissingToken(token: string): boolean {
 export function parseNumeric(token: string, fallback = NaN): number {
   if (!NUMERIC_RE.test(token)) return fallback;
   return Number(token);
+}
+
+/** File import accepts decimal numbers and infinity, unlike manual cell edits. */
+export function isImportNumeric(token: string): boolean {
+  return isNumeric(token) || INFINITY_RE.test(token);
+}
+
+/** Parse an import number without interpreting arbitrary text as a value. */
+export function parseImportNumeric(token: string): number {
+  const value = parseNumeric(token);
+  if (!Number.isNaN(value) || !INFINITY_RE.test(token)) return value;
+  return token.startsWith('-') ? -Infinity : Infinity;
 }
 
 /** Format a value for display with the shortest text that round-trips to the same double.

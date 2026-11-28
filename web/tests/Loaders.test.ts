@@ -204,6 +204,24 @@ describe('CsvLoader', () => {
     expect(mat.cell(1, 1)).toBe(4);
   });
 
+  it('keeps an infinity-and-gap first row as data and preserves infinity signs', async () => {
+    const mat = await new CsvLoader().load(
+      makeFile('a.csv', '-INF,NA\n1,+inf\n+∞,-∞\n'),
+    );
+    expect(mat.rowCount()).toBe(3);
+    expect(mat.column(0).annotation).toBe('');
+    expect(mat.column(0).categories).toBeUndefined();
+    expect(mat.column(1).categories).toBeUndefined();
+    expect(Array.from(mat.column(0).data)).toEqual([-Infinity, 1, Infinity]);
+    expect(Array.from(mat.column(1).data)).toEqual([NaN, Infinity, -Infinity]);
+  });
+
+  it('still rejects genuine text in a column containing infinity', async () => {
+    await expect(
+      new CsvLoader().load(makeFile('a.csv', 'x,y\ninf,1\ncontrol,2\n')),
+    ).rejects.toThrow(/mixes numeric and text/);
+  });
+
   it('loads a semicolon separated file', async () => {
     const mat = await new CsvLoader().load(makeFile('a.csv', '1;2;3\n4;5;6\n'));
     expect(mat.columnCount()).toBe(3);
@@ -258,6 +276,16 @@ describe('matrixToCsv', () => {
     const mat = new MatrixData();
     mat.appendColumn('Pos.1', [1, NaN]);
     expect(matrixToCsv(mat).split('\n')[2]).toBe('');
+  });
+
+  it('round-trips CSV infinity values without turning them into gaps or text', async () => {
+    const mat = new MatrixData();
+    mat.appendColumn('Pos.1', [Infinity, 1, -Infinity, NaN]);
+    mat.appendColumn('Pos.2', [2, 3, 4, 5]);
+
+    const restored = await new CsvLoader().load(makeFile('a.csv', matrixToCsv(mat)));
+    expect(restored.column(0).categories).toBeUndefined();
+    expect(Array.from(restored.column(0).data)).toEqual([Infinity, 1, -Infinity, NaN]);
   });
 
   it('exports categorical labels instead of their internal numeric codes', () => {

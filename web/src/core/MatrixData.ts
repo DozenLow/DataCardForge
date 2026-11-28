@@ -109,6 +109,18 @@ export class MatrixData {
     return this.m_columns.length === 0;
   }
 
+  /** Compare parsed content before sharing a matrix whose file metadata matches. */
+  hasSameContent(other: MatrixData): boolean {
+    if (this === other) return true;
+    return this.columnCount() === other.columnCount() && this.m_columns.every((col, i) => {
+      const peer = other.column(i);
+      return col.posName === peer.posName && col.annotation === peer.annotation &&
+        col.categories?.length === peer.categories?.length &&
+        (col.categories?.every((label, j) => label === peer.categories?.[j]) ?? true) &&
+        col.data.length === peer.data.length && col.data.every((value, j) => Object.is(value, peer.data[j]));
+    });
+  }
+
   /** Deep copy — used when a card caches a parsed matrix per file. */
   clone(): MatrixData {
     const copy = new MatrixData();

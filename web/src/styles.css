@@ -2201,7 +2201,8 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .node-light--computing {
+  .node-light--computing,
+  .summary-panel__lamp--computing {
     animation: none;
   }
 }
@@ -2223,7 +2224,7 @@ body {
 
 .summary-panel__lamp--computing {
   background: var(--state-amber);
-  animation: node-pulse 1s ease-in-out infinite;
+  animation: node-breathe 1s ease-in-out infinite;
 }
 
 .summary-panel__lamp--done {

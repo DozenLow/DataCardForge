@@ -91,6 +91,7 @@ import {
   REGRESSION_SIGNATURE,
   UNIT_CONVERT_SIGNATURE,
   chartPortId,
+  validateWorkspaceCards,
 } from './migrate.ts';
 import {
   SOURCE_PORT,
@@ -1180,7 +1181,7 @@ async function runScriptCardNow(cardId: number, mode: 'clean' | 'debug'): Promis
       }
     }
   } finally {
-    scriptRunsInFlight.delete(cardId);
+    if (epoch === workspaceEpoch) scriptRunsInFlight.delete(cardId);
   }
 }
 
@@ -1270,10 +1271,8 @@ interface WorkspaceState {
   /** Parsed matrices by id. Kept outside the cards so charts can share them. */
   matrices: Map<number, MatrixData>;
   /**
-   * Byte identity (`size:lastModified`) -> matrix id, so re-opening the *same bytes*
-   * reuses a parse. Keyed on content, never on file name: two different files routinely
-   * share a name (`export.csv` overwritten daily), and returning the older parse for the
-   * newer bytes would silently plot stale measurements.
+   * File metadata (`size:lastModified`) -> candidate matrix id. The allocator verifies
+   * parsed content before sharing: names and metadata can both collide.
    */
   matrixIdByIdentity: Map<string, number>;
   selectedId: number | null;
@@ -2191,11 +2190,14 @@ async function syncFunctionCard(cardId: number): Promise<void> {
     return;
   }
   syncingCards.add(cardId);
+  const epoch = workspaceEpoch;
   try {
     await pushFunctionCard(cardId);
   } finally {
-    syncingCards.delete(cardId);
-    if (resyncRequested.delete(cardId)) void syncFunctionCard(cardId);
+    if (epoch === workspaceEpoch) {
+      syncingCards.delete(cardId);
+      if (resyncRequested.delete(cardId)) void syncFunctionCard(cardId);
+    }
   }
 }
 
@@ -2625,7 +2627,7 @@ function summaryStillCurrent(cardId: number, localMatrixId: number): boolean {
 }
 
 /** Computes in flight per card: 计算 + 重算 pressed twice must not create two nodes. */
-const summaryComputing = new Set<number>();
+const summaryComputing = new Map<number, number>();
 
 /**
  * Read a summary node's result table.
@@ -2643,8 +2645,10 @@ async function fetchSummaryTable(
   if (!status || status.state !== 'done' || status.resultMatrixId < 0) return null;
   const frame = await backendClient.window(status.resultMatrixId, 0, SUMMARY_STATS.length);
   if (!frame.ok) return null;
-  const rows = frame.rows ?? 0;
-  const columns = frame.columns ?? 0;
+  // The labels come from the user's catalog filter, never from the frame. A legacy or
+  // malformed node can report more rows than that filter; do not create unlabelled rows.
+  const rows = Math.max(0, Math.min(frame.rows ?? 0, stats.length));
+  const columns = Math.max(0, frame.columns ?? 0);
   const data = frame.data ?? [];
   const table: number[][] = [];
   for (let r = 0; r < rows; ++r) {
@@ -3422,7 +3426,9 @@ async function pullOutputSlot(
       complete: result.shownRows >= result.totalRows || result.truncated,
     });
     return true;
-  })().finally(() => outputSlotPulls.delete(localMatrixId));
+  })().finally(() => {
+    if (outputSlotPulls.get(localMatrixId) === task) outputSlotPulls.delete(localMatrixId);
+  });
   outputSlotPulls.set(localMatrixId, task);
   return task;
 }
@@ -4050,7 +4056,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     for (const entry of entries) {
       const key = entry.identity ? identityKey(entry.identity) : null;
       const existing = key !== null ? matrixIdByIdentity.get(key) : undefined;
-      if (existing !== undefined && matrices.has(existing)) {
+      if (existing !== undefined && matrices.get(existing)?.hasSameContent(entry.matrix)) {
         ids.push(existing);
         continue;
       }
@@ -4103,7 +4109,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         return serverId;
       })
       .finally(() => {
-        matrixUploads.delete(matrixId);
+        if (matrixUploads.get(matrixId) === task) matrixUploads.delete(matrixId);
       });
     matrixUploads.set(matrixId, task);
     return task;
@@ -4178,6 +4184,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
    * cards bound to the old numbers forever — with no banner once the connection is back.
    */
   const ensureUploadedMatricesRegistered = async (): Promise<void> => {
+    const epoch = workspaceEpoch;
     const derivedIds = new Set(
       get()
         .cards.filter(isFormulaCard)
@@ -4187,8 +4194,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       .filter(([localId]) => !derivedIds.has(localId) && !backendMatrixIds.has(localId))
       .sort((a, b) => a[0] - b[0]);
     for (const [localId, matrix] of ordered) {
+      if (epoch !== workspaceEpoch) return;
+      if (backendMatrixIds.has(localId)) continue;
       await registerUploadedMatrix(localId, `#${localId}`, matrix);
     }
+    if (epoch !== workspaceEpoch) return;
     for (const card of get().cards) {
       if (isFormulaCard(card)) void syncFunctionCard(card.id);
     }
@@ -6120,9 +6130,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         if (!source) return;
         // One compute per card at a time: two overlapping clicks both saw `nodeId === null`
         // would create two nodes, and the loser is orphaned server-side.
-        if (summaryComputing.has(cardId)) return;
-        summaryComputing.add(cardId);
         const epoch = workspaceEpoch;
+        if (summaryComputing.get(cardId) === epoch) return;
+        summaryComputing.set(cardId, epoch);
+        const stillCurrent = () =>
+          epoch === workspaceEpoch && summaryStillCurrent(cardId, source.localMatrixId);
         const entry = state.summaries[cardId] ?? emptySummaryEntry();
         // In-flight marker, same name the backend publishes, so the yellow bar is honest
         // while the request is on the wire (the evaluation itself is synchronous there).
@@ -6142,6 +6154,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
               );
             }
           }
+          if (!stillCurrent()) return;
           if (serverMatrixId === null) {
             // Nothing authoritative to bind to (offline, or a function card with no result
             // yet). Stay 未请求 rather than pretending a compute happened.
@@ -6168,6 +6181,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
               ],
               { signatureId: SUMMARY_SIGNATURE, params: summaryParams(entry.stats) },
             );
+            if (!stillCurrent()) {
+              if (created.ok && created.nodeId !== undefined) void backendClient.deleteNode(created.nodeId);
+              return;
+            }
             if (!created.ok || created.nodeId === undefined) {
               if (created.code === 'backendUnavailable') {
                 set({ backend: { state: 'offline', error: created.code } });
@@ -6182,12 +6199,6 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
               return;
             }
             nodeId = created.nodeId;
-            // The source (or the whole workspace) can change while the POST is in flight;
-            // a node bound to a matrix nobody shows any more would leak server-side.
-            if (epoch !== workspaceEpoch || !summaryStillCurrent(cardId, source.localMatrixId)) {
-              void backendClient.deleteNode(nodeId);
-              return;
-            }
             patchSummary(cardId, { nodeId, boundMatrixId: source.localMatrixId });
           }
 
@@ -6197,7 +6208,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           // The source (or the whole workspace) can change while the compute is on the wire;
           // a failure must not paint a red error onto a panel that now describes a different
           // table. Same currency rule as the create answer above, applied to every branch.
-          if (epoch !== workspaceEpoch || !summaryStillCurrent(cardId, source.localMatrixId)) return;
+          if (!stillCurrent()) return;
           if (!computed.ok) {
             if (computed.code === 'backendUnavailable') {
               set({ backend: { state: 'offline', error: computed.code } });
@@ -6230,9 +6241,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
             });
             return;
           }
-          if (!summaryStillCurrent(cardId, source.localMatrixId)) return;
           const table = await fetchSummaryTable(nodeId, entry.stats);
-          if (!summaryStillCurrent(cardId, source.localMatrixId)) return;
+          if (!stillCurrent()) return;
           if (!table) {
             patchSummary(cardId, { status: 'error', code: 'internalError', result: null });
             return;
@@ -6247,7 +6257,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
             result: table,
           });
         } finally {
-          summaryComputing.delete(cardId);
+          if (summaryComputing.get(cardId) === epoch) summaryComputing.delete(cardId);
         }
       })();
     },
@@ -7134,13 +7144,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     },
 
     loadSnapshot(snapshot) {
-      // A push started against the previous workspace must not bind into this one.
-      workspaceEpoch += 1;
-      // Slot completeness is per-workspace bookkeeping keyed by local matrix id, and those
-      // ids restart: the restored workspace re-learns it from its first pull. The same holds
-      // for pulls still in flight — they carry the old epoch and answer nobody.
-      outputSlotCache.clear();
-      outputSlotPulls.clear();
+      validateWorkspaceCards(snapshot.cards);
 
       // Unit drift is a comparison between the OLD and the NEW version of a same-name table
       // (units L1a §3), so it has to be collected before `set` replaces `matrices`. The
@@ -7176,9 +7180,17 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       // number is a count of CARDS — nothing is compiled, imported or run to produce it.
       const scriptCount = restored.filter(isScriptCard).length;
 
-      // Restored cards are pushed afresh; a signature from the previous workspace would
-      // suppress a push that the restarted backend actually needs.
+      // All structural preparation succeeded. Local IDs can now change meaning, so
+      // retire the previous runtime bindings and in-flight markers as one boundary.
+      const epoch = ++workspaceEpoch;
+      backendMatrixIds.clear();
+      matrixUploads.clear();
+      syncingCards.clear();
+      resyncRequested.clear();
       lastPushedSignature.clear();
+      scriptRunsInFlight.clear();
+      outputSlotCache.clear();
+      outputSlotPulls.clear();
 
       set({
         cards: restored,
@@ -7291,9 +7303,11 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           .filter(([localId]) => !derivedIds.has(localId))
           .sort((a, b) => a[0] - b[0]);
         for (const [localId, matrix] of ordered) {
+          if (epoch !== workspaceEpoch) return;
           if (backendMatrixIds.has(localId)) continue;
           await registerUploadedMatrix(localId, `#${localId}`, matrix);
         }
+        if (epoch !== workspaceEpoch) return;
         for (const card of restored) {
           if (isFormulaCard(card)) void syncFunctionCard(card.id);
         }
@@ -7450,7 +7464,12 @@ function computeBlockers(state: WorkspaceState): Blocker[] {
 function blockersEqual(a: readonly Blocker[], b: readonly Blocker[]): boolean {
   if (a.length !== b.length) return false;
   for (let i = 0; i < a.length; ++i) {
-    if (a[i].kind !== b[i].kind || a[i].cardId !== b[i].cardId) return false;
+    if (
+      a[i].kind !== b[i].kind ||
+      a[i].cardId !== b[i].cardId ||
+      a[i].detail !== b[i].detail
+    )
+      return false;
   }
   return true;
 }

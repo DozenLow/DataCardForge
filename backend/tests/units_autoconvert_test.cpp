@@ -223,6 +223,10 @@ void runNodeChecks() {
         std::string("default policy must stay done, got ") + nodeName(node->state));
 
   Matrix result;
+  if (node->resultMatrixIds.empty()) {
+    check(false, "auto card produced no result matrix");
+    return;
+  }
   check(store.snapshot(node->resultMatrixIds[0], &result), "auto card produced no result");
   if (result.columnCount() == 1) {
     const std::vector<double> expected = {151.0, 202.0};
@@ -247,8 +251,12 @@ void runNodeChecks() {
           "auto policy must leave the card done");
     if (autoNode) {
       Matrix autoResult;
-      check(store.snapshot(autoNode->resultMatrixIds[0], &autoResult),
-            "auto-policy card produced no result");
+      if (autoNode->resultMatrixIds.empty()) {
+        check(false, "auto-policy card produced no result matrix");
+      } else {
+        check(store.snapshot(autoNode->resultMatrixIds[0], &autoResult),
+              "auto-policy card produced no result");
+      }
       if (autoResult.columnCount() == 1) {
         // The right operand is converted to the LEFT operand's unit (km): 150 cm = 0.0015 km,
         // 200 cm = 0.002 km, added to 1 km and 2 km.
@@ -273,10 +281,14 @@ void runNodeChecks() {
     nodes.computeNow(createdTier.nodeId);
     Matrix tierResult;
     const auto tierNode = nodes.get(createdTier.nodeId);
-    check(tierNode.has_value() &&
-              store.snapshot(tierNode->resultMatrixIds[0], &tierResult) &&
-              tierResult.columnCount() == 1 && sameValues(tierResult.column(0).data, {151.0, 202.0}),
-          std::string("policy '") + policy + "' must compute the plain sum");
+    const bool hasResult = tierNode.has_value() && !tierNode->resultMatrixIds.empty();
+    check(hasResult, std::string("policy '") + policy + "' produced no result matrix");
+    if (hasResult) {
+      check(store.snapshot(tierNode->resultMatrixIds[0], &tierResult) &&
+                tierResult.columnCount() == 1 &&
+                sameValues(tierResult.column(0).data, {151.0, 202.0}),
+            std::string("policy '") + policy + "' must compute the plain sum");
+    }
     bool tierDependents = false;
     nodes.remove(createdTier.nodeId, &tierDependents);
   }

@@ -108,6 +108,21 @@ describe('blocking gate', () => {
     expect(host.textContent).toContain('后端不可达');
   });
 
+  it('updates the detail when the same blocker changes its cause', async () => {
+    useWorkspace.setState({ backend: { state: 'offline', error: 'first failure' } });
+    const host = await mount();
+    expect(host.textContent).toContain('first failure');
+
+    await act(async () => {
+      useWorkspace.setState({ backend: { state: 'offline', error: 'second failure' } });
+    });
+    await flush();
+
+    expect(store().blockers).toContainEqual({ kind: 'backendOffline', detail: 'second failure' });
+    expect(host.textContent).toContain('second failure');
+    expect(host.textContent).not.toContain('first failure');
+  });
+
   it('is not raised by a compute error', async () => {
     store().reset();
     useWorkspace.setState({ backend: { state: 'online' } });

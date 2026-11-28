@@ -170,6 +170,27 @@ int main() {
   const auto rsq = ExprEngine::evaluate("RSQ(A, B)", {"A", "B"}, relation, 3);
   CHECK(std::fabs(rsq[0] - 1.0) < 1e-12);
 
+  // Non-finite values in different rows must remove whole pairs, not compact each
+  // column independently. The surviving (A, B) pairs are (1, 3), (3, 7), (5, 11).
+  const std::vector<std::vector<double>> incompletePairs{
+      {1.0, NAN, 3.0, 200.0, 5.0}, {3.0, 100.0, 7.0, INFINITY, 11.0}};
+  const auto checkPairStat = [](const char* formula, const auto& input, double expected) {
+    const auto result = ExprEngine::evaluate(formula, {"A", "B"}, input, input[0].size());
+    CHECK(result.size() == input[0].size());
+    for (double value : result) {
+      CHECK(std::isnan(expected) ? std::isnan(value) : std::fabs(value - expected) < 1e-12);
+    }
+  };
+  checkPairStat("SLOPE(B, A)", incompletePairs, 2.0);
+  checkPairStat("INTERCEPT(B, A)", incompletePairs, 1.0);
+  checkPairStat("CORREL(A, B)", incompletePairs, 1.0);
+  checkPairStat("COVARIANCE.S(A, B)", incompletePairs, 8.0);
+  checkPairStat("COVARIANCE.P(A, B)", incompletePairs, 16.0 / 3.0);
+
+  const std::vector<std::vector<double>> singlePair{{1.0, NAN, 3.0}, {3.0, 100.0, INFINITY}};
+  checkPairStat("COVARIANCE.S(A, B)", singlePair, NAN);
+  checkPairStat("COVARIANCE.P(A, B)", singlePair, 0.0);
+
   // Degenerate columns: RSQ must refuse exactly like CORREL (frozen: RSQ = corr^2).
   const std::vector<std::vector<double>> constY{{1.0, 2.0, 3.0}, {5.0, 5.0, 5.0}};
   const auto rsqConstY = ExprEngine::evaluate("RSQ(B, A)", {"A", "B"}, constY, 3);

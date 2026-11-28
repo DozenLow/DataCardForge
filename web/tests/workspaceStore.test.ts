@@ -1995,6 +1995,94 @@ describe('function card chains', () => {
 
 // ── restore hygiene (an adversarial review found this one) ──────────────────────
 describe('restore does not leak derived matrices', () => {
+  it('uploads B and binds its formula to B when A and B reuse local IDs', async () => {
+    const stub = stubBackend({});
+    const upload = vi.spyOn(BackendClient.prototype, 'registerMatrix');
+    try {
+      const srcId = await loadSource([[11]], ['A']);
+      const formulaId = store().addFormulaCard(srcId)!;
+      await flush();
+      const snapshot = store().toSnapshot();
+      const localId = (store().cards[0] as MatrixCardModel).sources[0].matrixId;
+      const oldServer = store().backendMatrixId(localId);
+      expect(oldServer).not.toBeNull();
+      snapshot.matrices.find((entry) => entry.id === localId)!.columns[0].data = [99];
+      upload.mockClear();
+      stub.calls.length = 0;
+      store().loadSnapshot(snapshot);
+      await vi.waitFor(() => expect(upload).toHaveBeenCalledTimes(1));
+      expect(upload.mock.calls[0]?.[1][0].data).toEqual([99]);
+      await vi.waitFor(() => {
+        expect(store().backendMatrixId(localId)).not.toBeNull();
+        expect(store().backendMatrixId(localId)).not.toBe(oldServer);
+        const create = stub.calls.find((c) => c.url.endsWith('/nodes') && c.method === 'POST');
+        expect(create).toBeDefined();
+        expect(JSON.parse(create!.body!).inputs[0].sourceMatrixId).toBe(store().backendMatrixId(localId));
+        expect((store().cards.find((c) => c.id === formulaId) as FunctionCardModel).node).not.toBeNull();
+      });
+    } finally {
+      upload.mockRestore();
+      stub.restore();
+    }
+  });
+
+  it('does not continue the superseded restore or untrack its replacement upload', async () => {
+    const stub = stubBackend({});
+    const pending: Array<(id: number) => void> = [];
+    const upload = vi.spyOn(BackendClient.prototype, 'registerMatrix').mockImplementation(
+      () => new Promise((resolve) => pending.push((matrixId) => resolve({ ok: true, matrixId, revision: 1 }))),
+    );
+    try {
+      store().addMatrixCard([{ name: 'first.txt', matrix: matrix([[11]]) },
+        { name: 'second.txt', matrix: matrix([[12]]) }]);
+      const a = store().toSnapshot();
+      store().reset();
+      const b = structuredClone(a);
+      b.matrices[0].columns[0].data = [21];
+      b.matrices[1].columns[0].data = [22];
+      upload.mockClear();
+      const [old1, old2] = pending.splice(0);
+      old1(90);
+      old2(91);
+      await flush();
+      store().loadSnapshot(a);
+      store().loadSnapshot(b);
+      expect(upload.mock.calls.map(([, cols]) => cols[0].data)).toEqual([[11], [21]]);
+      pending[0](101);
+      await flush();
+      expect(stub.calls.some((c) => c.url.endsWith('/matrices/101') && c.method === 'DELETE')).toBe(true);
+      await store().connectBackend();
+      expect(upload).toHaveBeenCalledTimes(2);
+      pending[1](102);
+      await vi.waitFor(() => expect(upload).toHaveBeenCalledTimes(3));
+      expect(upload.mock.calls[2][1][0].data).toEqual([22]);
+      pending[2](103);
+      await vi.waitFor(() => expect(store().backendMatrixId(b.matrices[1].id)).toBe(103));
+      expect(store().backendMatrixId(b.matrices[0].id)).toBe(102);
+    } finally {
+      store().reset();
+      upload.mockRestore();
+      stub.restore();
+    }
+  });
+
+  it('rejects a malformed restore without invalidating the current in-flight upload', async () => {
+    const stub = stubBackend({ matrixDelayMs: 40 });
+    try {
+      const id = store().addMatrixCard([{ name: 'live.txt', matrix: matrix([[11]]) }]);
+      const before = store();
+      const localId = (before.cards[0] as MatrixCardModel).sources[0].matrixId;
+      const invalid = before.toSnapshot();
+      Reflect.deleteProperty(invalid.cards[0], 'inputs');
+      expect(() => before.loadSnapshot(invalid)).toThrow();
+      expect(store()).toBe(before);
+      expect(store().selectedId).toBe(id);
+      await vi.waitFor(() => expect(store().backendMatrixId(localId)).toBe(100));
+    } finally {
+      await flush();
+      stub.restore();
+    }
+  });
   it('registers the source table on restore, not the function card display cache', async () => {
     const stub = stubBackend({ nodeResult: [[2, 4]], nodeNames: ['Pos.1 double'] });
     try {
@@ -2478,6 +2566,107 @@ describe('in-flight regressions: summary currency, explicit full load, single cl
     expect(entry?.status).toBe('idle');
     expect(entry?.code).toBeUndefined();
     expect(entry?.result ?? null).toBeNull();
+  });
+
+  it.each([true, false])('ignores an old summary window after reset (ok=%s)', async (ok) => {
+    const backend = stubClient();
+    const createSpy = vi.spyOn(BackendClient.prototype, 'createNode').mockResolvedValue({
+      ok: true, nodeId: 710, state: 'dirty',
+    });
+    const computeSpy = vi.spyOn(BackendClient.prototype, 'computeNode').mockResolvedValue({
+      ok: true, state: 'done', resultMatrixIds: [910],
+    });
+    const getSpy = vi.spyOn(BackendClient.prototype, 'getNode').mockResolvedValue({
+      nodeId: 710, state: 'done', params: {}, resultMatrixId: 910,
+    });
+    type WindowAnswer = Awaited<ReturnType<BackendClient['window']>>;
+    let settle!: (answer: WindowAnswer) => void;
+    const pending = new Promise<WindowAnswer>((resolve) => { settle = resolve; });
+    const windowSpy = vi.spyOn(BackendClient.prototype, 'window').mockReturnValue(pending);
+    try {
+      const addTable = (value: number) => store().addMatrixCard([
+        { name: 'table.txt', matrix: matrix([[value]]) },
+      ]);
+      const oldId = addTable(11);
+      await tick();
+      store().computeSummary(oldId);
+      await vi.waitFor(() => expect(windowSpy).toHaveBeenCalledWith(910, 0, expect.any(Number)));
+
+      store().reset();
+      const newId = addTable(99);
+      expect(newId).toBe(oldId);
+      store().setSummaryOpen(newId, true);
+      expect(store().summaries[newId]?.status).toBe('idle');
+      settle(ok ? {
+        ok: true, rows: 1, columns: 1, data: [Float64Array.of(11)], names: ['old'],
+        totalRows: 1, totalCols: 1,
+      } : { ok: false, code: 'internalError' });
+      await flush();
+
+      expect(store().summaries[newId]).toMatchObject({ status: 'idle', result: null });
+      expect(store().summaries[newId]?.code).toBeUndefined();
+    } finally {
+      settle({ ok: false, code: 'internalError' });
+      await flush();
+      for (const spy of [createSpy, computeSpy, getSpy, windowSpy]) spy.mockRestore();
+      backend.restore();
+    }
+  });
+
+  it('computeSummary: clamps malformed frame rows to the selected stat labels', async () => {
+    const backend = stubClient();
+    const createSpy = vi.spyOn(BackendClient.prototype, 'createNode').mockResolvedValue({
+      ok: true,
+      nodeId: 710,
+      state: 'done',
+      resultMatrixId: 910,
+      resultMatrixIds: [910],
+    });
+    const computeSpy = vi.spyOn(BackendClient.prototype, 'computeNode').mockResolvedValue({
+      ok: true,
+      state: 'done',
+      resultMatrixIds: [910],
+    });
+    const getSpy = vi.spyOn(BackendClient.prototype, 'getNode').mockResolvedValue({
+      nodeId: 710,
+      state: 'done',
+      params: {},
+      resultMatrixId: 910,
+    });
+    const windowSpy = vi.spyOn(BackendClient.prototype, 'window').mockResolvedValue({
+      ok: true,
+      rows: 12,
+      columns: 1,
+      data: [Float64Array.from({ length: 12 }, (_, row) => row)],
+      names: ['Pos.1 A'],
+      totalRows: 12,
+      totalCols: 1,
+    });
+    try {
+      const cardId = store().addMatrixCard([
+        { name: 'a.txt', matrix: matrix([[1], [2], [3]]) },
+      ]);
+      await tick();
+      store().setSummaryOpen(cardId, true);
+      // Leave just `n` selected, but make the stale frame claim all catalogue rows.
+      for (const stat of [...store().summaries[cardId].stats].filter((stat) => stat !== 'n')) {
+        store().toggleSummaryStat(cardId, stat);
+      }
+      store().computeSummary(cardId);
+      await flush();
+      await flush();
+
+      const result = store().summaries[cardId]?.result;
+      expect(result?.stats).toEqual(['n']);
+      expect(result?.rows).toHaveLength(1);
+      expect(result?.rows[0]).toEqual([0]);
+    } finally {
+      windowSpy.mockRestore();
+      getSpy.mockRestore();
+      computeSpy.mockRestore();
+      createSpy.mockRestore();
+      backend.restore();
+    }
   });
 
   it('loadFullResult: an explicit full load during an in-flight preview still caches every row', async () => {

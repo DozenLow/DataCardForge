@@ -64,8 +64,8 @@ export interface EditingSurface {
  *
  * `navigator.clipboard.writeText` first (the async API; a click on a menu item is the user
  * gesture it needs, and localhost is a secure context). Where that API does not exist — an old
- * browser, a test environment — fall back to the deprecated `execCommand('copy')`, which copies
- * whatever the focused field has selected. Copy has no failure UI on purpose: unlike paste, a
+ * browser, a test environment — fall back to the deprecated `execCommand('copy')`, staging
+ * the requested text in a temporary selection. Copy has no failure UI on purpose: unlike paste, a
  * failed copy loses nothing (the text is still in the surface, and Ctrl+C is the same gesture),
  * and the menu is about to close, so there is nothing to keep on screen.
  */
@@ -77,10 +77,37 @@ export function writeClipboardText(text: string): void {
     });
     return;
   }
+  let scratch: HTMLTextAreaElement | null = null;
+  const active = document.activeElement;
+  const selection =
+    active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement
+      ? { element: active, start: active.selectionStart, end: active.selectionEnd }
+      : null;
   try {
+    // `execCommand` copies the current selection, not its argument. A detached editor can be
+    // the active element after a menu click, so place the requested text in a temporary field
+    // and select it. The field is removed in `finally`, and the old editor selection/focus is
+    // restored so clipboard fallback does not lose the user's editing position.
+    scratch = document.createElement('textarea');
+    scratch.value = text;
+    scratch.setAttribute('readonly', '');
+    scratch.style.position = 'fixed';
+    scratch.style.inset = '0 auto auto -9999px';
+    document.body.appendChild(scratch);
+    scratch.select();
     document.execCommand?.('copy');
   } catch {
     // `execCommand` is deprecated and may throw in exotic contexts; there is no third path.
+  } finally {
+    scratch?.remove();
+    if (selection?.element.isConnected) {
+      selection.element.focus();
+      if (selection.start !== null && selection.end !== null) {
+        selection.element.setSelectionRange(selection.start, selection.end);
+      }
+    } else if (active instanceof HTMLElement && active.isConnected) {
+      active.focus();
+    }
   }
 }
 

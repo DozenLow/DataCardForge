@@ -7,6 +7,7 @@
  * components stay free of DOM plumbing.
  */
 import { MatrixData } from '../core/MatrixData.ts';
+import type { ChartSource } from '../charts/chartModel.ts';
 import { FILE_ACCEPT, loadMatrixFile } from '../loaders/FileLoaderFactory.ts';
 import { migrateWorkspace, WorkspaceFormatError } from './migrate.ts';
 import type { WorkspaceSnapshot } from './types.ts';
@@ -44,14 +45,13 @@ export function pickFiles(multiple: boolean, accept = FILE_ACCEPT): Promise<File
 export interface LoadedFile {
   name: string;
   matrix: MatrixData;
-  /** Identity of the bytes this was parsed from — see `MatrixEntry`. */
+  /** Metadata of the file this was parsed from — see `MatrixEntry`. */
   identity: FileIdentity;
 }
 
 /**
- * Cheap fingerprint distinguishing "the same file again" from "a different file that
- * happens to share a name". Sensor exports overwrite `today.csv` in place, so the name
- * alone must not key a parse cache.
+ * Cheap lookup hint for the store's parse cache; the store compares parsed content
+ * before sharing any matrix.
  */
 export interface FileIdentity {
   size: number;
@@ -180,6 +180,56 @@ export interface LoadedWorkspace {
   snapshot: WorkspaceSnapshot;
   /** SHA-256 of the exact bytes parsed — the key the trust record is stored under. */
   hash: string;
+}
+
+/** Serialize the workspace text used both for the download and its trust hash. */
+export function serializeWorkspace(snapshot: WorkspaceSnapshot): string {
+  return JSON.stringify({
+    ...snapshot,
+    cards: snapshot.cards.map((card) => {
+      if (card.kind !== 'chart') return card;
+      // A chart caches its plotted numbers in the config (attached columns, explicit X,
+      // grouping factor). They need the same ±Infinity encoding as matrix columns: JSON
+      // otherwise turns them into null — the NaN encoding — and a restored chart would
+      // silently plot a gap where the file held a value.
+      const encode = (source: ChartSource) =>
+        source && Array.isArray(source.raw) &&
+        (source.raw.includes(Infinity) || source.raw.includes(-Infinity))
+          ? {
+              ...source,
+              raw: source.raw.map((value) =>
+                value === Infinity || value === -Infinity ? String(value) : value,
+              ),
+            }
+          : source;
+      const config = card.config;
+      // A malformed card passes through untouched: refusing it is the reader's job, and
+      // the writer must not throw on the way to a file the reader will reject.
+      if (!config || typeof config !== 'object' || !Array.isArray(config.sources)) return card;
+      return {
+        ...card,
+        config: {
+          ...config,
+          sources: config.sources.map(encode),
+          xAxisSource: config.xAxisSource ? encode(config.xAxisSource) : config.xAxisSource,
+          factorSource: config.factorSource ? encode(config.factorSource) : config.factorSource,
+        },
+      };
+    }),
+    matrices: snapshot.matrices.map((matrix) => ({
+      ...matrix,
+      columns: matrix.columns.map((column) => {
+        const { data } = column;
+        if (!data.includes(Infinity) && !data.includes(-Infinity)) return column;
+        // JSON otherwise turns both infinities into null, the existing encoding for NaN.
+        // The v1/v2 matrix reader already accepts these numeric strings.
+        return {
+          ...column,
+          data: data.map((value) => (value === Infinity || value === -Infinity ? String(value) : value)),
+        };
+      }),
+    })),
+  });
 }
 
 export async function readWorkspace(file: File): Promise<LoadedWorkspace> {
