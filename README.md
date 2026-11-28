@@ -33,6 +33,12 @@ visible degradation, not a bug. Backend chart fitting/filters are shown as unava
 vector drawing, annotation, panel and field rendering remain local.
 The demo URL only serves after Pages is enabled once: **Settings → Pages → Source: GitHub Actions**.
 
+For real measurements, the repository includes two small public-data samples under
+[`example/`](example/README.md): engine-bearing vibration (Mendeley Data / CC BY 4.0) and NOAA
+NCEI hourly weather observations. The example directory records authors, DOIs, licenses or use
+terms, exact upstream hashes, and every filtering or renaming step; the full datasets are not
+redistributed.
+
 **From a release archive, no toolchain** — unzip `datacardforge-<os>-standard.zip` and run the binary:
 it serves the bundled `web/` and opens the browser. On Windows the exe is deliberately a **console
 program**: double-clicking gives you a window that prints the address and stays open (closing it stops

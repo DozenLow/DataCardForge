@@ -1,0 +1,48 @@
+{
+  "generated_by": "python3 example/build_examples.py",
+  "industrial": {
+    "file": "industrial-engine-bearing.csv",
+    "source_title": "Vibration dataset of main journal bearings in internal combustion engines under diverse climatic and varying operating conditions",
+    "source_url": "https://doi.org/10.17632/3fcrrdjjvk.5",
+    "data_article": "https://doi.org/10.1016/j.dib.2024.111214",
+    "authors": [
+      "Muhammad Noman Riaz",
+      "Amir Hamza",
+      "Hamid Jabbar",
+      "Manzar Abbas",
+      "Mohsin Islam Tiwana"
+    ],
+    "access_date": "2026-11-28",
+    "archive_url": "https://data.mendeley.com/public-files/datasets/3fcrrdjjvk/files/46c4cf85-ba7d-47ec-a817-25ed6036df69/file_downloaded",
+    "archive_sha256": "70f5cbc7bbfd9ada244b91d92f50ecb2c12ca8eaf92a8e090be9d5ed98b30cca",
+    "derived_sha256": "38d99f14e98e177ae2cc727c7b7f6ef856180326bf0683bd4fdee48e463b3cb9",
+    "license": "CC BY 4.0",
+    "rows": 512,
+    "rows_per_state": 256,
+    "source_rows_selected": {
+      "healthy": 256,
+      "faulty": 256
+    },
+    "source_member": {
+      "healthy": "Engine Journal Bearings Dataset 2/Engine Journal Bearings Dataset/Healthy Bearings Dataset/1000 RPM/50% Humidity/15 deg Celsius/3rd at 15c 2022May27-0338-0046.csv",
+      "faulty": "Engine Journal Bearings Dataset 2/Engine Journal Bearings Dataset/Faulty Bearings Dataset/1000 RPM/50% Humidity/15 deg Celsius/3rd at 15c 2022May26-2336-0024.csv"
+    },
+    "transformation": "The first 256 records from each same-condition source file were retained; columns Time and Channel 3 were renamed, and bearing_state was added."
+  },
+  "research": {
+    "file": "research-weather-boston-2024-07.csv",
+    "source_title": "Local Climatological Data (LCD), Version 2 (LCDv2)",
+    "source_url": "https://doi.org/10.25921/96dw-mb77",
+    "query_url": "https://www.ncei.noaa.gov/access/services/data/v1?dataset=local-climatological-data-v2&stations=USW00014739&startDate=2024-07-01&endDate=2024-07-07&format=csv",
+    "documentation_url": "https://www.ncei.noaa.gov/products/land-based-station/local-climatological-data",
+    "open_data_policy_url": "https://www.ncei.noaa.gov/sites/g/files/anmtlf171/files/2023-12/NCEI%20PD-10-2-02%20-%20Open%20Data%20Policy%20Signed.pdf",
+    "access_date": "2026-11-28",
+    "source_sha256": "38aee5de8ce165ddea7bd8f87c8b0086fd07832f1b44e7a6b06e3d8f1713dc84",
+    "derived_sha256": "813915a822e28cefbf58232ec944e51b0bbff43e70b76996a71364ba8ab29a2d",
+    "attribution": "Kantor, Diana; Casey, Nancy W.; Menne, Matthew J.; Buddenberg, Andrew. 2023. NOAA National Centers for Environmental Information.",
+    "rows": 168,
+    "report_type": "FM-15",
+    "station": "USW00014739",
+    "transformation": "FM-15 hourly reports in the seven-day response were selected; six fields were retained and elapsed_h was added relative to the first observation."
+  }
+}
